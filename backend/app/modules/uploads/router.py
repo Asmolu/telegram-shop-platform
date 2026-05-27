@@ -1,8 +1,59 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.common.deps import get_db_session, require_roles
+from app.db.models import User, UserRole
+from app.modules.uploads.schemas import BannerImageUploadRead, ProductImageUploadRead
+from app.modules.uploads.service import UploadsService
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
+
+
+def get_uploads_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> UploadsService:
+    return UploadsService(session)
 
 
 @router.get("/status")
 async def module_status() -> dict[str, str]:
     return {"module": "uploads", "status": "stub"}
+
+
+@router.post(
+    "/products/{product_id}/images",
+    response_model=ProductImageUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_product_image(
+    product_id: int,
+    service: Annotated[UploadsService, Depends(get_uploads_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    file: Annotated[UploadFile, File()],
+    alt_text: Annotated[str | None, Form(max_length=255)] = None,
+    position: Annotated[int | None, Form(ge=0)] = None,
+    is_primary: Annotated[bool, Form()] = False,
+) -> object:
+    return await service.upload_product_image(
+        product_id=product_id,
+        file=file,
+        alt_text=alt_text,
+        position=position,
+        is_primary=is_primary,
+    )
+
+
+@router.post(
+    "/banners/images",
+    response_model=BannerImageUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_banner_image(
+    service: Annotated[UploadsService, Depends(get_uploads_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    file: Annotated[UploadFile, File()],
+    alt_text: Annotated[str | None, Form(max_length=255)] = None,
+) -> object:
+    return await service.upload_banner_image(file=file, alt_text=alt_text)

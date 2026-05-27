@@ -25,6 +25,10 @@ class ProductImageRead(ProductImageBase):
 
     id: int
     product_id: int
+    url: str
+    original_filename: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
     created_at: datetime
 
 

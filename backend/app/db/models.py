@@ -183,6 +183,9 @@ class ProductImage(Base):
         index=True,
     )
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_primary: Mapped[bool] = mapped_column(
@@ -198,3 +201,27 @@ class ProductImage(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="images")
+
+    @property
+    def url(self) -> str:
+        return f"/uploads/{self.file_path}"
+
+
+class Banner(Base):
+    __tablename__ = "banners"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    @property
+    def url(self) -> str:
+        return f"/uploads/{self.file_path}"
