@@ -1,0 +1,6 @@
+ORDER_CREATED = "order.created"
+ORDER_STATUS_CHANGED = "order.status_changed"
+ORDER_SHIPPED = "order.shipped"
+PRODUCT_UPDATED = "product.updated"
+PROMO_USED = "promo.used"
+REVIEW_CREATED = "review.created"

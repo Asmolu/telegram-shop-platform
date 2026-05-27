@@ -1,0 +1,74 @@
+# =========================
+# OS / editors
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+secrets/
+*.pem
+*.key
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.coverage.*
+.venv/
+venv/
+env/
+
+# =========================
+# Node / frontend
+# =========================
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+.pnpm-store/
+
+# =========================
+# Docker / runtime data
+# =========================
+postgres_data/
+redis_data/
+*.sqlite3
+*.db
+
+# Runtime uploads: keep directory layout, ignore uploaded files
+backend/uploads/**
+!backend/uploads/**/
+!backend/uploads/**/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# Archives / temporary exports
+*.zip
+*.tar
+*.tar.gz
+*.rar
+.tmp/
+tmp/
