@@ -44,3 +44,18 @@ def test_product_status_enum_migration_disables_implicit_type_creation() -> None
         "ARCHIVED",
     ]
     assert migration.PRODUCT_STATUS_ENUM.create_type is False
+
+
+def test_product_variants_migration_adds_inventory_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0004_add_product_variants.py"
+    )
+    content = migration_path.read_text()
+
+    assert "product_variants" in content
+    assert "ck_product_variants_stock_non_negative" in content
+    assert "ck_product_variants_reserved_non_negative" in content
+    assert "ck_product_variants_reserved_not_above_stock" in content

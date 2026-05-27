@@ -4,14 +4,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
-from app.db.models import Product, ProductImage, ProductStatus, Tag
+from app.db.models import Product, ProductImage, ProductStatus, ProductVariant, Tag
 from app.modules.categories.repository import CategoriesRepository
-from app.modules.products.repository import ProductsRepository
+from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
+from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
 from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
     ProductList,
     ProductUpdate,
+    ProductVariantCreate,
+    ProductVariantList,
+    ProductVariantUpdate,
 )
 from app.modules.tags.repository import TagsRepository
 
@@ -20,6 +24,7 @@ class ProductsService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repository = ProductsRepository(session)
+        self.variants_repository = ProductVariantsRepository(session)
         self.categories_repository = CategoriesRepository(session)
         self.tags_repository = TagsRepository(session)
 
@@ -36,14 +41,16 @@ class ProductsService:
         if status is not None and status != ProductStatus.ACTIVE:
             return ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
 
-        return await self.list_products(
+        items, total = await self.repository.list(
             limit=limit,
             offset=offset,
             category_id=category_id,
             tag_id=tag_id,
             status=ProductStatus.ACTIVE,
             search=search,
+            active_variants_only=True,
         )
+        return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
 
     async def list_products(
         self,
@@ -123,6 +130,65 @@ class ProductsService:
         await self.repository.delete(product)
         await self._commit()
 
+    async def list_public_product_variants(self, product_id: int) -> ProductVariantList:
+        product = await self.repository.get_active_by_id(product_id)
+        if product is None:
+            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        variants = await self.variants_repository.list_by_product_id(product_id, active_only=True)
+        return ProductVariantList(items=variants)
+
+    async def list_product_variants(self, product_id: int) -> ProductVariantList:
+        await self.get_product(product_id)
+        variants = await self.variants_repository.list_by_product_id(product_id)
+        return ProductVariantList(items=variants)
+
+    async def create_product_variant(
+        self,
+        product_id: int,
+        payload: ProductVariantCreate,
+    ) -> ProductVariant:
+        await self.get_product(product_id)
+        self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
+
+        variant = ProductVariant(product_id=product_id, **payload.model_dump())
+        self.variants_repository.add(variant)
+        variant_id = await self._flush_commit_and_get_id(variant)
+        created_variant = await self.variants_repository.get_by_id(variant_id)
+        if created_variant is None:
+            raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        return created_variant
+
+    async def update_product_variant(
+        self,
+        variant_id: int,
+        payload: ProductVariantUpdate,
+    ) -> ProductVariant:
+        variant = await self.get_product_variant(variant_id)
+        data = payload.model_dump(exclude_unset=True)
+        stock_quantity = data.get("stock_quantity", variant.stock_quantity)
+        reserved_quantity = data.get("reserved_quantity", variant.reserved_quantity)
+        self._validate_inventory(stock_quantity, reserved_quantity)
+
+        for field, value in data.items():
+            setattr(variant, field, value)
+
+        variant_id = await self._flush_commit_and_get_id(variant)
+        updated_variant = await self.variants_repository.get_by_id(variant_id)
+        if updated_variant is None:
+            raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        return updated_variant
+
+    async def delete_product_variant(self, variant_id: int) -> None:
+        variant = await self.get_product_variant(variant_id)
+        await self.variants_repository.delete(variant)
+        await self._commit()
+
+    async def get_product_variant(self, variant_id: int) -> ProductVariant:
+        variant = await self.variants_repository.get_by_id(variant_id)
+        if variant is None:
+            raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        return variant
+
     async def _ensure_category_exists(self, category_id: int | None) -> None:
         if category_id is None:
             return
@@ -142,19 +208,31 @@ class ProductsService:
         if primary_count > 1:
             raise AppError("Only one primary product image is allowed", status.HTTP_400_BAD_REQUEST)
 
-    async def _flush_commit_and_get_id(self, product: Product) -> int:
+    def _validate_inventory(self, stock_quantity: int, reserved_quantity: int) -> None:
+        try:
+            validate_inventory_quantities(stock_quantity, reserved_quantity)
+        except InventoryValidationError as exc:
+            raise AppError(str(exc), status.HTTP_400_BAD_REQUEST) from exc
+
+    async def _flush_commit_and_get_id(self, instance: Product | ProductVariant) -> int:
         try:
             await self.session.flush()
-            product_id = product.id
+            instance_id = instance.id
             await self.session.commit()
-            return product_id
+            return instance_id
         except IntegrityError as exc:
             await self.session.rollback()
-            raise AppError("Product slug already exists", status.HTTP_409_CONFLICT) from exc
+            raise AppError(
+                "Product slug or variant SKU already exists",
+                status.HTTP_409_CONFLICT,
+            ) from exc
 
     async def _commit(self) -> None:
         try:
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
-            raise AppError("Product slug already exists", status.HTTP_409_CONFLICT) from exc
+            raise AppError(
+                "Product slug or variant SKU already exists",
+                status.HTTP_409_CONFLICT,
+            ) from exc

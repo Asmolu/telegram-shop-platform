@@ -49,6 +49,27 @@ def test_product_create_rejects_regular_user() -> None:
     assert response.json() == {"detail": "Insufficient permissions"}
 
 
+def test_product_variant_create_requires_authentication() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post("/api/v1/products/1/variants", json=_variant_payload())
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate credentials"}
+
+
+def test_product_variant_create_rejects_regular_user() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/products/1/variants", json=_variant_payload())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Insufficient permissions"}
+
+
 def test_category_and_tag_write_routes_are_protected() -> None:
     with TestClient(create_app()) as client:
         category_response = client.post(
@@ -94,6 +115,103 @@ def test_product_create_allows_seller() -> None:
     assert response.json()["slug"] == "hoodie"
 
 
+def test_product_variant_create_allows_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def create_product_variant(self, _: int, __: object) -> dict[str, object]:
+            return _variant_response()
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/products/1/variants", json=_variant_payload())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["available_quantity"] == 3
+
+
+def test_product_variant_create_rejects_negative_stock() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/products/1/variants",
+                json={**_variant_payload(), "stock_quantity": -1},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
+def test_product_variant_create_rejects_reserved_quantity_above_stock() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/products/1/variants",
+                json={**_variant_payload(), "stock_quantity": 2, "reserved_quantity": 3},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
+def test_public_product_list_includes_active_variants_and_availability() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def list_public_products(self, **_: object) -> ProductList:
+            return ProductList.model_validate(
+                {
+                    "items": [
+                        {
+                            **_product_response(),
+                            "variants": [_variant_response()],
+                            "is_available": True,
+                        }
+                    ],
+                    "meta": {"limit": 20, "offset": 0, "total": 1},
+                }
+            )
+
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["is_available"] is True
+    assert response.json()["items"][0]["variants"][0]["available_quantity"] == 3
+
+
+def test_public_product_variants_returns_active_variants() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def list_public_product_variants(self, _: int) -> dict[str, object]:
+            return {"items": [_variant_response()]}
+
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/1/variants")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["is_active"] is True
+
+
 def _product_payload() -> dict[str, object]:
     return {
         "name": "Hoodie",
@@ -104,6 +222,52 @@ def _product_payload() -> dict[str, object]:
         "category_id": None,
         "tag_ids": [],
         "images": [],
+    }
+
+
+def _variant_payload() -> dict[str, object]:
+    return {
+        "size": "M",
+        "color": "Black",
+        "sku": "HOODIE-M-BLK",
+        "stock_quantity": 5,
+        "reserved_quantity": 2,
+        "is_active": True,
+    }
+
+
+def _product_response() -> dict[str, object]:
+    now = datetime(2026, 5, 27, tzinfo=UTC).isoformat()
+    return {
+        "id": 1,
+        "name": "Hoodie",
+        "slug": "hoodie",
+        "description": "Warm",
+        "base_price": "59.90",
+        "status": "ACTIVE",
+        "category_id": None,
+        "category": None,
+        "tags": [],
+        "images": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _variant_response() -> dict[str, object]:
+    now = datetime(2026, 5, 27, tzinfo=UTC).isoformat()
+    return {
+        "id": 1,
+        "product_id": 1,
+        "size": "M",
+        "color": "Black",
+        "sku": "HOODIE-M-BLK",
+        "stock_quantity": 5,
+        "reserved_quantity": 2,
+        "available_quantity": 3,
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
     }
 
 

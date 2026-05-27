@@ -5,6 +5,7 @@ from enum import StrEnum
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum,
@@ -171,6 +172,77 @@ class Product(Base):
         secondary=product_tags,
         back_populates="products",
     )
+    variants: Mapped[list["ProductVariant"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductVariant.id",
+    )
+
+    @property
+    def is_available(self) -> bool:
+        return any(
+            variant.is_active and variant.available_quantity > 0 for variant in self.variants
+        )
+
+
+class ProductVariant(Base):
+    __tablename__ = "product_variants"
+    __table_args__ = (
+        CheckConstraint("stock_quantity >= 0", name="ck_product_variants_stock_non_negative"),
+        CheckConstraint(
+            "reserved_quantity >= 0",
+            name="ck_product_variants_reserved_non_negative",
+        ),
+        CheckConstraint(
+            "reserved_quantity <= stock_quantity",
+            name="ck_product_variants_reserved_not_above_stock",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    size: Mapped[str] = mapped_column(String(64), nullable=False)
+    color: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sku: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    stock_quantity: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    reserved_quantity: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product: Mapped[Product] = relationship(back_populates="variants")
+
+    @property
+    def available_quantity(self) -> int:
+        return self.stock_quantity - self.reserved_quantity
 
 
 class ProductImage(Base):

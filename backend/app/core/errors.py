@@ -18,8 +18,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": exc.errors()},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": [_serialize_validation_error(error) for error in exc.errors()]},
         )
 
     @app.exception_handler(SQLAlchemyError)
@@ -37,3 +37,11 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Internal server error"},
         )
+
+
+def _serialize_validation_error(error: dict) -> dict:
+    serialized = dict(error)
+    ctx = serialized.get("ctx")
+    if isinstance(ctx, dict) and "error" in ctx:
+        serialized["ctx"] = {**ctx, "error": str(ctx["error"])}
+    return serialized
