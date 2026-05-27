@@ -102,3 +102,9 @@ FastAPI exposes OpenAPI at:
 http://localhost:8000/openapi.json
 http://localhost:8000/docs
 ```
+
+## Authentication settings
+
+Telegram login validates Mini App `initData` with `TELEGRAM_WEBAPP_BOT_TOKEN` or
+`TELEGRAM_BOT_TOKEN`, then returns a JWT access token. Set `JWT_SECRET_KEY` to a
+strong local secret before using authenticated endpoints.

@@ -1,4 +1,6 @@
-class AuthRepository:
-    """Database access layer for auth."""
+from sqlalchemy.ext.asyncio import AsyncSession
 
-    pass
+
+class AuthRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session

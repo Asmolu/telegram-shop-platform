@@ -61,6 +61,8 @@ docker compose up -d postgres redis
 ```text
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/telegram_shop
 REDIS_URL=redis://localhost:6379/0
+TELEGRAM_WEBAPP_BOT_TOKEN=<your bot token>
+JWT_SECRET_KEY=<local development secret>
 ```
 
 3. Run backend:

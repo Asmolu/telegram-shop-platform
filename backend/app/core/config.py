@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     telegram_webapp_bot_token: str | None = None
     telegram_seller_chat_id: str | None = None
 
+    jwt_secret_key: str = "change-me-in-local-env"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60
+    telegram_auth_max_age_seconds: int = 86_400
+
     uploads_dir: str = "uploads"
     public_uploads_url: str = "/uploads"
     upload_subdirs: tuple[str, ...] = ("products", "banners", "reviews", "temp")
