@@ -21,4 +21,10 @@ class LocalStorageService:
         content = await file.read()
         target_path.write_bytes(content)
 
-        return str(target_path.as_posix())
+        return target_path.relative_to(self.base_dir).as_posix()
+
+
+def ensure_upload_directories() -> None:
+    settings.uploads_dir_path.mkdir(parents=True, exist_ok=True)
+    for subdir in settings.upload_subdirs:
+        (settings.uploads_dir_path / subdir).mkdir(parents=True, exist_ok=True)

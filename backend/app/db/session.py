@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.sql import text
 
 from app.core.config import settings
 
@@ -9,3 +10,13 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+async def check_database_connection() -> bool:
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
+    return True
+
+
+async def dispose_database_engine() -> None:
+    await engine.dispose()

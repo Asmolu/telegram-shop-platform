@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -5,9 +8,24 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
+from app.core.redis import close_redis_client
+from app.db.session import dispose_database_engine
+from app.modules.uploads.storage import ensure_upload_directories
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    ensure_upload_directories()
+    try:
+        yield
+    finally:
+        await close_redis_client()
+        await dispose_database_engine()
 
 
 def create_app() -> FastAPI:
+    ensure_upload_directories()
+
     app = FastAPI(
         title=settings.app_name,
         debug=settings.debug,
@@ -15,6 +33,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -28,8 +47,11 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
-    settings.uploads_dir_path.mkdir(parents=True, exist_ok=True)
-    app.mount(settings.public_uploads_url, StaticFiles(directory=settings.uploads_dir), name="uploads")
+    app.mount(
+        settings.public_uploads_url,
+        StaticFiles(directory=settings.uploads_dir_path),
+        name="uploads",
+    )
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:
