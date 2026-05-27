@@ -30,7 +30,9 @@ def test_jwt_rejects_expired_token() -> None:
 
 def test_jwt_rejects_tampered_token() -> None:
     token = create_access_token(subject="123")
-    tampered_token = f"{token[:-1]}x"
+    header, payload, signature = token.split(".")
+    replacement = "A" if signature[0] != "A" else "B"
+    tampered_token = f"{header}.{payload}.{replacement}{signature[1:]}"
 
     with pytest.raises(TokenError):
         verify_access_token(tampered_token)
