@@ -11,6 +11,7 @@ class OrderCheckoutCreate(BaseModel):
     contact_phone: str = Field(min_length=1, max_length=32)
     delivery_address: str = Field(min_length=1)
     delivery_comment: str | None = None
+    promo_code: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class OrderStatusUpdate(BaseModel):
@@ -41,6 +42,8 @@ class OrderRead(BaseModel):
     status: OrderStatus
     subtotal_amount: Decimal
     discount_amount: Decimal
+    promo_code_id: int | None = None
+    promo_code_code: str | None = None
     total_amount: Decimal
     contact_name: str
     contact_phone: str

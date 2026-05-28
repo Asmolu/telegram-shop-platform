@@ -9,12 +9,15 @@ from app.core.errors import AppError
 from app.db.models import (
     Cart,
     CartItem,
+    CouponUsage,
+    DiscountType,
     Order,
     OrderItem,
     OrderStatus,
     Product,
     ProductStatus,
     ProductVariant,
+    PromoCode,
     User,
     UserRole,
 )
@@ -23,6 +26,7 @@ from app.main import create_app
 from app.modules.orders.router import get_orders_service
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderStatusUpdate
 from app.modules.orders.service import OrdersService
+from app.modules.promo_codes.service import PromoCodeCalculation
 
 
 class DummySession:
@@ -46,6 +50,68 @@ class FakeOrderEventPublisher:
 
     async def emit(self, name: str, payload: dict[str, object]) -> None:
         self.events.append((name, payload))
+
+
+class FakePromoCodesService:
+    def __init__(
+        self,
+        *,
+        error: AppError | None = None,
+        discount_amount: Decimal = Decimal("10.00"),
+    ) -> None:
+        self.error = error
+        self.discount_amount = discount_amount
+        self.usages: list[CouponUsage] = []
+
+    async def validate_for_checkout(
+        self,
+        *,
+        user_id: int,
+        code: str,
+        subtotal_amount: Decimal,
+        for_update: bool,
+    ) -> PromoCodeCalculation:
+        assert user_id == 1
+        assert code == "SAVE10"
+        assert for_update is True
+        if self.error is not None:
+            raise self.error
+
+        promo_code = PromoCode(
+            id=7,
+            code=code,
+            discount_type=DiscountType.FIXED,
+            discount_value=self.discount_amount,
+            is_active=True,
+            starts_at=None,
+            ends_at=None,
+            usage_limit=None,
+            per_user_limit=None,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        return PromoCodeCalculation(
+            promo_code=promo_code,
+            subtotal_amount=subtotal_amount,
+            discount_amount=self.discount_amount,
+            total_amount=subtotal_amount - self.discount_amount,
+        )
+
+    def record_usage_for_checkout(
+        self,
+        *,
+        promo_code_id: int,
+        user_id: int,
+        order_id: int,
+    ) -> None:
+        self.usages.append(
+            CouponUsage(
+                promo_code_id=promo_code_id,
+                user_id=user_id,
+                order_id=order_id,
+                used_at=_now(),
+            )
+        )
 
 
 class FakeOrdersRepository:
@@ -118,6 +184,57 @@ async def test_checkout_from_valid_cart() -> None:
     assert repository.carts[1].items == []
     assert session.committed is True
     assert events.events == [(ORDER_CREATED, {"order_id": 1, "user_id": 1})]
+
+
+@pytest.mark.asyncio
+async def test_checkout_with_valid_promo_code_creates_order_and_coupon_usage() -> None:
+    promo_codes_service = FakePromoCodesService(discount_amount=Decimal("20.00"))
+    service, repository, session, _ = _orders_service(promo_codes_service=promo_codes_service)
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate(
+            **_checkout_payload_json(),
+            promo_code="save10",
+        ),
+    )
+
+    assert order.subtotal_amount == Decimal("119.80")
+    assert order.discount_amount == Decimal("20.00")
+    assert order.total_amount == Decimal("99.80")
+    assert order.promo_code_id == 7
+    assert order.promo_code_code == "SAVE10"
+    assert len(promo_codes_service.usages) == 1
+    assert promo_codes_service.usages[0].promo_code_id == 7
+    assert promo_codes_service.usages[0].order_id == order.id
+    assert session.committed is True
+    assert repository.carts[1].items == []
+
+
+@pytest.mark.asyncio
+async def test_checkout_with_invalid_promo_code_fails_without_partial_order() -> None:
+    promo_codes_service = FakePromoCodesService(
+        error=AppError("Promo code is inactive"),
+    )
+    service, repository, session, events = _orders_service(
+        promo_codes_service=promo_codes_service,
+    )
+
+    with pytest.raises(AppError, match="Promo code is inactive"):
+        await service.checkout_current_user_cart(
+            user_id=1,
+            payload=OrderCheckoutCreate(
+                **_checkout_payload_json(),
+                promo_code="SAVE10",
+            ),
+        )
+
+    assert repository.orders == {}
+    assert repository.variants[1].stock_quantity == 5
+    assert repository.carts[1].items != []
+    assert promo_codes_service.usages == []
+    assert session.rolled_back is True
+    assert events.events == []
 
 
 @pytest.mark.asyncio
@@ -283,10 +400,15 @@ def _orders_service(
     variant_is_active: bool = True,
     stock_quantity: int = 5,
     cart_items: list[CartItem] | None = None,
+    promo_codes_service: FakePromoCodesService | None = None,
 ) -> tuple[OrdersService, FakeOrdersRepository, DummySession, FakeOrderEventPublisher]:
     session = DummySession()
     events = FakeOrderEventPublisher()
-    service = OrdersService(session, event_publisher=events)
+    service = OrdersService(
+        session,
+        event_publisher=events,
+        promo_codes_service=promo_codes_service,
+    )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(
         user_id=1,

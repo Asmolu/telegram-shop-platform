@@ -104,3 +104,27 @@ def test_order_migration_adds_order_tables_status_enum_and_snapshot_constraints(
     assert "ck_order_items_quantity_positive" in content
     assert "product_name" in content
     assert "variant_sku" in content
+
+
+def test_promo_code_migration_adds_discount_enum_tables_and_order_snapshot() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0007_add_promo_code_tables.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_promo_code_tables_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.DISCOUNT_TYPE_ENUM.name == "discount_type"
+    assert migration.DISCOUNT_TYPE_ENUM.enums == ["PERCENT", "FIXED"]
+    assert migration.DISCOUNT_TYPE_ENUM.create_type is False
+    assert "promo_codes" in content
+    assert "coupon_usages" in content
+    assert "promo_code_code" in content
+    assert "ck_promo_codes_discount_value_positive" in content
+    assert "uq_coupon_usages_promo_order" in content

@@ -20,6 +20,7 @@ from app.db.models import (
 from app.events.names import ORDER_CREATED
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
+from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
 
 
 class OrderEventPublisher(Protocol):
@@ -41,10 +42,12 @@ class OrdersService:
         self,
         session: AsyncSession,
         event_publisher: OrderEventPublisher | None = None,
+        promo_codes_service: PromoCodesService | None = None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
         self.event_publisher = event_publisher or InternalOrderEventPublisher()
+        self.promo_codes_service = promo_codes_service or PromoCodesService(session)
 
     async def checkout_current_user_cart(
         self,
@@ -62,9 +65,27 @@ class OrdersService:
             )
             self._validate_checkout_items(cart.items, variants_by_id)
 
-            order = self._build_order(user_id=user_id, payload=payload, items=cart.items)
+            subtotal = self._calculate_subtotal(cart.items)
+            promo_calculation = await self._validate_promo_code(
+                user_id=user_id,
+                code=payload.promo_code,
+                subtotal=subtotal,
+            )
+            order = self._build_order(
+                user_id=user_id,
+                payload=payload,
+                subtotal=subtotal,
+                promo_calculation=promo_calculation,
+            )
             self.repository.add(order)
             await self.session.flush()
+
+            if promo_calculation is not None:
+                self.promo_codes_service.record_usage_for_checkout(
+                    promo_code_id=promo_calculation.promo_code.id,
+                    user_id=user_id,
+                    order_id=order.id,
+                )
 
             for item in cart.items:
                 variant = variants_by_id[item.product_variant_id]
@@ -177,24 +198,57 @@ class OrdersService:
         *,
         user_id: int,
         payload: OrderCheckoutCreate,
-        items: list[CartItem],
+        subtotal: Decimal,
+        promo_calculation: PromoCodeCalculation | None,
     ) -> Order:
-        subtotal = sum(
-            (item.product.base_price * item.quantity for item in items),
-            Decimal("0.00"),
-        )
         discount = Decimal("0.00")
+        total = subtotal
+        promo_code_id = None
+        promo_code_code = None
+        if promo_calculation is not None:
+            discount = promo_calculation.discount_amount
+            total = promo_calculation.total_amount
+            promo_code_id = promo_calculation.promo_code.id
+            promo_code_code = promo_calculation.promo_code.code
+
         return Order(
             order_number=self._generate_order_number(),
             user_id=user_id,
             status=OrderStatus.NEW,
             subtotal_amount=subtotal,
             discount_amount=discount,
-            total_amount=subtotal - discount,
+            promo_code_id=promo_code_id,
+            promo_code_code=promo_code_code,
+            total_amount=total,
             contact_name=payload.contact_name,
             contact_phone=payload.contact_phone,
             delivery_address=payload.delivery_address,
             delivery_comment=payload.delivery_comment,
+        )
+
+    async def _validate_promo_code(
+        self,
+        *,
+        user_id: int,
+        code: str | None,
+        subtotal: Decimal,
+    ) -> PromoCodeCalculation | None:
+        if code is None:
+            return None
+        normalized_code = code.strip().upper()
+        if not normalized_code:
+            raise AppError("Promo code not found", status.HTTP_404_NOT_FOUND)
+        return await self.promo_codes_service.validate_for_checkout(
+            user_id=user_id,
+            code=normalized_code,
+            subtotal_amount=subtotal,
+            for_update=True,
+        )
+
+    def _calculate_subtotal(self, items: list[CartItem]) -> Decimal:
+        return sum(
+            (item.product.base_price * item.quantity for item in items),
+            Decimal("0.00"),
         )
 
     def _generate_order_number(self) -> str:

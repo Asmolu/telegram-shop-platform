@@ -59,6 +59,11 @@ class OrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class DiscountType(StrEnum):
+    PERCENT = "PERCENT"
+    FIXED = "FIXED"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -101,6 +106,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         order_by="Order.id",
+    )
+    coupon_usages: Mapped[list["CouponUsage"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="CouponUsage.id",
     )
 
 
@@ -369,6 +379,12 @@ class Order(Base):
         default=Decimal("0.00"),
         server_default="0.00",
     )
+    promo_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("promo_codes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    promo_code_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_phone: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -387,11 +403,13 @@ class Order(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="orders")
+    promo_code: Mapped["PromoCode | None"] = relationship(back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order",
         cascade="all, delete-orphan",
         order_by="OrderItem.id",
     )
+    coupon_usages: Mapped[list["CouponUsage"]] = relationship(back_populates="order")
 
 
 class OrderItem(Base):
@@ -487,3 +505,87 @@ class Banner(Base):
     @property
     def url(self) -> str:
         return f"/uploads/{self.file_path}"
+
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+    __table_args__ = (
+        CheckConstraint("discount_value > 0", name="ck_promo_codes_discount_value_positive"),
+        CheckConstraint(
+            "usage_limit IS NULL OR usage_limit > 0",
+            name="ck_promo_codes_usage_limit_positive",
+        ),
+        CheckConstraint(
+            "per_user_limit IS NULL OR per_user_limit > 0",
+            name="ck_promo_codes_per_user_limit_positive",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    discount_type: Mapped[DiscountType] = mapped_column(
+        Enum(DiscountType, name="discount_type"),
+        nullable=False,
+    )
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    usage_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    per_user_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    orders: Mapped[list[Order]] = relationship(back_populates="promo_code")
+    usages: Mapped[list["CouponUsage"]] = relationship(
+        back_populates="promo_code",
+        cascade="all, delete-orphan",
+        order_by="CouponUsage.id",
+    )
+
+
+class CouponUsage(Base):
+    __tablename__ = "coupon_usages"
+    __table_args__ = (
+        UniqueConstraint("promo_code_id", "order_id", name="uq_coupon_usages_promo_order"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    promo_code_id: Mapped[int] = mapped_column(
+        ForeignKey("promo_codes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    promo_code: Mapped[PromoCode] = relationship(back_populates="usages")
+    user: Mapped[User] = relationship(back_populates="coupon_usages")
+    order: Mapped[Order | None] = relationship(back_populates="coupon_usages")
