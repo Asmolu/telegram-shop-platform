@@ -12,6 +12,7 @@ from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
     ProductList,
+    ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
     ProductVariantList,
@@ -125,6 +126,12 @@ class ProductsService:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         return updated_product
 
+    async def update_product_status(self, product_id: int, payload: ProductStatusUpdate) -> Product:
+        return await self._set_product_status(product_id, payload.status)
+
+    async def archive_product(self, product_id: int) -> Product:
+        return await self._set_product_status(product_id, ProductStatus.ARCHIVED)
+
     async def delete_product(self, product_id: int) -> None:
         product = await self.get_product(product_id)
         await self.repository.delete(product)
@@ -178,6 +185,15 @@ class ProductsService:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
         return updated_variant
 
+    async def deactivate_product_variant(self, variant_id: int) -> ProductVariant:
+        variant = await self.get_product_variant(variant_id)
+        variant.is_active = False
+        variant_id = await self._flush_commit_and_get_id(variant)
+        updated_variant = await self.variants_repository.get_by_id(variant_id)
+        if updated_variant is None:
+            raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        return updated_variant
+
     async def delete_product_variant(self, variant_id: int) -> None:
         variant = await self.get_product_variant(variant_id)
         await self.variants_repository.delete(variant)
@@ -213,6 +229,19 @@ class ProductsService:
             validate_inventory_quantities(stock_quantity, reserved_quantity)
         except InventoryValidationError as exc:
             raise AppError(str(exc), status.HTTP_400_BAD_REQUEST) from exc
+
+    async def _set_product_status(
+        self,
+        product_id: int,
+        product_status: ProductStatus,
+    ) -> Product:
+        product = await self.get_product(product_id)
+        product.status = product_status
+        product_id = await self._flush_commit_and_get_id(product)
+        updated_product = await self.repository.get_by_id(product_id)
+        if updated_product is None:
+            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        return updated_product
 
     async def _flush_commit_and_get_id(self, instance: Product | ProductVariant) -> int:
         try:

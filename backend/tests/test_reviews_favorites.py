@@ -66,6 +66,11 @@ class FakeReviewsRepository:
     async def list_for_user(self, *, user_id: int) -> list[Review]:
         return [review for review in self.reviews.values() if review.user_id == user_id]
 
+    async def list_all(self, *, status: ReviewStatus | None = None) -> list[Review]:
+        if status is None:
+            return list(self.reviews.values())
+        return [review for review in self.reviews.values() if review.status == status]
+
     def add(self, review: Review) -> None:
         review.id = self.next_review_id
         self.next_review_id += 1
@@ -221,6 +226,32 @@ async def test_seller_admin_can_reject_review() -> None:
     assert review.moderated_by_id == 2
 
 
+@pytest.mark.asyncio
+async def test_seller_admin_can_list_and_get_reviews_by_status() -> None:
+    service, repository, _ = _reviews_service()
+    repository.reviews[1] = _review(1, status=ReviewStatus.PENDING)
+    repository.reviews[2] = _review(2, status=ReviewStatus.APPROVED)
+
+    reviews = await service.list_reviews(ReviewStatus.PENDING)
+    review = await service.get_review(1)
+
+    assert [item.id for item in reviews.items] == [1]
+    assert review.id == 1
+
+
+@pytest.mark.asyncio
+async def test_dedicated_review_approve_and_reject_actions() -> None:
+    service, repository, _ = _reviews_service()
+    repository.reviews[1] = _review(1, status=ReviewStatus.PENDING)
+    repository.reviews[2] = _review(2, status=ReviewStatus.PENDING)
+
+    approved = await service.approve_review(review_id=1, moderator_id=2)
+    rejected = await service.reject_review(review_id=2, moderator_id=2)
+
+    assert approved.status == ReviewStatus.APPROVED
+    assert rejected.status == ReviewStatus.REJECTED
+
+
 def test_normal_user_cannot_moderate_reviews() -> None:
     app = create_app()
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
@@ -230,6 +261,18 @@ def test_normal_user_cannot_moderate_reviews() -> None:
                 "/api/v1/reviews/1/status",
                 json={"status": "APPROVED"},
             )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
+def test_normal_user_cannot_list_reviews_for_moderation() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/reviews/admin")
     finally:
         app.dependency_overrides.clear()
 

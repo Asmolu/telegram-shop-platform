@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
-from app.db.models import User, UserRole
+from app.db.models import OrderStatus, User, UserRole
 from app.modules.orders.schemas import (
     OrderCheckoutCreate,
     OrderList,
@@ -45,8 +45,17 @@ async def list_orders(
     service: Annotated[OrdersService, Depends(get_orders_service)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    status_filter: Annotated[OrderStatus | None, Query(alias="status")] = None,
+    user_id: int | None = None,
+    search: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
 ) -> OrderList:
-    return await service.list_orders(limit=limit, offset=offset)
+    return await service.list_orders(
+        limit=limit,
+        offset=offset,
+        status=status_filter,
+        user_id=user_id,
+        search=search,
+    )
 
 
 @router.get("/admin/{order_id}", response_model=OrderRead)

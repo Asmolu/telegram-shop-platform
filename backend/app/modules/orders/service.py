@@ -143,8 +143,22 @@ class OrdersService:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
         return OrderRead.model_validate(order)
 
-    async def list_orders(self, *, limit: int = 20, offset: int = 0) -> OrderList:
-        orders = await self.repository.list_all(limit=limit, offset=offset)
+    async def list_orders(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        status: OrderStatus | None = None,
+        user_id: int | None = None,
+        search: str | None = None,
+    ) -> OrderList:
+        orders = await self.repository.list_all(
+            limit=limit,
+            offset=offset,
+            status=status,
+            user_id=user_id,
+            search=search,
+        )
         return OrderList(items=[OrderRead.model_validate(order) for order in orders])
 
     async def get_order(self, order_id: int) -> OrderRead:

@@ -1,7 +1,11 @@
+from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.pagination import PageMeta
+from app.core.errors import AppError
 from app.db.models import User
 from app.modules.users.repository import UsersRepository
+from app.modules.users.schemas import UserList, UserRead
 
 
 class UsersService:
@@ -10,3 +14,16 @@ class UsersService:
 
     async def get_user_by_id(self, user_id: int) -> User | None:
         return await self.repository.get_by_id(user_id)
+
+    async def list_users(self, *, limit: int, offset: int) -> UserList:
+        users, total = await self.repository.list(limit=limit, offset=offset)
+        return UserList(
+            items=[UserRead.model_validate(user) for user in users],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+
+    async def get_user_detail(self, user_id: int) -> UserRead:
+        user = await self.repository.get_by_id(user_id)
+        if user is None:
+            raise AppError("User not found", status.HTTP_404_NOT_FOUND)
+        return UserRead.model_validate(user)

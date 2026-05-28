@@ -1,10 +1,10 @@
 from collections.abc import Iterable
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Cart, CartItem, Order, OrderItem, ProductVariant
+from app.db.models import Cart, CartItem, Order, OrderItem, OrderStatus, ProductVariant, User
 
 
 class OrdersRepository:
@@ -47,10 +47,42 @@ class OrdersRepository:
         )
         return list(result.scalars())
 
-    async def list_all(self, *, limit: int, offset: int) -> list[Order]:
+    async def list_all(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: OrderStatus | None = None,
+        user_id: int | None = None,
+        search: str | None = None,
+    ) -> list[Order]:
+        conditions = []
+        if status is not None:
+            conditions.append(Order.status == status)
+        if user_id is not None:
+            conditions.append(Order.user_id == user_id)
+        if search:
+            search_value = search.strip()
+            search_conditions = [
+                Order.order_number.ilike(f"%{search_value}%"),
+                Order.contact_name.ilike(f"%{search_value}%"),
+                Order.contact_phone.ilike(f"%{search_value}%"),
+                User.username.ilike(f"%{search_value}%"),
+            ]
+            if search_value.isdigit():
+                search_conditions.extend(
+                    [
+                        Order.id == int(search_value),
+                        Order.user_id == int(search_value),
+                    ]
+                )
+            conditions.append(or_(*search_conditions))
+
         result = await self.session.execute(
             select(Order)
+            .join(User, User.id == Order.user_id)
             .options(selectinload(Order.items))
+            .where(*conditions)
             .order_by(Order.created_at.desc(), Order.id.desc())
             .limit(limit)
             .offset(offset)

@@ -155,3 +155,30 @@ def test_reviews_favorites_migration_adds_review_status_enum_and_constraints() -
     assert "ck_reviews_rating_range" in content
     assert "uq_reviews_user_product" in content
     assert "uq_favorites_user_product" in content
+
+
+def test_sprint_9_banner_migration_adds_management_fields() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0009_extend_banners_for_seller_panel.py"
+    )
+    spec = importlib.util.spec_from_file_location("extend_banners_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.BANNER_TARGET_TYPE_ENUM.name == "banner_target_type"
+    assert migration.BANNER_TARGET_TYPE_ENUM.enums == [
+        "product",
+        "category",
+        "promo",
+        "external_url",
+    ]
+    assert migration.BANNER_TARGET_TYPE_ENUM.create_type is False
+    assert "target_type" in content
+    assert "external_url" in content
+    assert "is_active" in content

@@ -10,6 +10,7 @@ from app.modules.products.schemas import (
     ProductCreate,
     ProductList,
     ProductRead,
+    ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
     ProductVariantList,
@@ -116,6 +117,15 @@ async def update_product_variant(
     return await service.update_product_variant(variant_id, payload)
 
 
+@router.patch("/variants/{variant_id}/deactivate", response_model=ProductVariantRead)
+async def deactivate_product_variant(
+    variant_id: int,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+) -> object:
+    return await service.deactivate_product_variant(variant_id)
+
+
 @router.delete("/variants/{variant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product_variant(
     variant_id: int,
@@ -124,6 +134,25 @@ async def delete_product_variant(
 ) -> Response:
     await service.delete_product_variant(variant_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{product_id}/status", response_model=ProductRead)
+async def update_product_status(
+    product_id: int,
+    payload: ProductStatusUpdate,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+) -> object:
+    return await service.update_product_status(product_id, payload)
+
+
+@router.patch("/{product_id}/archive", response_model=ProductRead)
+async def archive_product(
+    product_id: int,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+) -> object:
+    return await service.archive_product(product_id)
 
 
 @router.get("/{product_id}", response_model=ProductRead)

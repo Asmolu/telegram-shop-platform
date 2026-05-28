@@ -70,6 +70,19 @@ def test_product_variant_create_rejects_regular_user() -> None:
     assert response.json() == {"detail": "Insufficient permissions"}
 
 
+def test_product_admin_list_rejects_regular_user() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/admin")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Insufficient permissions"}
+
+
 def test_category_and_tag_write_routes_are_protected() -> None:
     with TestClient(create_app()) as client:
         category_response = client.post(
@@ -132,6 +145,55 @@ def test_product_variant_create_allows_seller() -> None:
 
     assert response.status_code == 201
     assert response.json()["available_quantity"] == 3
+
+
+def test_product_status_and_archive_routes_are_protected() -> None:
+    with TestClient(create_app()) as client:
+        status_response = client.patch("/api/v1/products/1/status", json={"status": "ACTIVE"})
+        archive_response = client.patch("/api/v1/products/1/archive")
+        variant_response = client.patch("/api/v1/products/variants/1/deactivate")
+
+    assert status_response.status_code == 401
+    assert archive_response.status_code == 401
+    assert variant_response.status_code == 401
+
+
+def test_product_archive_allows_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def archive_product(self, _: int) -> dict[str, object]:
+            return {**_product_response(), "status": "ARCHIVED", "variants": []}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.patch("/api/v1/products/1/archive")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ARCHIVED"
+
+
+def test_product_variant_deactivate_allows_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def deactivate_product_variant(self, _: int) -> dict[str, object]:
+            return {**_variant_response(), "is_active": False}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.patch("/api/v1/products/variants/1/deactivate")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
 
 
 def test_product_variant_create_rejects_negative_stock() -> None:

@@ -132,9 +132,28 @@ class FakeOrdersRepository:
         del limit, offset
         return [order for order in self.orders.values() if order.user_id == user_id]
 
-    async def list_all(self, *, limit: int, offset: int) -> list[Order]:
+    async def list_all(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: OrderStatus | None = None,
+        user_id: int | None = None,
+        search: str | None = None,
+    ) -> list[Order]:
         del limit, offset
-        return list(self.orders.values())
+        orders = list(self.orders.values())
+        if status is not None:
+            orders = [order for order in orders if order.status == status]
+        if user_id is not None:
+            orders = [order for order in orders if order.user_id == user_id]
+        if search is not None:
+            orders = [
+                order
+                for order in orders
+                if search in order.order_number or search == str(order.id)
+            ]
+        return orders
 
     async def get_by_id(self, order_id: int) -> Order | None:
         return self.orders.get(order_id)
@@ -343,9 +362,11 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
     repository.orders[10] = _order(order_id=10, user_id=1)
 
     orders = await service.list_orders()
+    filtered = await service.list_orders(status=OrderStatus.NEW, search="10")
     updated = await service.update_order_status(10, OrderStatusUpdate(status=OrderStatus.SHIPPED))
 
     assert len(orders.items) == 1
+    assert len(filtered.items) == 1
     assert updated.status == OrderStatus.SHIPPED
 
 

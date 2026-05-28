@@ -113,6 +113,10 @@ class ProductUpdate(BaseModel):
     images: list[ProductImageCreate] | None = None
 
 
+class ProductStatusUpdate(BaseModel):
+    status: ProductStatus
+
+
 class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 

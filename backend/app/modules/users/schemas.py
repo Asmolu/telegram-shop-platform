@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.common.pagination import PageMeta
 from app.db.models import UserRole
 
 
@@ -18,3 +19,8 @@ class UserRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class UserList(BaseModel):
+    items: list[UserRead]
+    meta: PageMeta

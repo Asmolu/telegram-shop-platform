@@ -84,6 +84,7 @@ class UploadsService:
             suffix=upload.extension,
         )
         banner = Banner(
+            title=alt_text or upload.original_filename,
             file_path=file_path,
             original_filename=upload.original_filename,
             mime_type=upload.mime_type,

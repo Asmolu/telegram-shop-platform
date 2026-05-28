@@ -70,6 +70,30 @@ class ReviewsService:
         reviews = await self.repository.list_for_user(user_id=user_id)
         return ReviewList(items=[ReviewRead.model_validate(review) for review in reviews])
 
+    async def list_reviews(self, status: ReviewStatus | None = None) -> ReviewList:
+        reviews = await self.repository.list_all(status=status)
+        return ReviewList(items=[ReviewRead.model_validate(review) for review in reviews])
+
+    async def get_review(self, review_id: int) -> ReviewRead:
+        review = await self.repository.get_by_id(review_id)
+        if review is None:
+            raise AppError("Review not found", status.HTTP_404_NOT_FOUND)
+        return ReviewRead.model_validate(review)
+
+    async def approve_review(self, *, review_id: int, moderator_id: int) -> ReviewRead:
+        return await self.moderate_review(
+            review_id=review_id,
+            moderator_id=moderator_id,
+            payload=ReviewModerationUpdate(status=ReviewStatus.APPROVED),
+        )
+
+    async def reject_review(self, *, review_id: int, moderator_id: int) -> ReviewRead:
+        return await self.moderate_review(
+            review_id=review_id,
+            moderator_id=moderator_id,
+            payload=ReviewModerationUpdate(status=ReviewStatus.REJECTED),
+        )
+
     async def moderate_review(
         self,
         *,

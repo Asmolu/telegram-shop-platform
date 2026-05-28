@@ -54,5 +54,15 @@ class ReviewsRepository:
         )
         return list(result.scalars())
 
+    async def list_all(self, *, status: ReviewStatus | None = None) -> list[Review]:
+        conditions = []
+        if status is not None:
+            conditions.append(Review.status == status)
+
+        result = await self.session.execute(
+            select(Review).where(*conditions).order_by(Review.created_at.desc(), Review.id.desc())
+        )
+        return list(result.scalars())
+
     def add(self, review: Review) -> None:
         self.session.add(review)
