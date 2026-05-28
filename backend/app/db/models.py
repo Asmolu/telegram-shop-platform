@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -81,6 +82,12 @@ class User(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    cart: Mapped["Cart | None"] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
 
@@ -177,6 +184,7 @@ class Product(Base):
         cascade="all, delete-orphan",
         order_by="ProductVariant.id",
     )
+    cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product")
 
     @property
     def is_available(self) -> bool:
@@ -239,10 +247,82 @@ class ProductVariant(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="variants")
+    cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product_variant")
 
     @property
     def available_quantity(self) -> int:
         return self.stock_quantity - self.reserved_quantity
+
+
+class Cart(Base):
+    __tablename__ = "carts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="cart")
+    items: Mapped[list["CartItem"]] = relationship(
+        back_populates="cart",
+        cascade="all, delete-orphan",
+        order_by="CartItem.id",
+    )
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_cart_items_quantity_positive"),
+        UniqueConstraint("cart_id", "product_variant_id", name="uq_cart_items_cart_variant"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cart_id: Mapped[int] = mapped_column(
+        ForeignKey("carts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_variant_id: Mapped[int] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    cart: Mapped[Cart] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship(back_populates="cart_items")
+    product_variant: Mapped[ProductVariant] = relationship(back_populates="cart_items")
 
 
 class ProductImage(Base):

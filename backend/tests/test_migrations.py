@@ -59,3 +59,18 @@ def test_product_variants_migration_adds_inventory_constraints() -> None:
     assert "ck_product_variants_stock_non_negative" in content
     assert "ck_product_variants_reserved_non_negative" in content
     assert "ck_product_variants_reserved_not_above_stock" in content
+
+
+def test_cart_migration_adds_cart_tables_and_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0005_add_cart_tables.py"
+    )
+    content = migration_path.read_text()
+
+    assert "carts" in content
+    assert "cart_items" in content
+    assert "ck_cart_items_quantity_positive" in content
+    assert "uq_cart_items_cart_variant" in content
