@@ -4,7 +4,7 @@ services:
       context: ./backend
     container_name: telegram-shop-backend
     env_file:
-      - ./backend/.env.example
+      - ./backend/.env
     ports:
       - "8000:8000"
     volumes:
