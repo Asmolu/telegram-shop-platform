@@ -51,6 +51,14 @@ class ProductStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class OrderStatus(StrEnum):
+    NEW = "NEW"
+    PROCESSING = "PROCESSING"
+    SHIPPED = "SHIPPED"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -88,6 +96,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="Order.id",
     )
 
 
@@ -185,6 +198,7 @@ class Product(Base):
         order_by="ProductVariant.id",
     )
     cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product")
+    order_items: Mapped[list["OrderItem"]] = relationship(back_populates="product")
 
     @property
     def is_available(self) -> bool:
@@ -248,6 +262,7 @@ class ProductVariant(Base):
 
     product: Mapped[Product] = relationship(back_populates="variants")
     cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product_variant")
+    order_items: Mapped[list["OrderItem"]] = relationship(back_populates="product_variant")
 
     @property
     def available_quantity(self) -> int:
@@ -323,6 +338,101 @@ class CartItem(Base):
     cart: Mapped[Cart] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="cart_items")
     product_variant: Mapped[ProductVariant] = relationship(back_populates="cart_items")
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_number: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[OrderStatus] = mapped_column(
+        Enum(OrderStatus, name="order_status"),
+        nullable=False,
+        default=OrderStatus.NEW,
+        server_default=OrderStatus.NEW.value,
+        index=True,
+    )
+    subtotal_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    delivery_address: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="orders")
+    items: Mapped[list["OrderItem"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderItem.id",
+    )
+
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"),
+        CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price_non_negative"),
+        CheckConstraint("subtotal >= 0", name="ck_order_items_subtotal_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    product_variant_id: Mapped[int] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    variant_size: Mapped[str] = mapped_column(String(64), nullable=False)
+    variant_sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    order: Mapped[Order] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship(back_populates="order_items")
+    product_variant: Mapped[ProductVariant] = relationship(back_populates="order_items")
 
 
 class ProductImage(Base):
