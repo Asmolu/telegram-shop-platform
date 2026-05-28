@@ -1091,7 +1091,7 @@ CTA:
 - per_user_limit;
 - actions.
 
-### Форма
+### Формы
 
 Поля:
 

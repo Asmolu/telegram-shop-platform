@@ -10,18 +10,18 @@ This is a project scaffold and architecture baseline, not a completed product. T
 
 ## Stack
 
-| Layer | Technology |
-| --- | --- |
-| Customer app | React + Vite + TypeScript |
-| Seller panel | React + Vite + TypeScript |
-| Backend API | Python 3.12 + FastAPI |
-| ORM | SQLAlchemy 2.0 async |
-| Migrations | Alembic |
-| Database | PostgreSQL |
-| Cache / queues | Redis |
-| Files | Local `/uploads`, cloud-ready later |
-| API contract | OpenAPI |
-| Auth | Telegram initData validation + JWT |
+| Layer          | Technology                          |
+| -------------- | ----------------------------------- |
+| Customer app   | React + Vite + TypeScript           |
+| Seller panel   | React + Vite + TypeScript           |
+| Backend API    | Python 3.12 + FastAPI               |
+| ORM            | SQLAlchemy 2.0 async                |
+| Migrations     | Alembic                             |
+| Database       | PostgreSQL                          |
+| Cache / queues | Redis                               |
+| Files          | Local `/uploads`, cloud-ready later |
+| API contract   | OpenAPI                             |
+| Auth           | Telegram initData validation + JWT  |
 
 ## Repository structure
 
@@ -171,3 +171,10 @@ npm run build
 - Never commit `.env`, tokens, private keys, uploaded user files, or database dumps.
 
 See `AGENTS.md` before giving tasks to Codex.
+
+## Project Documentation
+
+- `SRS.README.md` — product/system requirements.
+- `SPRINT_PLAN.md` — implementation roadmap.
+- `AGENTS.md` — Codex/agent development rules.
+- `UI_DESIGN_SPEC.README.md` — Mini App and Seller Portal UI specification.

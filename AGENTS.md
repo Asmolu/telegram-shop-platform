@@ -131,3 +131,16 @@ Update documentation when changing architecture, commands, environment variables
 - `SPRINT_PLAN.md`
 - `docs/LOCAL_DEVELOPMENT.md`
 - `docs/CODEX_WORKFLOW.md`
+
+## UI / Frontend Design Source
+
+When working on Mini App or Seller Portal UI, always read:
+
+- `UI_DESIGN_SPEC.README.md`
+
+Rules:
+
+- Mini App and Seller Portal must not look identical.
+- Mini App is mobile-first and marketplace-like.
+- Seller Portal is desktop-first and dashboard-like.
+- Backend tasks must not implement frontend UI unless the sprint explicitly asks for it.
