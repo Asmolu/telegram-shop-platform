@@ -128,3 +128,30 @@ def test_promo_code_migration_adds_discount_enum_tables_and_order_snapshot() -> 
     assert "promo_code_code" in content
     assert "ck_promo_codes_discount_value_positive" in content
     assert "uq_coupon_usages_promo_order" in content
+
+
+def test_reviews_favorites_migration_adds_review_status_enum_and_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0008_add_reviews_and_favorites.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "add_reviews_and_favorites_migration",
+        migration_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.REVIEW_STATUS_ENUM.name == "review_status"
+    assert migration.REVIEW_STATUS_ENUM.enums == ["PENDING", "APPROVED", "REJECTED"]
+    assert migration.REVIEW_STATUS_ENUM.create_type is False
+    assert "reviews" in content
+    assert "favorites" in content
+    assert "ck_reviews_rating_range" in content
+    assert "uq_reviews_user_product" in content
+    assert "uq_favorites_user_product" in content

@@ -59,6 +59,12 @@ class OrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class ReviewStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class DiscountType(StrEnum):
     PERCENT = "PERCENT"
     FIXED = "FIXED"
@@ -111,6 +117,22 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         order_by="CouponUsage.id",
+    )
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="Review.user_id",
+        order_by="Review.id",
+    )
+    moderated_reviews: Mapped[list["Review"]] = relationship(
+        back_populates="moderated_by",
+        foreign_keys="Review.moderated_by_id",
+        order_by="Review.id",
+    )
+    favorites: Mapped[list["Favorite"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="Favorite.id",
     )
 
 
@@ -209,6 +231,16 @@ class Product(Base):
     )
     cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product")
     order_items: Mapped[list["OrderItem"]] = relationship(back_populates="product")
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="Review.id",
+    )
+    favorites: Mapped[list["Favorite"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="Favorite.id",
+    )
 
     @property
     def is_available(self) -> bool:
@@ -410,6 +442,7 @@ class Order(Base):
         order_by="OrderItem.id",
     )
     coupon_usages: Mapped[list["CouponUsage"]] = relationship(back_populates="order")
+    reviews: Mapped[list["Review"]] = relationship(back_populates="order")
 
 
 class OrderItem(Base):
@@ -589,3 +622,92 @@ class CouponUsage(Base):
     promo_code: Mapped[PromoCode] = relationship(back_populates="usages")
     user: Mapped[User] = relationship(back_populates="coupon_usages")
     order: Mapped[Order | None] = relationship(back_populates="coupon_usages")
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = (
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_reviews_rating_range"),
+        UniqueConstraint("user_id", "product_id", name="uq_reviews_user_product"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ReviewStatus] = mapped_column(
+        Enum(ReviewStatus, name="review_status"),
+        nullable=False,
+        default=ReviewStatus.PENDING,
+        server_default=ReviewStatus.PENDING.value,
+        index=True,
+    )
+    moderated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    moderated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User] = relationship(
+        back_populates="reviews",
+        foreign_keys=[user_id],
+    )
+    product: Mapped[Product] = relationship(back_populates="reviews")
+    order: Mapped[Order | None] = relationship(back_populates="reviews")
+    moderated_by: Mapped[User | None] = relationship(
+        back_populates="moderated_reviews",
+        foreign_keys=[moderated_by_id],
+    )
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    __table_args__ = (
+        UniqueConstraint("user_id", "product_id", name="uq_favorites_user_product"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    user: Mapped[User] = relationship(back_populates="favorites")
+    product: Mapped[Product] = relationship(back_populates="favorites")
