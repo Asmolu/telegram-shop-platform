@@ -17,7 +17,14 @@ from app.db.models import (
     ProductStatus,
     ProductVariant,
 )
-from app.events.names import ORDER_CREATED
+from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
+from app.events.payloads import (
+    order_created_payload,
+    order_shipped_payload,
+    order_status_changed_payload,
+    promo_used_payload,
+)
+from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
@@ -29,10 +36,13 @@ class OrderEventPublisher(Protocol):
 
 
 class InternalOrderEventPublisher:
-    """No-op event placeholder for the future notification pipeline."""
+    """Post-commit notification event publisher."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.publisher = NotificationsEventPublisher(session)
 
     async def emit(self, name: str, payload: Mapping[str, object]) -> None:
-        del name, payload
+        await self.publisher.emit(name, payload)
 
 
 class OrdersService:
@@ -46,7 +56,7 @@ class OrdersService:
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
-        self.event_publisher = event_publisher or InternalOrderEventPublisher()
+        self.event_publisher = event_publisher or InternalOrderEventPublisher(session)
         self.promo_codes_service = promo_codes_service or PromoCodesService(session)
 
     async def checkout_current_user_cart(
@@ -54,7 +64,7 @@ class OrdersService:
         user_id: int,
         payload: OrderCheckoutCreate,
     ) -> OrderRead:
-        event_payload: dict[str, object] | None = None
+        post_commit_events: list[tuple[str, dict[str, object]]] = []
         try:
             cart = await self.repository.get_cart_for_checkout(user_id)
             self._validate_cart_not_empty(cart)
@@ -112,7 +122,9 @@ class OrdersService:
             if created_order is None:
                 raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
             response = OrderRead.model_validate(created_order)
-            event_payload = {"order_id": created_order.id, "user_id": user_id}
+            post_commit_events.append((ORDER_CREATED, order_created_payload(created_order)))
+            if created_order.promo_code_id is not None:
+                post_commit_events.append((PROMO_USED, promo_used_payload(created_order)))
             await self.session.commit()
         except AppError:
             await self.session.rollback()
@@ -124,7 +136,8 @@ class OrdersService:
             await self.session.rollback()
             raise
 
-        await self.event_publisher.emit(ORDER_CREATED, event_payload)
+        for event_name, event_payload in post_commit_events:
+            await self.event_publisher.emit(event_name, event_payload)
         return response
 
     async def list_current_user_orders(
@@ -176,6 +189,7 @@ class OrdersService:
         if order is None:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
 
+        previous_status = order.status
         order.status = payload.status
         try:
             await self.session.commit()
@@ -183,7 +197,16 @@ class OrdersService:
             await self.session.rollback()
             raise AppError("Order update failed", status.HTTP_409_CONFLICT) from exc
 
-        return OrderRead.model_validate(order)
+        response = OrderRead.model_validate(order)
+        if previous_status != order.status:
+            await self.event_publisher.emit(
+                ORDER_STATUS_CHANGED,
+                order_status_changed_payload(order, previous_status=previous_status),
+            )
+            if order.status == OrderStatus.SHIPPED:
+                await self.event_publisher.emit(ORDER_SHIPPED, order_shipped_payload(order))
+
+        return response
 
     def _validate_cart_not_empty(self, cart: Cart | None) -> None:
         if cart is None or not cart.items:

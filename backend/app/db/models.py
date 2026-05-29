@@ -3,6 +3,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -77,6 +78,17 @@ class BannerTargetType(StrEnum):
     EXTERNAL_URL = "external_url"
 
 
+class NotificationChannel(StrEnum):
+    TELEGRAM = "telegram"
+    INTERNAL = "internal"
+
+
+class NotificationStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -140,6 +152,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         order_by="Favorite.id",
+    )
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user",
+        order_by="Notification.id",
     )
 
 
@@ -751,3 +767,47 @@ class Favorite(Base):
 
     user: Mapped[User] = relationship(back_populates="favorites")
     product: Mapped[Product] = relationship(back_populates="favorites")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    channel: Mapped[NotificationChannel] = mapped_column(
+        Enum(NotificationChannel, name="notification_channel"),
+        nullable=False,
+        default=NotificationChannel.INTERNAL,
+        server_default=NotificationChannel.INTERNAL.value,
+        index=True,
+    )
+    status: Mapped[NotificationStatus] = mapped_column(
+        Enum(NotificationStatus, name="notification_status"),
+        nullable=False,
+        default=NotificationStatus.PENDING,
+        server_default=NotificationStatus.PENDING.value,
+        index=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User | None] = relationship(back_populates="notifications")

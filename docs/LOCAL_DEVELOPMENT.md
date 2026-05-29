@@ -62,8 +62,13 @@ docker compose up -d postgres redis
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/telegram_shop
 REDIS_URL=redis://localhost:6379/0
 TELEGRAM_WEBAPP_BOT_TOKEN=<your bot token>
+TELEGRAM_BOT_TOKEN=<seller notification bot token>
+TELEGRAM_SELLER_CHAT_ID=<seller group or chat id>
 JWT_SECRET_KEY=<local development secret>
 ```
+
+`TELEGRAM_WEBAPP_BOT_TOKEN` is for Mini App auth. Seller notifications are sent
+with `TELEGRAM_BOT_TOKEN` to `TELEGRAM_SELLER_CHAT_ID`.
 
 3. Run backend:
 

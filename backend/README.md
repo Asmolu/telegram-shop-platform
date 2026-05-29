@@ -99,7 +99,7 @@ curl http://localhost:8000/health
 FastAPI exposes OpenAPI at:
 
 ```text
-http://localhost:8000/openapi.json
+http://localhost:8000/api/v1/openapi.json
 http://localhost:8000/docs
 ```
 
@@ -108,3 +108,13 @@ http://localhost:8000/docs
 Telegram login validates Mini App `initData` with `TELEGRAM_WEBAPP_BOT_TOKEN` or
 `TELEGRAM_BOT_TOKEN`, then returns a JWT access token. Set `JWT_SECRET_KEY` to a
 strong local secret before using authenticated endpoints.
+
+## Notifications
+
+Sprint 10 notifications are exposed under `/api/v1/notifications`.
+Seller/admin management endpoints use `/api/v1/notifications/admin`.
+User-facing notification listing is available at `/api/v1/notifications/me`.
+
+Seller Telegram notifications use `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_SELLER_CHAT_ID`. `TELEGRAM_WEBAPP_BOT_TOKEN` remains reserved for Mini
+App authentication and must not be used for seller notification delivery.

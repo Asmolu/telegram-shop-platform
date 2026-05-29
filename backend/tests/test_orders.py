@@ -11,6 +11,8 @@ from app.db.models import (
     CartItem,
     CouponUsage,
     DiscountType,
+    Notification,
+    NotificationStatus,
     Order,
     OrderItem,
     OrderStatus,
@@ -21,12 +23,14 @@ from app.db.models import (
     User,
     UserRole,
 )
-from app.events.names import ORDER_CREATED
+from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
 from app.main import create_app
+from app.modules.notifications.service import NotificationsEventPublisher, NotificationsService
 from app.modules.orders.router import get_orders_service
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderStatusUpdate
 from app.modules.orders.service import OrdersService
 from app.modules.promo_codes.service import PromoCodeCalculation
+from app.modules.telegram.service import TelegramDeliveryError
 
 
 class DummySession:
@@ -43,13 +47,20 @@ class DummySession:
     async def flush(self) -> None:
         return None
 
+    async def refresh(self, _: object) -> None:
+        return None
+
 
 class FakeOrderEventPublisher:
-    def __init__(self) -> None:
+    def __init__(self, session: DummySession | None = None) -> None:
+        self.session = session
         self.events: list[tuple[str, dict[str, object]]] = []
+        self.commit_states: list[bool] = []
 
     async def emit(self, name: str, payload: dict[str, object]) -> None:
         self.events.append((name, payload))
+        if self.session is not None:
+            self.commit_states.append(self.session.committed)
 
 
 class FakePromoCodesService:
@@ -187,6 +198,28 @@ class FakeOrdersRepository:
                 return
 
 
+class FakeNotificationsRepository:
+    def __init__(self) -> None:
+        self.notifications: dict[int, Notification] = {}
+        self.next_notification_id = 1
+
+    def add(self, notification: Notification) -> None:
+        notification.id = self.next_notification_id
+        self.next_notification_id += 1
+        notification.created_at = _now()
+        notification.updated_at = _now()
+        self.notifications[notification.id] = notification
+
+    async def get_by_id(self, notification_id: int) -> Notification | None:
+        return self.notifications.get(notification_id)
+
+
+class FailingTelegramService:
+    async def send_seller_notification(self, message: str) -> None:
+        del message
+        raise TelegramDeliveryError("Telegram unavailable")
+
+
 @pytest.mark.asyncio
 async def test_checkout_from_valid_cart() -> None:
     service, repository, session, events = _orders_service()
@@ -202,13 +235,30 @@ async def test_checkout_from_valid_cart() -> None:
     assert repository.variants[1].stock_quantity == 3
     assert repository.carts[1].items == []
     assert session.committed is True
-    assert events.events == [(ORDER_CREATED, {"order_id": 1, "user_id": 1})]
+    assert events.events == [
+        (
+            ORDER_CREATED,
+            {
+                "order_id": 1,
+                "order_number": order.order_number,
+                "user_id": 1,
+                "subtotal_amount": "119.80",
+                "discount_amount": "0.00",
+                "total_amount": "119.80",
+                "promo_code_id": None,
+                "promo_code": None,
+            },
+        )
+    ]
+    assert events.commit_states == [True]
 
 
 @pytest.mark.asyncio
 async def test_checkout_with_valid_promo_code_creates_order_and_coupon_usage() -> None:
     promo_codes_service = FakePromoCodesService(discount_amount=Decimal("20.00"))
-    service, repository, session, _ = _orders_service(promo_codes_service=promo_codes_service)
+    service, repository, session, events = _orders_service(
+        promo_codes_service=promo_codes_service,
+    )
 
     order = await service.checkout_current_user_cart(
         user_id=1,
@@ -228,6 +278,26 @@ async def test_checkout_with_valid_promo_code_creates_order_and_coupon_usage() -
     assert promo_codes_service.usages[0].order_id == order.id
     assert session.committed is True
     assert repository.carts[1].items == []
+    assert [event[0] for event in events.events] == [ORDER_CREATED, PROMO_USED]
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_failure_does_not_rollback_successful_checkout() -> None:
+    service, _, session, _ = _orders_service()
+    notifications_service = NotificationsService(
+        session,
+        telegram_service=FailingTelegramService(),
+    )
+    notifications_repository = FakeNotificationsRepository()
+    notifications_service.repository = notifications_repository
+    service.event_publisher = NotificationsEventPublisher(session, notifications_service)
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert order.id == 1
+    assert session.committed is True
+    assert session.rolled_back is False
+    assert notifications_repository.notifications[1].status == NotificationStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -358,7 +428,7 @@ async def test_user_cannot_access_another_users_order() -> None:
 
 @pytest.mark.asyncio
 async def test_seller_admin_can_list_and_update_orders() -> None:
-    service, repository, _, _ = _orders_service()
+    service, repository, _, events = _orders_service()
     repository.orders[10] = _order(order_id=10, user_id=1)
 
     orders = await service.list_orders()
@@ -368,6 +438,27 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
     assert len(orders.items) == 1
     assert len(filtered.items) == 1
     assert updated.status == OrderStatus.SHIPPED
+    assert events.events == [
+        (
+            ORDER_STATUS_CHANGED,
+            {
+                "order_id": 10,
+                "order_number": "ORD-00000010",
+                "user_id": 1,
+                "previous_status": "NEW",
+                "new_status": "SHIPPED",
+            },
+        ),
+        (
+            ORDER_SHIPPED,
+            {
+                "order_id": 10,
+                "order_number": "ORD-00000010",
+                "user_id": 1,
+                "status": "SHIPPED",
+            },
+        ),
+    ]
 
 
 def test_orders_require_authentication() -> None:
@@ -424,7 +515,7 @@ def _orders_service(
     promo_codes_service: FakePromoCodesService | None = None,
 ) -> tuple[OrdersService, FakeOrdersRepository, DummySession, FakeOrderEventPublisher]:
     session = DummySession()
-    events = FakeOrderEventPublisher()
+    events = FakeOrderEventPublisher(session)
     service = OrdersService(
         session,
         event_publisher=events,

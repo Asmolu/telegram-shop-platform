@@ -182,3 +182,29 @@ def test_sprint_9_banner_migration_adds_management_fields() -> None:
     assert "target_type" in content
     assert "external_url" in content
     assert "is_active" in content
+
+
+def test_sprint_10_notification_migration_adds_status_and_channel_enums() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260527_0010_add_notifications.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_notifications_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.NOTIFICATION_CHANNEL_ENUM.name == "notification_channel"
+    assert migration.NOTIFICATION_CHANNEL_ENUM.enums == ["telegram", "internal"]
+    assert migration.NOTIFICATION_CHANNEL_ENUM.create_type is False
+    assert migration.NOTIFICATION_STATUS_ENUM.name == "notification_status"
+    assert migration.NOTIFICATION_STATUS_ENUM.enums == ["pending", "sent", "failed"]
+    assert migration.NOTIFICATION_STATUS_ENUM.create_type is False
+    assert "notifications" in content
+    assert "payload" in content
+    assert "error_message" in content
+    assert "sent_at" in content
