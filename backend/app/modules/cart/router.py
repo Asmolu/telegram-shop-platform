@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session
 from app.db.models import User
+from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.cart.schemas import CartItemCreate, CartItemUpdate, CartRead
 from app.modules.cart.service import CartService
 
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/cart", tags=["cart"])
 
 
 def get_cart_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> CartService:
-    return CartService(session)
+    return CartService(session, analytics_tracker=IsolatedAnalyticsTracker())
 
 
 @router.get("", response_model=CartRead)

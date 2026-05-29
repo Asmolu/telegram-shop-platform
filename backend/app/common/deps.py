@@ -47,6 +47,25 @@ async def get_current_user(
     return user
 
 
+async def get_optional_current_user(
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> User | None:
+    if token is None:
+        return None
+
+    try:
+        payload = verify_access_token(token)
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError, TokenError):
+        return None
+
+    user = await UsersRepository(session).get_by_id(user_id)
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
 def require_roles(*allowed_roles: UserRole):
     async def dependency(current_user: Annotated[User, Depends(get_current_user)]) -> User:
         if current_user.role not in allowed_roles:

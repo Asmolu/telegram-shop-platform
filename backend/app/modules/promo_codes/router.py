@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import User, UserRole
+from app.modules.audit.service import AuditService
 from app.modules.promo_codes.schemas import (
     PromoCodeCreate,
     PromoCodeList,
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/promo-codes", tags=["promo-codes"])
 def get_promo_codes_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> PromoCodesService:
-    return PromoCodesService(session)
+    return PromoCodesService(session, audit_service=AuditService(session))
 
 
 @router.post("/validate", response_model=PromoCodeValidationRead)
@@ -36,10 +37,10 @@ async def validate_current_cart_promo_code(
 @router.post("", response_model=PromoCodeRead, status_code=status.HTTP_201_CREATED)
 async def create_promo_code(
     payload: PromoCodeCreate,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[PromoCodesService, Depends(get_promo_codes_service)],
 ) -> PromoCodeRead:
-    return await service.create_promo_code(payload)
+    return await service.create_promo_code(payload, actor_user_id=current_user.id)
 
 
 @router.get("", response_model=PromoCodeList)
@@ -65,17 +66,21 @@ async def get_promo_code(
 async def update_promo_code(
     promo_code_id: int,
     payload: PromoCodeUpdate,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[PromoCodesService, Depends(get_promo_codes_service)],
 ) -> PromoCodeRead:
-    return await service.update_promo_code(promo_code_id, payload)
+    return await service.update_promo_code(
+        promo_code_id,
+        payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.delete("/{promo_code_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_promo_code(
     promo_code_id: int,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[PromoCodesService, Depends(get_promo_codes_service)],
 ) -> Response:
-    await service.deactivate_promo_code(promo_code_id)
+    await service.deactivate_promo_code(promo_code_id, actor_user_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

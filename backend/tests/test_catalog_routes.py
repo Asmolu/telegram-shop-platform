@@ -99,7 +99,7 @@ def test_product_create_allows_seller() -> None:
     app = create_app()
 
     class FakeProductsService:
-        async def create_product(self, _: object) -> dict[str, object]:
+        async def create_product(self, _: object, **__: object) -> dict[str, object]:
             now = datetime(2026, 5, 27, tzinfo=UTC).isoformat()
             return {
                 "id": 1,
@@ -132,7 +132,12 @@ def test_product_variant_create_allows_seller() -> None:
     app = create_app()
 
     class FakeProductsService:
-        async def create_product_variant(self, _: int, __: object) -> dict[str, object]:
+        async def create_product_variant(
+            self,
+            _: int,
+            __: object,
+            **___: object,
+        ) -> dict[str, object]:
             return _variant_response()
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
@@ -162,7 +167,7 @@ def test_product_archive_allows_seller() -> None:
     app = create_app()
 
     class FakeProductsService:
-        async def archive_product(self, _: int) -> dict[str, object]:
+        async def archive_product(self, _: int, **__: object) -> dict[str, object]:
             return {**_product_response(), "status": "ARCHIVED", "variants": []}
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
@@ -181,7 +186,7 @@ def test_product_variant_deactivate_allows_seller() -> None:
     app = create_app()
 
     class FakeProductsService:
-        async def deactivate_product_variant(self, _: int) -> dict[str, object]:
+        async def deactivate_product_variant(self, _: int, **__: object) -> dict[str, object]:
             return {**_variant_response(), "is_active": False}
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)

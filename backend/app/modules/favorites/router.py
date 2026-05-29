@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session
 from app.db.models import User
+from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.favorites.schemas import FavoriteCreate, FavoriteList, FavoriteRead
 from app.modules.favorites.service import FavoritesService
 
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/favorites", tags=["favorites"])
 def get_favorites_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> FavoritesService:
-    return FavoritesService(session)
+    return FavoritesService(session, analytics_tracker=IsolatedAnalyticsTracker())
 
 
 @router.get("", response_model=FavoriteList)

@@ -1,3 +1,6 @@
+import logging
+from collections.abc import Awaitable, Callable
+
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import Product, ProductImage, ProductStatus, ProductVariant, Tag
+from app.modules.analytics.service import AnalyticsTracker
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
@@ -20,14 +25,41 @@ from app.modules.products.schemas import (
 )
 from app.modules.tags.repository import TagsRepository
 
+logger = logging.getLogger(__name__)
+
+PRODUCT_AUDIT_FIELDS = (
+    "name",
+    "slug",
+    "description",
+    "base_price",
+    "status",
+    "category_id",
+)
+VARIANT_AUDIT_FIELDS = (
+    "product_id",
+    "size",
+    "color",
+    "sku",
+    "stock_quantity",
+    "reserved_quantity",
+    "is_active",
+)
+
 
 class ProductsService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        analytics_tracker: AnalyticsTracker | None = None,
+        audit_service: AuditService | None = None,
+    ) -> None:
         self.session = session
         self.repository = ProductsRepository(session)
         self.variants_repository = ProductVariantsRepository(session)
         self.categories_repository = CategoriesRepository(session)
         self.tags_repository = TagsRepository(session)
+        self.analytics_tracker = analytics_tracker
+        self.audit_service = audit_service or NoopAuditService()
 
     async def list_public_products(
         self,
@@ -73,10 +105,11 @@ class ProductsService:
         )
         return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
 
-    async def get_public_product(self, product_id: int) -> Product:
+    async def get_public_product(self, product_id: int, user_id: int | None = None) -> Product:
         product = await self.repository.get_active_by_id(product_id)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
         return product
 
     async def get_product(self, product_id: int) -> Product:
@@ -85,7 +118,11 @@ class ProductsService:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         return product
 
-    async def create_product(self, payload: ProductCreate) -> Product:
+    async def create_product(
+        self,
+        payload: ProductCreate,
+        actor_user_id: int | None = None,
+    ) -> Product:
         tags = await self._resolve_tags(payload.tag_ids)
         await self._ensure_category_exists(payload.category_id)
         self._validate_images(payload.images)
@@ -97,14 +134,30 @@ class ProductsService:
             images=[ProductImage(**image.model_dump()) for image in payload.images],
         )
         self.repository.add(product)
-        product_id = await self._flush_commit_and_get_id(product)
+        product_id = await self._flush_commit_and_get_id(
+            product,
+            audit_callback=lambda created_product: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="product.created",
+                entity_type="product",
+                entity_id=created_product.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(created_product, PRODUCT_AUDIT_FIELDS),
+            ),
+        )
         created_product = await self.repository.get_by_id(product_id)
         if created_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         return created_product
 
-    async def update_product(self, product_id: int, payload: ProductUpdate) -> Product:
+    async def update_product(
+        self,
+        product_id: int,
+        payload: ProductUpdate,
+        actor_user_id: int | None = None,
+    ) -> Product:
         product = await self.get_product(product_id)
+        before_data = self.audit_service.snapshot(product, PRODUCT_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True, exclude={"tag_ids", "images"})
 
         if "category_id" in data:
@@ -120,17 +173,46 @@ class ProductsService:
         for field, value in data.items():
             setattr(product, field, value)
 
-        product_id = await self._flush_commit_and_get_id(product)
+        product_id = await self._flush_commit_and_get_id(
+            product,
+            audit_callback=lambda updated_product: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="product.updated",
+                entity_type="product",
+                entity_id=updated_product.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(updated_product, PRODUCT_AUDIT_FIELDS),
+            ),
+        )
         updated_product = await self.repository.get_by_id(product_id)
         if updated_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         return updated_product
 
-    async def update_product_status(self, product_id: int, payload: ProductStatusUpdate) -> Product:
-        return await self._set_product_status(product_id, payload.status)
+    async def update_product_status(
+        self,
+        product_id: int,
+        payload: ProductStatusUpdate,
+        actor_user_id: int | None = None,
+    ) -> Product:
+        return await self._set_product_status(
+            product_id,
+            payload.status,
+            actor_user_id=actor_user_id,
+            action="product.status_changed",
+        )
 
-    async def archive_product(self, product_id: int) -> Product:
-        return await self._set_product_status(product_id, ProductStatus.ARCHIVED)
+    async def archive_product(
+        self,
+        product_id: int,
+        actor_user_id: int | None = None,
+    ) -> Product:
+        return await self._set_product_status(
+            product_id,
+            ProductStatus.ARCHIVED,
+            actor_user_id=actor_user_id,
+            action="product.archived",
+        )
 
     async def delete_product(self, product_id: int) -> None:
         product = await self.get_product(product_id)
@@ -153,13 +235,25 @@ class ProductsService:
         self,
         product_id: int,
         payload: ProductVariantCreate,
+        actor_user_id: int | None = None,
     ) -> ProductVariant:
         await self.get_product(product_id)
         self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
 
         variant = ProductVariant(product_id=product_id, **payload.model_dump())
         self.variants_repository.add(variant)
-        variant_id = await self._flush_commit_and_get_id(variant)
+        variant_id = await self._flush_commit_and_get_id(
+            variant,
+            audit_callback=lambda created_variant: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="variant.created",
+                entity_type="product_variant",
+                entity_id=created_variant.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(created_variant, VARIANT_AUDIT_FIELDS),
+                metadata={"product_id": product_id},
+            ),
+        )
         created_variant = await self.variants_repository.get_by_id(variant_id)
         if created_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
@@ -169,8 +263,10 @@ class ProductsService:
         self,
         variant_id: int,
         payload: ProductVariantUpdate,
+        actor_user_id: int | None = None,
     ) -> ProductVariant:
         variant = await self.get_product_variant(variant_id)
+        before_data = self.audit_service.snapshot(variant, VARIANT_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True)
         stock_quantity = data.get("stock_quantity", variant.stock_quantity)
         reserved_quantity = data.get("reserved_quantity", variant.reserved_quantity)
@@ -179,16 +275,46 @@ class ProductsService:
         for field, value in data.items():
             setattr(variant, field, value)
 
-        variant_id = await self._flush_commit_and_get_id(variant)
+        variant_id = await self._flush_commit_and_get_id(
+            variant,
+            audit_callback=lambda updated_variant: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="variant.updated",
+                entity_type="product_variant",
+                entity_id=updated_variant.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(updated_variant, VARIANT_AUDIT_FIELDS),
+                metadata={"product_id": updated_variant.product_id},
+            ),
+        )
         updated_variant = await self.variants_repository.get_by_id(variant_id)
         if updated_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
         return updated_variant
 
-    async def deactivate_product_variant(self, variant_id: int) -> ProductVariant:
+    async def deactivate_product_variant(
+        self,
+        variant_id: int,
+        actor_user_id: int | None = None,
+    ) -> ProductVariant:
         variant = await self.get_product_variant(variant_id)
+        before_data = self.audit_service.snapshot(variant, VARIANT_AUDIT_FIELDS)
         variant.is_active = False
-        variant_id = await self._flush_commit_and_get_id(variant)
+        variant_id = await self._flush_commit_and_get_id(
+            variant,
+            audit_callback=lambda deactivated_variant: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="variant.deactivated",
+                entity_type="product_variant",
+                entity_id=deactivated_variant.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(
+                    deactivated_variant,
+                    VARIANT_AUDIT_FIELDS,
+                ),
+                metadata={"product_id": deactivated_variant.product_id},
+            ),
+        )
         updated_variant = await self.variants_repository.get_by_id(variant_id)
         if updated_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
@@ -234,18 +360,38 @@ class ProductsService:
         self,
         product_id: int,
         product_status: ProductStatus,
+        *,
+        actor_user_id: int | None,
+        action: str,
     ) -> Product:
         product = await self.get_product(product_id)
+        before_data = self.audit_service.snapshot(product, PRODUCT_AUDIT_FIELDS)
         product.status = product_status
-        product_id = await self._flush_commit_and_get_id(product)
+        product_id = await self._flush_commit_and_get_id(
+            product,
+            audit_callback=lambda updated_product: self._record_audit(
+                actor_user_id=actor_user_id,
+                action=action,
+                entity_type="product",
+                entity_id=updated_product.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(updated_product, PRODUCT_AUDIT_FIELDS),
+            ),
+        )
         updated_product = await self.repository.get_by_id(product_id)
         if updated_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         return updated_product
 
-    async def _flush_commit_and_get_id(self, instance: Product | ProductVariant) -> int:
+    async def _flush_commit_and_get_id(
+        self,
+        instance: Product | ProductVariant,
+        audit_callback: Callable[[Product | ProductVariant], Awaitable[None]] | None = None,
+    ) -> int:
         try:
             await self.session.flush()
+            if audit_callback is not None:
+                await audit_callback(instance)
             instance_id = instance.id
             await self.session.commit()
             return instance_id
@@ -265,3 +411,42 @@ class ProductsService:
                 "Product slug or variant SKU already exists",
                 status.HTTP_409_CONFLICT,
             ) from exc
+
+    async def _record_audit(
+        self,
+        *,
+        actor_user_id: int | None,
+        action: str,
+        entity_type: str,
+        entity_id: int | None,
+        before_data: dict[str, object] | None,
+        after_data: dict[str, object] | None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        await self.audit_service.record_action(
+            actor_user_id=actor_user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            before_data=before_data,
+            after_data=after_data,
+            metadata=metadata,
+        )
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int | None,
+        product_id: int | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                product_id=product_id,
+            )
+        except Exception:
+            logger.warning("Failed to track product analytics event %s", event_name, exc_info=True)

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from fastapi import status
@@ -6,16 +7,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.db.models import Review, ReviewStatus
+from app.modules.analytics.service import AnalyticsTracker
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.reviews.repository import ReviewsRepository
 from app.modules.reviews.schemas import ReviewCreate, ReviewList, ReviewModerationUpdate, ReviewRead
+
+logger = logging.getLogger(__name__)
+REVIEW_AUDIT_FIELDS = ("status", "moderated_at", "moderated_by_id")
 
 
 class ReviewsService:
     """Review creation, public listing, and moderation."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        analytics_tracker: AnalyticsTracker | None = None,
+        audit_service: AuditService | None = None,
+    ) -> None:
         self.session = session
         self.repository = ReviewsRepository(session)
+        self.analytics_tracker = analytics_tracker
+        self.audit_service = audit_service or NoopAuditService()
 
     async def create_product_review(
         self,
@@ -58,6 +71,13 @@ class ReviewsService:
             await self.session.rollback()
             raise AppError("Product already reviewed", status.HTTP_409_CONFLICT) from exc
 
+        await self._track_event(
+            "review.created",
+            user_id=user_id,
+            product_id=product_id,
+            order_id=order_id,
+            metadata={"review_id": review.id, "rating": review.rating},
+        )
         return ReviewRead.model_validate(review)
 
     async def list_approved_product_reviews(self, product_id: int) -> ReviewList:
@@ -105,11 +125,25 @@ class ReviewsService:
         if review is None:
             raise AppError("Review not found", status.HTTP_404_NOT_FOUND)
 
+        before_data = self.audit_service.snapshot(review, REVIEW_AUDIT_FIELDS)
         review.status = payload.status
         review.moderated_at = datetime.now(UTC)
         review.moderated_by_id = moderator_id
 
         try:
+            await self.audit_service.record_action(
+                actor_user_id=moderator_id,
+                action=(
+                    "review.approved"
+                    if payload.status == ReviewStatus.APPROVED
+                    else "review.rejected"
+                ),
+                entity_type="review",
+                entity_id=review.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(review, REVIEW_AUDIT_FIELDS),
+                metadata={"product_id": review.product_id, "user_id": review.user_id},
+            )
             await self.session.commit()
             await self.session.refresh(review)
         except IntegrityError as exc:
@@ -117,3 +151,25 @@ class ReviewsService:
             raise AppError("Review moderation failed", status.HTTP_409_CONFLICT) from exc
 
         return ReviewRead.model_validate(review)
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int,
+        product_id: int,
+        order_id: int | None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                product_id=product_id,
+                order_id=order_id,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to track review analytics event %s", event_name, exc_info=True)

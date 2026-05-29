@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import OrderStatus, User, UserRole
+from app.modules.analytics.service import IsolatedAnalyticsTracker
+from app.modules.audit.service import AuditService
 from app.modules.orders.schemas import (
     OrderCheckoutCreate,
     OrderList,
@@ -17,7 +19,11 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 def get_orders_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> OrdersService:
-    return OrdersService(session)
+    return OrdersService(
+        session,
+        analytics_tracker=IsolatedAnalyticsTracker(),
+        audit_service=AuditService(session),
+    )
 
 
 @router.post("/checkout", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
@@ -71,10 +77,10 @@ async def get_order(
 async def update_order_status(
     order_id: int,
     payload: OrderStatusUpdate,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[OrdersService, Depends(get_orders_service)],
 ) -> OrderRead:
-    return await service.update_order_status(order_id, payload)
+    return await service.update_order_status(order_id, payload, actor_user_id=current_user.id)
 
 
 @router.get("/{order_id}", response_model=OrderRead)

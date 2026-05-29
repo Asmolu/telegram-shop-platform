@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from decimal import Decimal
 from secrets import token_hex
@@ -24,10 +25,14 @@ from app.events.payloads import (
     order_status_changed_payload,
     promo_used_payload,
 )
+from app.modules.analytics.service import AnalyticsTracker
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
+
+logger = logging.getLogger(__name__)
 
 
 class OrderEventPublisher(Protocol):
@@ -53,11 +58,15 @@ class OrdersService:
         session: AsyncSession,
         event_publisher: OrderEventPublisher | None = None,
         promo_codes_service: PromoCodesService | None = None,
+        analytics_tracker: AnalyticsTracker | None = None,
+        audit_service: AuditService | None = None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
         self.event_publisher = event_publisher or InternalOrderEventPublisher(session)
         self.promo_codes_service = promo_codes_service or PromoCodesService(session)
+        self.analytics_tracker = analytics_tracker
+        self.audit_service = audit_service or NoopAuditService()
 
     async def checkout_current_user_cart(
         self,
@@ -65,6 +74,7 @@ class OrdersService:
         payload: OrderCheckoutCreate,
     ) -> OrderRead:
         post_commit_events: list[tuple[str, dict[str, object]]] = []
+        post_commit_analytics: list[tuple[str, dict[str, object]]] = []
         try:
             cart = await self.repository.get_cart_for_checkout(user_id)
             self._validate_cart_not_empty(cart)
@@ -123,8 +133,40 @@ class OrdersService:
                 raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
             response = OrderRead.model_validate(created_order)
             post_commit_events.append((ORDER_CREATED, order_created_payload(created_order)))
+            post_commit_analytics.append(
+                (
+                    "checkout.started",
+                    {
+                        "user_id": user_id,
+                        "order_id": created_order.id,
+                        "promo_code_id": created_order.promo_code_id,
+                    },
+                )
+            )
+            post_commit_analytics.append(
+                (
+                    "order.created",
+                    {
+                        "user_id": user_id,
+                        "order_id": created_order.id,
+                        "promo_code_id": created_order.promo_code_id,
+                        "total_amount": str(created_order.total_amount),
+                    },
+                )
+            )
             if created_order.promo_code_id is not None:
                 post_commit_events.append((PROMO_USED, promo_used_payload(created_order)))
+                post_commit_analytics.append(
+                    (
+                        "promo.used",
+                        {
+                            "user_id": user_id,
+                            "order_id": created_order.id,
+                            "promo_code_id": created_order.promo_code_id,
+                            "promo_code": created_order.promo_code_code,
+                        },
+                    )
+                )
             await self.session.commit()
         except AppError:
             await self.session.rollback()
@@ -138,6 +180,14 @@ class OrdersService:
 
         for event_name, event_payload in post_commit_events:
             await self.event_publisher.emit(event_name, event_payload)
+        for event_name, event_payload in post_commit_analytics:
+            await self._track_event(
+                event_name,
+                user_id=int(event_payload["user_id"]),
+                order_id=int(event_payload["order_id"]),
+                promo_code_id=event_payload.get("promo_code_id"),
+                metadata=event_payload,
+            )
         return response
 
     async def list_current_user_orders(
@@ -184,13 +234,24 @@ class OrdersService:
         self,
         order_id: int,
         payload: OrderStatusUpdate,
+        actor_user_id: int | None = None,
     ) -> OrderRead:
         order = await self.repository.get_by_id(order_id)
         if order is None:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
 
         previous_status = order.status
+        before_data = self.audit_service.snapshot(order, ("status",))
         order.status = payload.status
+        if previous_status != order.status:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="order.status_changed",
+                entity_type="order",
+                entity_id=order.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(order, ("status",)),
+            )
         try:
             await self.session.commit()
         except IntegrityError as exc:
@@ -207,6 +268,28 @@ class OrdersService:
                 await self.event_publisher.emit(ORDER_SHIPPED, order_shipped_payload(order))
 
         return response
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int,
+        order_id: int,
+        promo_code_id: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                order_id=order_id,
+                promo_code_id=promo_code_id if isinstance(promo_code_id, int) else None,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to track order analytics event %s", event_name, exc_info=True)
 
     def _validate_cart_not_empty(self, cart: Cart | None) -> None:
         if cart is None or not cart.items:

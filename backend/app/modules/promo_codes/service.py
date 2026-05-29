@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import CouponUsage, DiscountType, PromoCode
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.promo_codes.repository import PromoCodesRepository, calculate_cart_subtotal
 from app.modules.promo_codes.schemas import (
     PromoCodeCreate,
@@ -19,6 +20,16 @@ from app.modules.promo_codes.schemas import (
 )
 
 MONEY_QUANT = Decimal("0.01")
+PROMO_AUDIT_FIELDS = (
+    "code",
+    "discount_type",
+    "discount_value",
+    "is_active",
+    "starts_at",
+    "ends_at",
+    "usage_limit",
+    "per_user_limit",
+)
 
 
 @dataclass(frozen=True)
@@ -32,15 +43,30 @@ class PromoCodeCalculation:
 class PromoCodesService:
     """Promo code management and validation business logic."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, audit_service: AuditService | None = None) -> None:
         self.session = session
         self.repository = PromoCodesRepository(session)
+        self.audit_service = audit_service or NoopAuditService()
 
-    async def create_promo_code(self, payload: PromoCodeCreate) -> PromoCodeRead:
+    async def create_promo_code(
+        self,
+        payload: PromoCodeCreate,
+        actor_user_id: int | None = None,
+    ) -> PromoCodeRead:
         self._validate_discount_value(payload.discount_type, payload.discount_value)
         promo_code = PromoCode(**payload.model_dump())
         self.repository.add(promo_code)
         try:
+            if promo_code.id is None:
+                await self.session.flush()
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="promo.created",
+                entity_type="promo_code",
+                entity_id=promo_code.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(promo_code, PROMO_AUDIT_FIELDS),
+            )
             await self.session.commit()
             await self.session.refresh(promo_code)
         except IntegrityError as exc:
@@ -64,8 +90,10 @@ class PromoCodesService:
         self,
         promo_code_id: int,
         payload: PromoCodeUpdate,
+        actor_user_id: int | None = None,
     ) -> PromoCodeRead:
         promo_code = await self._get_existing_promo_code(promo_code_id)
+        before_data = self.audit_service.snapshot(promo_code, PROMO_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True)
 
         discount_type = data.get("discount_type", promo_code.discount_type)
@@ -80,6 +108,14 @@ class PromoCodesService:
             setattr(promo_code, field, value)
 
         try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="promo.updated",
+                entity_type="promo_code",
+                entity_id=promo_code.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(promo_code, PROMO_AUDIT_FIELDS),
+            )
             await self.session.commit()
             await self.session.refresh(promo_code)
         except IntegrityError as exc:
@@ -88,10 +124,23 @@ class PromoCodesService:
 
         return PromoCodeRead.model_validate(promo_code)
 
-    async def deactivate_promo_code(self, promo_code_id: int) -> None:
+    async def deactivate_promo_code(
+        self,
+        promo_code_id: int,
+        actor_user_id: int | None = None,
+    ) -> None:
         promo_code = await self._get_existing_promo_code(promo_code_id)
+        before_data = self.audit_service.snapshot(promo_code, PROMO_AUDIT_FIELDS)
         promo_code.is_active = False
         try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="promo.deactivated",
+                entity_type="promo_code",
+                entity_id=promo_code.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(promo_code, PROMO_AUDIT_FIELDS),
+            )
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()

@@ -99,6 +99,20 @@ http://localhost:8000/docs
 http://localhost:8000/api/v1/openapi.json
 ```
 
+## Backend observability API
+
+Sprint 11 adds backend-only observability modules:
+
+- `backend/app/modules/analytics/` records user behavior events and exposes seller/admin reporting.
+- `backend/app/modules/audit/` records seller/admin actions on critical entities.
+
+Seller/admin endpoints are available under the canonical API prefix:
+
+- `GET /api/v1/analytics/events`
+- `GET /api/v1/analytics/summary`
+- `GET /api/v1/audit-logs`
+- `GET /api/v1/audit-logs/{log_id}`
+
 ## Local backend without Docker
 
 ```bash

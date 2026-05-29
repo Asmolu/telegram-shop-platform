@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import ReviewStatus, User, UserRole
+from app.modules.analytics.service import IsolatedAnalyticsTracker
+from app.modules.audit.service import AuditService
 from app.modules.reviews.schemas import (
     ReviewCreate,
     ReviewList,
@@ -20,7 +22,11 @@ product_reviews_router = APIRouter(prefix="/products", tags=["reviews"])
 def get_reviews_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ReviewsService:
-    return ReviewsService(session)
+    return ReviewsService(
+        session,
+        analytics_tracker=IsolatedAnalyticsTracker(),
+        audit_service=AuditService(session),
+    )
 
 
 @product_reviews_router.post(

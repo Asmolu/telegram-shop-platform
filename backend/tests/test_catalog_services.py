@@ -44,6 +44,25 @@ class DummySession:
         self.deleted = True
 
 
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
+class FakeAuditService:
+    def __init__(self) -> None:
+        self.logs: list[dict[str, object]] = []
+
+    async def record_action(self, **payload: object) -> None:
+        self.logs.append(payload)
+
+    def snapshot(self, instance: object, fields: tuple[str, ...]) -> dict[str, object]:
+        return {field: getattr(instance, field) for field in fields}
+
+
 @pytest.mark.asyncio
 async def test_category_service_crud_flow() -> None:
     category = _category()
@@ -153,6 +172,25 @@ async def test_public_product_list_loads_only_active_variants() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_product_detail_tracks_product_view() -> None:
+    tracker = FakeAnalyticsTracker()
+    service = ProductsService(DummySession(), analytics_tracker=tracker)
+    service.repository.get_active_by_id = AsyncMock(
+        return_value=_product(status=ProductStatus.ACTIVE)
+    )
+
+    product = await service.get_public_product(1, user_id=None)
+
+    assert product.id == 1
+    assert tracker.events == [
+        (
+            "product.viewed",
+            {"user_id": None, "product_id": 1},
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_product_service_rejects_multiple_primary_images() -> None:
     service = ProductsService(DummySession())
     service.categories_repository.get_by_id = AsyncMock(return_value=None)
@@ -197,6 +235,25 @@ async def test_product_variant_service_crud_flow() -> None:
     assert updated.stock_quantity == 10
     assert updated.available_quantity == 8
     service.variants_repository.delete.assert_awaited_once_with(variant)
+
+
+@pytest.mark.asyncio
+async def test_product_update_records_audit_log() -> None:
+    audit_service = FakeAuditService()
+    product = _product(status=ProductStatus.DRAFT)
+    service = ProductsService(DummySession(), audit_service=audit_service)
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    await service.update_product(
+        1,
+        ProductUpdate(status=ProductStatus.ACTIVE),
+        actor_user_id=2,
+    )
+
+    assert audit_service.logs[0]["actor_user_id"] == 2
+    assert audit_service.logs[0]["action"] == "product.updated"
+    assert audit_service.logs[0]["entity_type"] == "product"
+    assert audit_service.logs[0]["entity_id"] == 1
 
 
 @pytest.mark.asyncio

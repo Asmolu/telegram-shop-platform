@@ -30,6 +30,25 @@ class DummySession:
         return None
 
 
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
+class FakeAuditService:
+    def __init__(self) -> None:
+        self.logs: list[dict[str, object]] = []
+
+    async def record_action(self, **payload: object) -> None:
+        self.logs.append(payload)
+
+    def snapshot(self, instance: object, fields: tuple[str, ...]) -> dict[str, object]:
+        return {field: getattr(instance, field) for field in fields}
+
+
 class FakeReviewsRepository:
     def __init__(self) -> None:
         self.product_ids = {1}
@@ -227,6 +246,24 @@ async def test_seller_admin_can_reject_review() -> None:
 
 
 @pytest.mark.asyncio
+async def test_review_moderation_records_audit_log() -> None:
+    audit_service = FakeAuditService()
+    service, repository, _ = _reviews_service(audit_service=audit_service)
+    repository.reviews[1] = _review(1, status=ReviewStatus.PENDING)
+
+    await service.moderate_review(
+        review_id=1,
+        moderator_id=2,
+        payload=ReviewModerationUpdate(status=ReviewStatus.APPROVED),
+    )
+
+    assert audit_service.logs[0]["actor_user_id"] == 2
+    assert audit_service.logs[0]["action"] == "review.approved"
+    assert audit_service.logs[0]["entity_type"] == "review"
+    assert audit_service.logs[0]["entity_id"] == 1
+
+
+@pytest.mark.asyncio
 async def test_seller_admin_can_list_and_get_reviews_by_status() -> None:
     service, repository, _ = _reviews_service()
     repository.reviews[1] = _review(1, status=ReviewStatus.PENDING)
@@ -300,6 +337,31 @@ async def test_add_favorite() -> None:
     assert favorite.product_id == 1
     assert len(repository.favorites) == 1
     assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_create_review_tracks_review_created_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, repository, _ = _reviews_service(analytics_tracker=tracker)
+    repository.purchase_order_ids[(1, 1)] = 10
+
+    review = await service.create_product_review(
+        user_id=1,
+        product_id=1,
+        payload=ReviewCreate(rating=5, text="Great hoodie"),
+    )
+
+    assert tracker.events == [
+        (
+            "review.created",
+            {
+                "user_id": 1,
+                "product_id": 1,
+                "order_id": 10,
+                "metadata": {"review_id": review.id, "rating": 5},
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -413,9 +475,17 @@ def test_favorite_routes_scope_to_current_user() -> None:
     assert response.status_code == 200
 
 
-def _reviews_service() -> tuple[ReviewsService, FakeReviewsRepository, DummySession]:
+def _reviews_service(
+    *,
+    analytics_tracker: FakeAnalyticsTracker | None = None,
+    audit_service: FakeAuditService | None = None,
+) -> tuple[ReviewsService, FakeReviewsRepository, DummySession]:
     session = DummySession()
-    service = ReviewsService(session)
+    service = ReviewsService(
+        session,
+        analytics_tracker=analytics_tracker,
+        audit_service=audit_service,
+    )
     repository = FakeReviewsRepository()
     service.repository = repository
     return service, repository, session

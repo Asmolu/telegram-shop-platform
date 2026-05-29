@@ -7,16 +7,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import Banner, BannerTargetType
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.banners.repository import BannersRepository
 from app.modules.banners.schemas import BannerCreate, BannerList, BannerRead, BannerUpdate
+
+BANNER_AUDIT_FIELDS = (
+    "title",
+    "subtitle",
+    "file_path",
+    "target_type",
+    "target_id",
+    "external_url",
+    "position",
+    "is_active",
+    "starts_at",
+    "ends_at",
+)
 
 
 class BannersService:
     """Banner management endpoints."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, audit_service: AuditService | None = None) -> None:
         self.session = session
         self.repository = BannersRepository(session)
+        self.audit_service = audit_service or NoopAuditService()
 
     async def list_public_banners(self, *, limit: int, offset: int) -> BannerList:
         items, total = await self.repository.list(
@@ -40,7 +55,11 @@ class BannersService:
         banner = await self._get_existing_banner(banner_id)
         return BannerRead.model_validate(banner)
 
-    async def create_banner(self, payload: BannerCreate) -> BannerRead:
+    async def create_banner(
+        self,
+        payload: BannerCreate,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
         banner = Banner(
             title=payload.title,
             subtitle=payload.subtitle,
@@ -59,6 +78,16 @@ class BannersService:
         )
         self.repository.add(banner)
         try:
+            if banner.id is None:
+                await self.session.flush()
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.created",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
             await self.session.commit()
             await self.session.refresh(banner)
         except IntegrityError as exc:
@@ -67,8 +96,14 @@ class BannersService:
 
         return BannerRead.model_validate(banner)
 
-    async def update_banner(self, banner_id: int, payload: BannerUpdate) -> BannerRead:
+    async def update_banner(
+        self,
+        banner_id: int,
+        payload: BannerUpdate,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
         banner = await self._get_existing_banner(banner_id)
+        before_data = self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True)
 
         target_type = data.get("target_type", banner.target_type)
@@ -95,6 +130,14 @@ class BannersService:
             setattr(banner, field, value)
 
         try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.updated",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
             await self.session.commit()
             await self.session.refresh(banner)
         except IntegrityError as exc:
@@ -103,8 +146,14 @@ class BannersService:
 
         return BannerRead.model_validate(banner)
 
-    async def set_banner_active(self, banner_id: int, is_active: bool) -> BannerRead:
+    async def set_banner_active(
+        self,
+        banner_id: int,
+        is_active: bool,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
         banner = await self._get_existing_banner(banner_id)
+        before_data = self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS)
         if is_active:
             self._validate_banner_state(
                 target_type=banner.target_type,
@@ -116,6 +165,14 @@ class BannersService:
             )
         banner.is_active = is_active
         try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.updated" if is_active else "banner.deactivated",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
             await self.session.commit()
             await self.session.refresh(banner)
         except IntegrityError as exc:

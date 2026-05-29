@@ -208,3 +208,21 @@ def test_sprint_10_notification_migration_adds_status_and_channel_enums() -> Non
     assert "payload" in content
     assert "error_message" in content
     assert "sent_at" in content
+
+
+def test_sprint_11_migration_adds_analytics_and_audit_tables() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260529_0011_add_analytics_and_audit.py"
+    )
+    content = migration_path.read_text()
+
+    assert "analytics_events" in content
+    assert "audit_logs" in content
+    assert "event_name" in content
+    assert "actor_user_id" in content
+    assert "before_data" in content
+    assert "after_data" in content
+    assert "metadata" in content

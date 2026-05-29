@@ -26,6 +26,14 @@ class DummySession:
         return None
 
 
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
 class FakeCartRepository:
     def __init__(self) -> None:
         self.carts: dict[int, Cart] = {}
@@ -116,6 +124,29 @@ async def test_add_item() -> None:
     assert cart.items[0].quantity == 2
     assert cart.items[0].subtotal == Decimal("119.80")
     assert cart.total == Decimal("119.80")
+
+
+@pytest.mark.asyncio
+async def test_add_item_tracks_cart_item_added_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, _ = _cart_service(analytics_tracker=tracker)
+
+    await service.add_item(1, CartItemCreate(product_id=1, product_variant_id=1, quantity=2))
+
+    assert tracker.events == [
+        (
+            "cart.item_added",
+            {
+                "user_id": 1,
+                "product_id": 1,
+                "metadata": {
+                    "product_variant_id": 1,
+                    "quantity": 2,
+                    "cart_id": 1,
+                },
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -232,8 +263,9 @@ def _cart_service(
     variant_is_active: bool = True,
     stock_quantity: int = 5,
     reserved_quantity: int = 0,
+    analytics_tracker: FakeAnalyticsTracker | None = None,
 ) -> tuple[CartService, FakeCartRepository]:
-    service = CartService(DummySession())
+    service = CartService(DummySession(), analytics_tracker=analytics_tracker)
     repository = FakeCartRepository()
     repository.products[1] = _product(status=product_status)
     repository.variants[1] = _variant(

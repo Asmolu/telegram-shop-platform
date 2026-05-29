@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from fastapi import status
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.db.models import Cart, CartItem, Product, ProductStatus, ProductVariant
+from app.modules.analytics.service import AnalyticsTracker
 from app.modules.cart.repository import CartRepository
 from app.modules.cart.schemas import (
     CartItemCreate,
@@ -17,11 +19,18 @@ from app.modules.cart.schemas import (
 )
 from app.modules.products.inventory import calculate_available_quantity
 
+logger = logging.getLogger(__name__)
+
 
 class CartService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        analytics_tracker: AnalyticsTracker | None = None,
+    ) -> None:
         self.session = session
         self.repository = CartRepository(session)
+        self.analytics_tracker = analytics_tracker
 
     async def get_current_user_cart(self, user_id: int) -> CartRead:
         cart = await self._get_or_create_cart(user_id)
@@ -56,7 +65,18 @@ class CartService:
         else:
             existing_item.quantity = quantity
 
-        return await self._commit_and_reload(user_id)
+        cart_response = await self._commit_and_reload(user_id)
+        await self._track_event(
+            "cart.item_added",
+            user_id=user_id,
+            product_id=product.id,
+            metadata={
+                "product_variant_id": variant.id,
+                "quantity": payload.quantity,
+                "cart_id": cart.id,
+            },
+        )
+        return cart_response
 
     async def update_item_quantity(
         self,
@@ -184,3 +204,23 @@ class CartService:
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int,
+        product_id: int | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                product_id=product_id,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to track cart analytics event %s", event_name, exc_info=True)

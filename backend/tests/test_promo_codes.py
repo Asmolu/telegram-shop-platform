@@ -307,7 +307,7 @@ def test_promo_management_allows_seller() -> None:
     app = create_app()
 
     class FakePromoCodesService:
-        async def create_promo_code(self, _: PromoCodeCreate) -> dict[str, object]:
+        async def create_promo_code(self, _: PromoCodeCreate, **__: object) -> dict[str, object]:
             return _promo_response()
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)

@@ -122,7 +122,7 @@ def test_banner_management_allows_seller() -> None:
     app = create_app()
 
     class FakeBannersService:
-        async def create_banner(self, _: BannerCreate) -> dict[str, object]:
+        async def create_banner(self, _: BannerCreate, **__: object) -> dict[str, object]:
             return _banner_response()
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)

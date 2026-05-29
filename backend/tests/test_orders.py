@@ -63,6 +63,25 @@ class FakeOrderEventPublisher:
             self.commit_states.append(self.session.committed)
 
 
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
+class FakeAuditService:
+    def __init__(self) -> None:
+        self.logs: list[dict[str, object]] = []
+
+    async def record_action(self, **payload: object) -> None:
+        self.logs.append(payload)
+
+    def snapshot(self, instance: object, fields: tuple[str, ...]) -> dict[str, object]:
+        return {field: getattr(instance, field) for field in fields}
+
+
 class FakePromoCodesService:
     def __init__(
         self,
@@ -282,6 +301,62 @@ async def test_checkout_with_valid_promo_code_creates_order_and_coupon_usage() -
 
 
 @pytest.mark.asyncio
+async def test_checkout_tracks_order_created_analytics_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, _, _, _ = _orders_service(analytics_tracker=tracker)
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert "checkout.started" in [event_name for event_name, _ in tracker.events]
+    assert (
+        "order.created",
+        {
+            "user_id": 1,
+            "order_id": order.id,
+            "promo_code_id": None,
+            "metadata": {
+                "user_id": 1,
+                "order_id": order.id,
+                "promo_code_id": None,
+                "total_amount": "119.80",
+            },
+        },
+    ) in tracker.events
+
+
+@pytest.mark.asyncio
+async def test_checkout_with_promo_tracks_promo_used_analytics_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, _, _, _ = _orders_service(
+        promo_codes_service=FakePromoCodesService(discount_amount=Decimal("20.00")),
+        analytics_tracker=tracker,
+    )
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate(
+            **_checkout_payload_json(),
+            promo_code="save10",
+        ),
+    )
+
+    assert (
+        "promo.used",
+        {
+            "user_id": 1,
+            "order_id": order.id,
+            "promo_code_id": 7,
+            "metadata": {
+                "user_id": 1,
+                "order_id": order.id,
+                "promo_code_id": 7,
+                "promo_code": "SAVE10",
+            },
+        },
+    ) in tracker.events
+
+
+@pytest.mark.asyncio
 async def test_telegram_send_failure_does_not_rollback_successful_checkout() -> None:
     service, _, session, _ = _orders_service()
     notifications_service = NotificationsService(
@@ -461,6 +536,24 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_order_status_update_records_audit_log() -> None:
+    audit_service = FakeAuditService()
+    service, repository, _, _ = _orders_service(audit_service=audit_service)
+    repository.orders[10] = _order(order_id=10, user_id=1)
+
+    await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.PROCESSING),
+        actor_user_id=2,
+    )
+
+    assert audit_service.logs[0]["actor_user_id"] == 2
+    assert audit_service.logs[0]["action"] == "order.status_changed"
+    assert audit_service.logs[0]["entity_type"] == "order"
+    assert audit_service.logs[0]["entity_id"] == 10
+
+
 def test_orders_require_authentication() -> None:
     with TestClient(create_app()) as client:
         list_response = client.get("/api/v1/orders")
@@ -487,7 +580,12 @@ def test_order_admin_routes_allow_seller_to_update_status() -> None:
     app = create_app()
 
     class FakeOrdersService:
-        async def update_order_status(self, order_id: int, payload: OrderStatusUpdate) -> dict:
+        async def update_order_status(
+            self,
+            order_id: int,
+            payload: OrderStatusUpdate,
+            **_: object,
+        ) -> dict:
             del order_id, payload
             return _order_response(status_value="PROCESSING")
 
@@ -513,6 +611,8 @@ def _orders_service(
     stock_quantity: int = 5,
     cart_items: list[CartItem] | None = None,
     promo_codes_service: FakePromoCodesService | None = None,
+    analytics_tracker: FakeAnalyticsTracker | None = None,
+    audit_service: FakeAuditService | None = None,
 ) -> tuple[OrdersService, FakeOrdersRepository, DummySession, FakeOrderEventPublisher]:
     session = DummySession()
     events = FakeOrderEventPublisher(session)
@@ -520,6 +620,8 @@ def _orders_service(
         session,
         event_publisher=events,
         promo_codes_service=promo_codes_service,
+        analytics_tracker=analytics_tracker,
+        audit_service=audit_service,
     )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(

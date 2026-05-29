@@ -3,9 +3,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.deps import get_db_session, require_roles
+from app.common.deps import get_db_session, get_optional_current_user, require_roles
 from app.common.pagination import PaginationParams
 from app.db.models import ProductStatus, User, UserRole
+from app.modules.analytics.service import IsolatedAnalyticsTracker
+from app.modules.audit.service import AuditService
 from app.modules.products.schemas import (
     ProductCreate,
     ProductList,
@@ -25,7 +27,11 @@ router = APIRouter(prefix="/products", tags=["products"])
 def get_products_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ProductsService:
-    return ProductsService(session)
+    return ProductsService(
+        session,
+        analytics_tracker=IsolatedAnalyticsTracker(),
+        audit_service=AuditService(session),
+    )
 
 
 @router.get("", response_model=ProductList)
@@ -102,9 +108,9 @@ async def create_product_variant(
     product_id: int,
     payload: ProductVariantCreate,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.create_product_variant(product_id, payload)
+    return await service.create_product_variant(product_id, payload, actor_user_id=current_user.id)
 
 
 @router.patch("/variants/{variant_id}", response_model=ProductVariantRead)
@@ -112,18 +118,18 @@ async def update_product_variant(
     variant_id: int,
     payload: ProductVariantUpdate,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.update_product_variant(variant_id, payload)
+    return await service.update_product_variant(variant_id, payload, actor_user_id=current_user.id)
 
 
 @router.patch("/variants/{variant_id}/deactivate", response_model=ProductVariantRead)
 async def deactivate_product_variant(
     variant_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.deactivate_product_variant(variant_id)
+    return await service.deactivate_product_variant(variant_id, actor_user_id=current_user.id)
 
 
 @router.delete("/variants/{variant_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -141,35 +147,43 @@ async def update_product_status(
     product_id: int,
     payload: ProductStatusUpdate,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.update_product_status(product_id, payload)
+    return await service.update_product_status(
+        product_id,
+        payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.patch("/{product_id}/archive", response_model=ProductRead)
 async def archive_product(
     product_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.archive_product(product_id)
+    return await service.archive_product(product_id, actor_user_id=current_user.id)
 
 
 @router.get("/{product_id}", response_model=ProductRead)
 async def get_public_product(
     product_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> object:
-    return await service.get_public_product(product_id)
+    return await service.get_public_product(
+        product_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
 
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 async def create_product(
     payload: ProductCreate,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.create_product(payload)
+    return await service.create_product(payload, actor_user_id=current_user.id)
 
 
 @router.patch("/{product_id}", response_model=ProductRead)
@@ -177,9 +191,9 @@ async def update_product(
     product_id: int,
     payload: ProductUpdate,
     service: Annotated[ProductsService, Depends(get_products_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.update_product(product_id, payload)
+    return await service.update_product(product_id, payload, actor_user_id=current_user.id)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
