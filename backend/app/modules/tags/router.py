@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService
 from app.common.deps import get_db_session, require_roles
 from app.db.models import User, UserRole
 from app.modules.tags.schemas import TagCreate, TagRead, TagUpdate
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/tags", tags=["tags"])
 
 
 def get_tags_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> TagsService:
-    return TagsService(session)
+    return TagsService(session, cache=CacheService())
 
 
 @router.get("", response_model=list[TagRead])

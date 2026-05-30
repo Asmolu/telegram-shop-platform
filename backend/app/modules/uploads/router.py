@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService
 from app.common.deps import get_db_session, require_roles
 from app.db.models import User, UserRole
 from app.modules.uploads.schemas import BannerImageUploadRead, ProductImageUploadRead
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/uploads", tags=["uploads"])
 def get_uploads_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> UploadsService:
-    return UploadsService(session)
+    return UploadsService(session, cache=CacheService())
 
 
 @router.get("/status")

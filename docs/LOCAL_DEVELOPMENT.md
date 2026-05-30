@@ -81,6 +81,21 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+Sprint 14 adds Redis-backed caching and rate limiting. Local development can keep the defaults from
+`backend/.env.example`; if Redis is stopped, public catalog reads still work and rate limiting uses
+the isolated in-memory fallback.
+
+Useful local toggles:
+
+```text
+CACHE_ENABLED=true
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REDIS_ENABLED=true
+RATE_LIMIT_IN_MEMORY_FALLBACK_ENABLED=true
+LOG_FORMAT=json
+ERROR_MONITORING_ENABLED=false
+```
+
 ## Mini App
 
 ```bash
@@ -115,3 +130,11 @@ http://localhost:5174
 http://localhost:8000/docs
 http://localhost:8000/api/v1/openapi.json
 ```
+
+## Production profile docs
+
+Production/staging deployment, backups, and security review are documented in:
+
+- `docs/PRODUCTION_DEPLOYMENT.md`
+- `docs/BACKUP_AND_RESTORE.md`
+- `docs/SECURITY_REVIEW.md`

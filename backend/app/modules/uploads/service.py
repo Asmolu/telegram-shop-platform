@@ -4,6 +4,7 @@ from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService, banner_cache_patterns, product_cache_patterns
 from app.core.errors import AppError
 from app.db.models import Banner, ProductImage
 from app.modules.products.repository import ProductsRepository
@@ -20,9 +21,11 @@ class UploadsService:
         self,
         session: AsyncSession,
         storage: LocalStorageService | None = None,
+        cache: CacheService | None = None,
     ) -> None:
         self.session = session
         self.storage = storage or LocalStorageService()
+        self.cache = cache
         self.repository = UploadsRepository(session)
         self.products_repository = ProductsRepository(session)
 
@@ -69,6 +72,7 @@ class UploadsService:
             self.storage.delete(file_path)
             raise AppError("Could not persist product image", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_product_cache()
         return image
 
     async def upload_banner_image(
@@ -101,6 +105,7 @@ class UploadsService:
             self.storage.delete(file_path)
             raise AppError("Could not persist banner image", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_banner_cache()
         return banner
 
     async def _validate_and_read_image(self, file: UploadFile) -> "_ValidatedUpload":
@@ -126,6 +131,16 @@ class UploadsService:
             mime_type=mime_type,
             size_bytes=len(content),
         )
+
+    async def _invalidate_product_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*product_cache_patterns())
+
+    async def _invalidate_banner_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*banner_cache_patterns())
 
 
 class _ValidatedUpload:

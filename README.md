@@ -113,6 +113,24 @@ Seller/admin endpoints are available under the canonical API prefix:
 - `GET /api/v1/audit-logs`
 - `GET /api/v1/audit-logs/{log_id}`
 
+## Production hardening
+
+Sprint 14 adds MVP production readiness:
+
+- Redis caching for public catalog, taxonomy, active banners, and approved product reviews.
+- Configurable rate limiting for global API traffic plus stricter login, upload, checkout, promo validation, and review creation limits.
+- Structured JSON request logging with request IDs and duration.
+- Error monitoring placeholders through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`.
+- A production Docker Compose profile in `docker-compose.prod.yml`.
+- Backup and restore guidance for PostgreSQL and uploads.
+- Security review documentation and production env examples.
+
+Production/staging docs:
+
+- `docs/PRODUCTION_DEPLOYMENT.md`
+- `docs/BACKUP_AND_RESTORE.md`
+- `docs/SECURITY_REVIEW.md`
+
 ## Local backend without Docker
 
 ```bash

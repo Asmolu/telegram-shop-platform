@@ -5,6 +5,8 @@ from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService, public_product_reviews_key, review_cache_patterns
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import Review, ReviewStatus
 from app.modules.analytics.service import AnalyticsTracker
@@ -24,11 +26,13 @@ class ReviewsService:
         session: AsyncSession,
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
+        cache: CacheService | None = None,
     ) -> None:
         self.session = session
         self.repository = ReviewsRepository(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
+        self.cache = cache
 
     async def create_product_review(
         self,
@@ -81,10 +85,19 @@ class ReviewsService:
         return ReviewRead.model_validate(review)
 
     async def list_approved_product_reviews(self, product_id: int) -> ReviewList:
+        cache_key = public_product_reviews_key(product_id)
+        if self.cache is not None:
+            cached = await self.cache.get_model(cache_key, ReviewList)
+            if cached is not None:
+                return cached
+
         if not await self.repository.product_exists(product_id):
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         reviews = await self.repository.list_approved_for_product(product_id=product_id)
-        return ReviewList(items=[ReviewRead.model_validate(review) for review in reviews])
+        result = ReviewList(items=[ReviewRead.model_validate(review) for review in reviews])
+        if self.cache is not None:
+            await self.cache.set_model(cache_key, result, settings.cache_reviews_ttl_seconds)
+        return result
 
     async def list_current_user_reviews(self, user_id: int) -> ReviewList:
         reviews = await self.repository.list_for_user(user_id=user_id)
@@ -150,6 +163,7 @@ class ReviewsService:
             await self.session.rollback()
             raise AppError("Review moderation failed", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_public_cache(product_id=review.product_id)
         return ReviewRead.model_validate(review)
 
     async def _track_event(
@@ -173,3 +187,8 @@ class ReviewsService:
             )
         except Exception:
             logger.warning("Failed to track review analytics event %s", event_name, exc_info=True)
+
+    async def _invalidate_public_cache(self, *, product_id: int | None = None) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*review_cache_patterns(product_id))

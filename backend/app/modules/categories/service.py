@@ -1,20 +1,39 @@
 from fastapi import status
+from pydantic import TypeAdapter
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService, categories_list_key, taxonomy_cache_patterns
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import Category
 from app.modules.categories.repository import CategoriesRepository
-from app.modules.categories.schemas import CategoryCreate, CategoryUpdate
+from app.modules.categories.schemas import CategoryCreate, CategoryRead, CategoryUpdate
+
+_CATEGORIES_ADAPTER = TypeAdapter(list[CategoryRead])
 
 
 class CategoriesService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, cache: CacheService | None = None) -> None:
         self.session = session
         self.repository = CategoriesRepository(session)
+        self.cache = cache
 
-    async def list_categories(self) -> list[Category]:
-        return await self.repository.list()
+    async def list_categories(self) -> list[Category] | list[CategoryRead]:
+        if self.cache is not None:
+            cached = await self.cache.get_value(categories_list_key(), _CATEGORIES_ADAPTER)
+            if cached is not None:
+                return cached
+
+        categories = await self.repository.list()
+        if self.cache is not None:
+            await self.cache.set_value(
+                categories_list_key(),
+                [CategoryRead.model_validate(category) for category in categories],
+                _CATEGORIES_ADAPTER,
+                settings.cache_taxonomy_ttl_seconds,
+            )
+        return categories
 
     async def get_category(self, category_id: int) -> Category:
         category = await self.repository.get_by_id(category_id)
@@ -27,6 +46,7 @@ class CategoriesService:
         self.repository.add(category)
         await self._commit()
         await self.session.refresh(category)
+        await self._invalidate_cache()
         return category
 
     async def update_category(self, category_id: int, payload: CategoryUpdate) -> Category:
@@ -36,12 +56,14 @@ class CategoriesService:
 
         await self._commit()
         await self.session.refresh(category)
+        await self._invalidate_cache()
         return category
 
     async def delete_category(self, category_id: int) -> None:
         category = await self.get_category(category_id)
         await self.repository.delete(category)
         await self._commit()
+        await self._invalidate_cache()
 
     async def _commit(self) -> None:
         try:
@@ -49,3 +71,8 @@ class CategoriesService:
         except IntegrityError as exc:
             await self.session.rollback()
             raise AppError("Category slug already exists", status.HTTP_409_CONFLICT) from exc
+
+    async def _invalidate_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*taxonomy_cache_patterns())

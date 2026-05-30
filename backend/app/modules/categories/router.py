@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService
 from app.common.deps import get_db_session, require_roles
 from app.db.models import User, UserRole
 from app.modules.categories.schemas import CategoryCreate, CategoryRead, CategoryUpdate
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 def get_categories_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> CategoriesService:
-    return CategoriesService(session)
+    return CategoriesService(session, cache=CacheService())
 
 
 @router.get("", response_model=list[CategoryRead])

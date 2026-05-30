@@ -440,6 +440,15 @@ Seller Panel становится рабочим интерфейсом упра
 ## Result
 Система готова к MVP production deployment.
 
+## Sprint 14 delivery notes
+
+- Added Redis-backed cache helpers for public catalog, taxonomy, banners, and approved reviews with service-level invalidation.
+- Added configurable rate limiting, structured request logging, and error-monitoring placeholders.
+- Added a new Alembic migration for missing production indexes.
+- Added `docker-compose.prod.yml`, production env examples, and static frontend production containers.
+- Added production deployment, backup/restore, and security review documentation.
+- Documented remaining MVP limitations instead of changing existing API response shapes.
+
 ---
 
 # Development Rules

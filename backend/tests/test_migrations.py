@@ -226,3 +226,17 @@ def test_sprint_11_migration_adds_analytics_and_audit_tables() -> None:
     assert "before_data" in content
     assert "after_data" in content
     assert "metadata" in content
+
+
+def test_sprint_14_migration_adds_missing_production_indexes() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260530_0012_add_sprint14_indexes.py"
+    )
+    content = migration_path.read_text()
+
+    assert "CREATE INDEX IF NOT EXISTS ix_products_created_at" in content
+    assert "CREATE INDEX IF NOT EXISTS ix_orders_created_at" in content
+    assert "CREATE INDEX IF NOT EXISTS ix_notifications_created_at" in content

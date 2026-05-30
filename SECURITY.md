@@ -35,3 +35,13 @@ Create a private issue or contact the repository owner directly. Do not disclose
 - stock deduction race conditions
 - promo code abuse / replay
 - seller/admin RBAC boundaries
+
+## Sprint 14 hardening
+
+- Production/staging startup rejects the default development `JWT_SECRET_KEY`.
+- Production/staging startup rejects wildcard `CORS_ORIGINS`.
+- API rate limiting is configurable and applied to login, uploads, checkout, promo validation, review creation, and global API traffic.
+- Public catalog, taxonomy, banner, and approved review cache reads must fail open to PostgreSQL when Redis is unavailable.
+- Structured request logs include request metadata but never Authorization headers or env values.
+
+See `docs/SECURITY_REVIEW.md` for the current MVP security review and known limitations.

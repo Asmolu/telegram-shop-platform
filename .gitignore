@@ -16,6 +16,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!.env.*.example
 *.local
 *.secret
 secrets/
@@ -31,6 +32,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.compileall_cache/
 .coverage
 htmlcov/
 .coverage.*

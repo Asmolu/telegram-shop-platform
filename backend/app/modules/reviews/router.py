@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import ReviewStatus, User, UserRole
 from app.modules.analytics.service import IsolatedAnalyticsTracker
@@ -26,6 +27,7 @@ def get_reviews_service(
         session,
         analytics_tracker=IsolatedAnalyticsTracker(),
         audit_service=AuditService(session),
+        cache=CacheService(),
     )
 
 

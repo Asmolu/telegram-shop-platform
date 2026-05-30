@@ -687,3 +687,17 @@ MVP-цель:
 Telegram Shop Platform — это модульный монолит на Python/FastAPI, PostgreSQL, SQLAlchemy и Alembic.
 
 Архитектура сохраняет исходную доменную модель e-commerce проекта, но убирает зависимость от NestJS/Prisma. Backend становится Python-first, а frontend продолжает работать как React/Vite TypeScript UI через OpenAPI-контракт.
+---
+
+## 17. Sprint 14 production hardening baseline
+
+MVP production/staging readiness requires:
+
+- Redis-backed caching for hot public catalog endpoints with graceful PostgreSQL fallback.
+- Configurable rate limiting for global API traffic and stricter sensitive write endpoints.
+- Structured request logging with request IDs, status, path, method, and duration.
+- Error-monitoring configuration placeholders without requiring a third-party account for local development.
+- Production Docker Compose profile with persistent PostgreSQL, Redis, and uploads volumes.
+- Documented PostgreSQL and uploads backup/restore workflow.
+- Production settings that reject default JWT secrets and wildcard CORS origins.
+- Alembic migrations for new schema/index changes only; old migrations remain immutable.

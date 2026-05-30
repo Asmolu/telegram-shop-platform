@@ -11,11 +11,10 @@ export class ApiClientError extends Error {
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
-const FALLBACK_API_BASE_URL = 'http://localhost:8000/api/v1';
 const TOKEN_STORAGE_KEY = 'telegram_shop_mini_app_access_token';
 
 export function getApiBaseUrl() {
-  return API_BASE_URL || FALLBACK_API_BASE_URL;
+  return API_BASE_URL;
 }
 
 export function getApiOrigin() {

@@ -5,7 +5,14 @@ from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import (
+    CacheService,
+    product_cache_patterns,
+    public_product_detail_key,
+    public_products_list_key,
+)
 from app.common.pagination import PageMeta
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import Product, ProductImage, ProductStatus, ProductVariant, Tag
 from app.modules.analytics.service import AnalyticsTracker
@@ -17,6 +24,7 @@ from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
     ProductList,
+    ProductRead,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -52,6 +60,7 @@ class ProductsService:
         session: AsyncSession,
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
+        cache: CacheService | None = None,
     ) -> None:
         self.session = session
         self.repository = ProductsRepository(session)
@@ -60,6 +69,7 @@ class ProductsService:
         self.tags_repository = TagsRepository(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
+        self.cache = cache
 
     async def list_public_products(
         self,
@@ -74,6 +84,19 @@ class ProductsService:
         if status is not None and status != ProductStatus.ACTIVE:
             return ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
 
+        cache_key = public_products_list_key(
+            limit=limit,
+            offset=offset,
+            category_id=category_id,
+            tag_id=tag_id,
+            status=status,
+            search=search,
+        )
+        if self.cache is not None:
+            cached = await self.cache.get_model(cache_key, ProductList)
+            if cached is not None:
+                return cached
+
         items, total = await self.repository.list(
             limit=limit,
             offset=offset,
@@ -83,7 +106,14 @@ class ProductsService:
             search=search,
             active_variants_only=True,
         )
-        return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
+        result = ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
+        if self.cache is not None:
+            await self.cache.set_model(
+                cache_key,
+                result,
+                settings.cache_public_products_ttl_seconds,
+            )
+        return result
 
     async def list_products(
         self,
@@ -105,12 +135,30 @@ class ProductsService:
         )
         return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
 
-    async def get_public_product(self, product_id: int, user_id: int | None = None) -> Product:
+    async def get_public_product(
+        self,
+        product_id: int,
+        user_id: int | None = None,
+    ) -> Product | ProductRead:
+        cache_key = public_product_detail_key(product_id)
+        if self.cache is not None:
+            cached = await self.cache.get_model(cache_key, ProductRead)
+            if cached is not None:
+                await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
+                return cached
+
         product = await self.repository.get_active_by_id(product_id)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        result = ProductRead.model_validate(product)
+        if self.cache is not None:
+            await self.cache.set_model(
+                cache_key,
+                result,
+                settings.cache_public_product_detail_ttl_seconds,
+            )
         await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
-        return product
+        return result
 
     async def get_product(self, product_id: int) -> Product:
         product = await self.repository.get_by_id(product_id)
@@ -148,6 +196,7 @@ class ProductsService:
         created_product = await self.repository.get_by_id(product_id)
         if created_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=created_product.id)
         return created_product
 
     async def update_product(
@@ -187,6 +236,7 @@ class ProductsService:
         updated_product = await self.repository.get_by_id(product_id)
         if updated_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=updated_product.id)
         return updated_product
 
     async def update_product_status(
@@ -218,6 +268,7 @@ class ProductsService:
         product = await self.get_product(product_id)
         await self.repository.delete(product)
         await self._commit()
+        await self._invalidate_product_cache(product_id=product_id)
 
     async def list_public_product_variants(self, product_id: int) -> ProductVariantList:
         product = await self.repository.get_active_by_id(product_id)
@@ -257,6 +308,7 @@ class ProductsService:
         created_variant = await self.variants_repository.get_by_id(variant_id)
         if created_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=created_variant.product_id)
         return created_variant
 
     async def update_product_variant(
@@ -290,6 +342,7 @@ class ProductsService:
         updated_variant = await self.variants_repository.get_by_id(variant_id)
         if updated_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=updated_variant.product_id)
         return updated_variant
 
     async def deactivate_product_variant(
@@ -318,12 +371,15 @@ class ProductsService:
         updated_variant = await self.variants_repository.get_by_id(variant_id)
         if updated_variant is None:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=updated_variant.product_id)
         return updated_variant
 
     async def delete_product_variant(self, variant_id: int) -> None:
         variant = await self.get_product_variant(variant_id)
+        product_id = variant.product_id
         await self.variants_repository.delete(variant)
         await self._commit()
+        await self._invalidate_product_cache(product_id=product_id)
 
     async def get_product_variant(self, variant_id: int) -> ProductVariant:
         variant = await self.variants_repository.get_by_id(variant_id)
@@ -381,7 +437,15 @@ class ProductsService:
         updated_product = await self.repository.get_by_id(product_id)
         if updated_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=updated_product.id)
         return updated_product
+
+    async def _invalidate_product_cache(self, *, product_id: int | None = None) -> None:
+        if self.cache is None:
+            return
+        if product_id is not None:
+            await self.cache.delete(public_product_detail_key(product_id))
+        await self.cache.delete_patterns(*product_cache_patterns())
 
     async def _flush_commit_and_get_id(
         self,

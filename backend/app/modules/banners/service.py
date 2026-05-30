@@ -4,7 +4,9 @@ from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService, banner_cache_patterns, public_banners_list_key
 from app.common.pagination import PageMeta
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import Banner, BannerTargetType
 from app.modules.audit.service import AuditService, NoopAuditService
@@ -28,21 +30,36 @@ BANNER_AUDIT_FIELDS = (
 class BannersService:
     """Banner management endpoints."""
 
-    def __init__(self, session: AsyncSession, audit_service: AuditService | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        audit_service: AuditService | None = None,
+        cache: CacheService | None = None,
+    ) -> None:
         self.session = session
         self.repository = BannersRepository(session)
         self.audit_service = audit_service or NoopAuditService()
+        self.cache = cache
 
     async def list_public_banners(self, *, limit: int, offset: int) -> BannerList:
+        cache_key = public_banners_list_key(limit=limit, offset=offset)
+        if self.cache is not None:
+            cached = await self.cache.get_model(cache_key, BannerList)
+            if cached is not None:
+                return cached
+
         items, total = await self.repository.list(
             limit=limit,
             offset=offset,
             active_only=True,
         )
-        return BannerList(
+        result = BannerList(
             items=[BannerRead.model_validate(item) for item in items],
             meta=PageMeta(limit=limit, offset=offset, total=total),
         )
+        if self.cache is not None:
+            await self.cache.set_model(cache_key, result, settings.cache_banners_ttl_seconds)
+        return result
 
     async def list_banners(self, *, limit: int, offset: int) -> BannerList:
         items, total = await self.repository.list(limit=limit, offset=offset)
@@ -94,6 +111,7 @@ class BannersService:
             await self.session.rollback()
             raise AppError("Banner create failed", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_public_cache()
         return BannerRead.model_validate(banner)
 
     async def update_banner(
@@ -144,6 +162,7 @@ class BannersService:
             await self.session.rollback()
             raise AppError("Banner update failed", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_public_cache()
         return BannerRead.model_validate(banner)
 
     async def set_banner_active(
@@ -179,6 +198,7 @@ class BannersService:
             await self.session.rollback()
             raise AppError("Banner update failed", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_public_cache()
         return BannerRead.model_validate(banner)
 
     async def _get_existing_banner(self, banner_id: int) -> Banner:
@@ -211,3 +231,8 @@ class BannersService:
 
         if starts_at is not None and ends_at is not None and starts_at >= ends_at:
             raise AppError("starts_at must be before ends_at", status.HTTP_400_BAD_REQUEST)
+
+    async def _invalidate_public_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*banner_cache_patterns())

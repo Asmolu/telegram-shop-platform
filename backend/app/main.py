@@ -8,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
+from app.core.logging import configure_logging
+from app.core.monitoring import initialize_error_monitoring
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis import close_redis_client
+from app.core.request_logging import RequestLoggingMiddleware
 from app.db.session import dispose_database_engine
 from app.modules.uploads.storage import ensure_upload_directories
 
@@ -24,6 +28,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    configure_logging()
+    initialize_error_monitoring()
     ensure_upload_directories()
 
     app = FastAPI(
@@ -43,6 +49,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
