@@ -1,0 +1,91 @@
+import React from 'react';
+import type { Product } from '../api';
+import { Link } from '../router/RouterProvider';
+import { formatPrice } from '../utils/format';
+import { getProductBadge, getProductImageUrl } from '../utils/images';
+
+export function ProductCard({
+  product,
+  favorite = false,
+  onFavoriteToggle,
+  onAddToCart,
+}: {
+  product: Product;
+  favorite?: boolean;
+  onFavoriteToggle?: (product: Product) => void | Promise<void>;
+  onAddToCart?: (product: Product) => void | Promise<void>;
+}) {
+  const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
+  const imageUrl = getProductImageUrl(product);
+  const badge = getProductBadge(product);
+  const sizes = product.variants
+    .filter((variant) => variant.is_active && variant.available_quantity > 0)
+    .map((variant) => variant.size)
+    .filter((size, index, all) => all.indexOf(size) === index)
+    .slice(0, 4);
+  const firstTag = product.tags[0]?.name;
+
+  async function runAction(action: 'favorite' | 'cart', callback?: (product: Product) => void | Promise<void>) {
+    if (!callback) {
+      return;
+    }
+
+    setBusyAction(action);
+    try {
+      await callback(product);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  return (
+    <article className="product-card">
+      <Link className="product-card__media" to={`/product/${product.id}`}>
+        {imageUrl ? (
+          <img src={imageUrl} alt={product.name} loading="lazy" />
+        ) : (
+          <div className="image-fallback">
+            <span>{product.name.slice(0, 1).toUpperCase()}</span>
+          </div>
+        )}
+        {badge ? <span className={`product-badge product-badge--${badge.toLowerCase()}`}>{badge}</span> : null}
+      </Link>
+      <button
+        className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
+        type="button"
+        aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+        disabled={busyAction !== null}
+        onClick={() => void runAction('favorite', onFavoriteToggle)}
+      >
+        {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
+      </button>
+      <Link className="product-card__body" to={`/product/${product.id}`}>
+        <strong className="product-card__price">{formatPrice(product.base_price)}</strong>
+        <span className="product-card__title">{product.name}</span>
+        <span className="product-card__meta">
+          {product.is_available ? 'В наличии' : 'Нет в наличии'}
+          {firstTag ? ` · ${firstTag}` : ''}
+        </span>
+        {sizes.length > 0 ? (
+          <span className="size-row">
+            {sizes.map((size) => (
+              <span className="size-pill" key={size}>
+                {size}
+              </span>
+            ))}
+          </span>
+        ) : null}
+      </Link>
+      {onAddToCart ? (
+        <button
+          className="add-cart-button"
+          type="button"
+          disabled={busyAction !== null || !product.is_available}
+          onClick={() => void runAction('cart', onAddToCart)}
+        >
+          {busyAction === 'cart' ? '…' : '+'}
+        </button>
+      ) : null}
+    </article>
+  );
+}
