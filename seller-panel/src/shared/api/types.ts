@@ -31,6 +31,30 @@ export interface User {
   updated_at: string;
 }
 
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface SellerRegistrationStartResponse {
+  registration_id: number;
+  bot_start_link: string | null;
+  start_command: string;
+  expires_at: string;
+}
+
+export interface SellerTelegramStartResponse {
+  registration_id: number;
+  telegram_username: string | null;
+  verification_expires_at: string;
+}
+
+export interface SellerRegistrationResendCodeResponse {
+  registration_id: number;
+  verification_expires_at: string;
+}
+
 export interface Category {
   id: number;
   name: string;
@@ -269,4 +293,36 @@ export interface AnalyticsEvent {
   banner_id: number | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
+}
+
+export type NotificationChannel = 'telegram' | 'internal';
+export type NotificationStatus = 'pending' | 'sent' | 'failed';
+
+export interface Notification {
+  id: number;
+  user_id: number | null;
+  type: string;
+  title: string;
+  message: string;
+  payload: Record<string, unknown> | null;
+  channel: NotificationChannel;
+  status: NotificationStatus;
+  error_message: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SellerBotStatus {
+  configured: boolean;
+  seller_chat_configured: boolean;
+  ok: boolean;
+  bot: Record<string, unknown> | null;
+  error: string | null;
+}
+
+export interface SellerBotActionResponse {
+  notification_id: number;
+  status: NotificationStatus;
+  message: string;
 }

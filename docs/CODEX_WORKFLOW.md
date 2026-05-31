@@ -45,6 +45,7 @@ Before merging Codex-generated changes, check:
 - No NestJS/Prisma backend code was added.
 - New DB fields have Alembic migrations.
 - Business logic is not inside routers.
+- Seller Portal auth uses Bot 2 start-token verification and never exposes bot tokens.
 - Tests or smoke checks were added for important behavior.
 - README/SRS/Sprint Plan were updated if architecture changed.
 

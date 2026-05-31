@@ -25,7 +25,10 @@ Backend:
 - `JWT_SECRET_KEY`
 - `CORS_ORIGINS`
 - `TELEGRAM_WEBAPP_BOT_TOKEN`
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` if seller notifications are enabled
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` for Bot 2 seller verification,
+  seller notifications, and seller-chat broadcast
+- `TELEGRAM_SELLER_BOT_USERNAME` if the Seller Panel should show a direct `t.me`
+  start link during registration
 - cache and rate limit settings from `backend/.env.production.example`
 
 Frontend:
@@ -52,6 +55,12 @@ Run migrations:
 ```bash
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
+
+Seller Portal email/password auth requires migration
+`20260601_0013_add_seller_auth_tables.py`. Bot 2 must be connected by webhook
+or polling to the seller registration start-token service boundary; until then,
+`POST /api/v1/seller-auth/register/telegram-start` is the documented manual
+callback simulation endpoint.
 
 Smoke checks:
 

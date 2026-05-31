@@ -64,11 +64,15 @@ REDIS_URL=redis://localhost:6379/0
 TELEGRAM_WEBAPP_BOT_TOKEN=<your bot token>
 TELEGRAM_BOT_TOKEN=<seller notification bot token>
 TELEGRAM_SELLER_CHAT_ID=<seller group or chat id>
+TELEGRAM_SELLER_BOT_USERNAME=<seller bot username without token>
 JWT_SECRET_KEY=<local development secret>
 ```
 
-`TELEGRAM_WEBAPP_BOT_TOKEN` is for Mini App auth. Seller notifications are sent
-with `TELEGRAM_BOT_TOKEN` to `TELEGRAM_SELLER_CHAT_ID`.
+`TELEGRAM_WEBAPP_BOT_TOKEN` is for Mini App auth. Seller verification,
+notifications, and seller-chat broadcast use Bot 2 through `TELEGRAM_BOT_TOKEN`
+and `TELEGRAM_SELLER_CHAT_ID`; the bot token is never exposed to the frontend.
+`TELEGRAM_SELLER_BOT_USERNAME` only enables a direct `t.me` start link in the
+Seller Panel.
 
 3. Run backend:
 
@@ -123,6 +127,18 @@ Default URL:
 ```text
 http://localhost:5174
 ```
+
+Seller registration uses the Bot 2 start-token flow. The current backend MVP
+does not run a Telegram webhook or polling loop, so local/manual testing can
+simulate the bot receiving `/start seller_<token>` with:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/seller-auth/register/telegram-start \
+  -H "Content-Type: application/json" \
+  -d "{\"start_payload\":\"seller_<token>\",\"telegram_user_id\":123,\"telegram_chat_id\":123,\"telegram_username\":\"sellername\"}"
+```
+
+Production should wire Bot 2 webhook or polling to the same service boundary.
 
 ## API documentation
 

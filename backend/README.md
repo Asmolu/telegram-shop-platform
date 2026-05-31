@@ -109,6 +109,21 @@ Telegram login validates Mini App `initData` with `TELEGRAM_WEBAPP_BOT_TOKEN` or
 `TELEGRAM_BOT_TOKEN`, then returns a JWT access token. Set `JWT_SECRET_KEY` to a
 strong local secret before using authenticated endpoints.
 
+Seller Portal email/password auth is exposed under `/api/v1/seller-auth`.
+Public registration creates a SELLER account only after Bot 2 verification:
+
+- `POST /seller-auth/register/start`
+- `POST /seller-auth/register/telegram-start` for the current MVP/manual Bot 2
+  start callback boundary
+- `POST /seller-auth/register/confirm`
+- `POST /seller-auth/login`
+- `GET /seller-auth/me`
+
+Use `TELEGRAM_BOT_TOKEN` for Bot 2. Set `TELEGRAM_SELLER_BOT_USERNAME` if the
+API should return a direct `https://t.me/...` start link; otherwise the response
+still includes the `/start seller_<token>` command. Verification codes and
+passwords are stored hashed, not in plain text.
+
 ## Notifications
 
 Sprint 10 notifications are exposed under `/api/v1/notifications`.
@@ -118,3 +133,7 @@ User-facing notification listing is available at `/api/v1/notifications/me`.
 Seller Telegram notifications use `TELEGRAM_BOT_TOKEN` and
 `TELEGRAM_SELLER_CHAT_ID`. `TELEGRAM_WEBAPP_BOT_TOKEN` remains reserved for Mini
 App authentication and must not be used for seller notification delivery.
+
+Seller bot management endpoints are exposed under `/api/v1/seller-bot`.
+`/seller-bot/broadcast` targets only `TELEGRAM_SELLER_CHAT_ID` in the MVP and
+creates audit log entries for seller/admin actions.

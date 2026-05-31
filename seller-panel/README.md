@@ -30,3 +30,7 @@ The frontend should call the FastAPI backend through:
 ```text
 VITE_API_BASE_URL
 ```
+
+Seller auth uses `/seller-auth/login` and `/seller-auth/register/*`.
+Registration shows the Bot 2 `/start seller_<token>` command returned by the
+backend; the Telegram bot token stays backend-only.

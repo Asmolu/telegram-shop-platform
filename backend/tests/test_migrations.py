@@ -240,3 +240,32 @@ def test_sprint_14_migration_adds_missing_production_indexes() -> None:
     assert "CREATE INDEX IF NOT EXISTS ix_products_created_at" in content
     assert "CREATE INDEX IF NOT EXISTS ix_orders_created_at" in content
     assert "CREATE INDEX IF NOT EXISTS ix_notifications_created_at" in content
+
+
+def test_seller_auth_migration_adds_credentials_and_pending_registration_tables() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260601_0013_add_seller_auth_tables.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_seller_auth_tables", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.SELLER_REGISTRATION_STATUS_ENUM.name == "seller_registration_status"
+    assert migration.SELLER_REGISTRATION_STATUS_ENUM.enums == [
+        "pending",
+        "verified",
+        "expired",
+        "rejected",
+    ]
+    assert migration.SELLER_REGISTRATION_STATUS_ENUM.create_type is False
+    assert "seller_credentials" in content
+    assert "pending_seller_registrations" in content
+    assert "password_hash" in content
+    assert "bot_start_token_hash" in content
+    assert "verification_code_hash" in content

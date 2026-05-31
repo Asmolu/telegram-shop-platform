@@ -58,7 +58,16 @@ def _match_rule(request: Request) -> RateLimitRule | None:
     if not path.startswith(f"{api_prefix}/"):
         return None
 
-    if method == "POST" and path == f"{api_prefix}/auth/telegram/login":
+    seller_auth_paths = {
+        f"{api_prefix}/seller-auth/login",
+        f"{api_prefix}/seller-auth/register/start",
+        f"{api_prefix}/seller-auth/register/confirm",
+        f"{api_prefix}/seller-auth/register/resend-code",
+        f"{api_prefix}/seller-auth/register/telegram-start",
+    }
+    if method == "POST" and (
+        path == f"{api_prefix}/auth/telegram/login" or path in seller_auth_paths
+    ):
         return RateLimitRule(
             "auth",
             settings.rate_limit_auth_requests,

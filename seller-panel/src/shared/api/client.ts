@@ -5,6 +5,7 @@ import type {
   Banner,
   BannerPayload,
   Category,
+  Notification,
   Order,
   OrderStatus,
   PageList,
@@ -18,7 +19,13 @@ import type {
   PromoCodePayload,
   Review,
   ReviewStatus,
+  SellerBotActionResponse,
+  SellerBotStatus,
+  SellerRegistrationResendCodeResponse,
+  SellerRegistrationStartResponse,
+  SellerTelegramStartResponse,
   Tag,
+  TokenResponse,
   UploadedBannerImage,
   UploadedProductImage,
   User,
@@ -153,6 +160,37 @@ function safeJson(rawText: string): unknown {
 }
 
 export const api = {
+  sellerAuth: {
+    startRegistration: (body: {
+      email: string;
+      password: string;
+      telegram_username: string;
+    }) =>
+      apiRequest<SellerRegistrationStartResponse>('/seller-auth/register/start', {
+        method: 'POST',
+        body,
+      }),
+    confirmRegistration: (body: { registration_id: number; code: string }) =>
+      apiRequest<TokenResponse>('/seller-auth/register/confirm', { method: 'POST', body }),
+    resendCode: (body: { registration_id: number }) =>
+      apiRequest<SellerRegistrationResendCodeResponse>('/seller-auth/register/resend-code', {
+        method: 'POST',
+        body,
+      }),
+    login: (body: { email: string; password: string }) =>
+      apiRequest<TokenResponse>('/seller-auth/login', { method: 'POST', body }),
+    me: () => apiRequest<User>('/seller-auth/me'),
+    simulateTelegramStart: (body: {
+      start_payload: string;
+      telegram_user_id: number;
+      telegram_chat_id: number;
+      telegram_username?: string | null;
+    }) =>
+      apiRequest<SellerTelegramStartResponse>('/seller-auth/register/telegram-start', {
+        method: 'POST',
+        body,
+      }),
+  },
   users: {
     me: () => apiRequest<User>('/users/me'),
   },
@@ -258,5 +296,20 @@ export const api = {
       apiRequest<AnalyticsSummary>('/analytics/summary', { query }),
     events: (query: QueryParams = {}) =>
       apiRequest<PageList<AnalyticsEvent>>('/analytics/events', { query }),
+  },
+  sellerBot: {
+    status: () => apiRequest<SellerBotStatus>('/seller-bot/status'),
+    sendTestMessage: (message: string) =>
+      apiRequest<SellerBotActionResponse>('/seller-bot/test-message', {
+        method: 'POST',
+        body: { message },
+      }),
+    broadcast: (message: string) =>
+      apiRequest<SellerBotActionResponse>('/seller-bot/broadcast', {
+        method: 'POST',
+        body: { message },
+      }),
+    messages: (query: QueryParams = {}) =>
+      apiRequest<PageList<Notification>>('/seller-bot/messages', { query }),
   },
 };

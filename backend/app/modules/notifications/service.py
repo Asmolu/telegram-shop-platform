@@ -140,6 +140,24 @@ class NotificationsService:
         await self.session.refresh(notification)
         return notification
 
+    async def send_seller_telegram_message(
+        self,
+        *,
+        type: str,
+        title: str,
+        message: str,
+        payload: Mapping[str, object] | None = None,
+    ) -> NotificationRead:
+        notification = await self.create_notification(
+            type=type,
+            title=title,
+            message=message,
+            payload=payload,
+            channel=NotificationChannel.TELEGRAM,
+        )
+        await self._deliver_telegram(notification)
+        return NotificationRead.model_validate(notification)
+
     async def _create_order_created(self, payload: Mapping[str, object]) -> NotificationRead:
         order_number = self._order_label(payload)
         total_amount = self._payload_value(payload, "total_amount", fallback="0.00")

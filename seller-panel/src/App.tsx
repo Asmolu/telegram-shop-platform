@@ -5,7 +5,7 @@ import { clearStoredToken, getStoredToken } from './shared/auth/tokenStorage';
 import { AppShell, type NavItem } from './shared/ui/AppShell';
 import { LoadingState } from './shared/ui/DataState';
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
-import { DevTokenLoginPage } from './pages/Login/DevTokenLoginPage';
+import { SellerAuthPage } from './pages/Login/SellerAuthPage';
 import { OrdersPage } from './pages/Orders/OrdersPage';
 import { ProductsPage } from './pages/Products/ProductsPage';
 import { ProductEditorPage } from './pages/ProductEditor/ProductEditorPage';
@@ -13,6 +13,7 @@ import { BannersPage } from './pages/Banners/BannersPage';
 import { PromoCodesPage } from './pages/PromoCodes/PromoCodesPage';
 import { ReviewsPage } from './pages/Reviews/ReviewsPage';
 import { StatisticsPage } from './pages/Statistics/StatisticsPage';
+import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 
 const navItems: NavItem[] = [
@@ -24,6 +25,7 @@ const navItems: NavItem[] = [
   { path: '/promo-codes', label: 'Promo Codes' },
   { path: '/reviews', label: 'Reviews' },
   { path: '/statistics', label: 'Statistics' },
+  { path: '/seller-bot', label: 'Seller Bot' },
   { path: '/settings', label: 'Settings' },
 ];
 
@@ -44,6 +46,7 @@ function getPageTitle(path: string): string {
   if (path.startsWith('/promo-codes')) return 'Promo Codes';
   if (path.startsWith('/reviews')) return 'Reviews';
   if (path.startsWith('/statistics')) return 'Statistics';
+  if (path.startsWith('/seller-bot')) return 'Seller Bot';
   if (path.startsWith('/settings')) return 'Settings';
   return 'Dashboard';
 }
@@ -74,7 +77,7 @@ export function App() {
     setCheckingUser(true);
     setAuthError(null);
 
-    api.users
+    api.sellerAuth
       .me()
       .then((currentUser) => {
         if (cancelled) return;
@@ -122,7 +125,7 @@ export function App() {
   }
 
   if (!token || path === '/login') {
-    return <DevTokenLoginPage authError={authError} onTokenSaved={handleTokenSaved} />;
+    return <SellerAuthPage authError={authError} onTokenSaved={handleTokenSaved} />;
   }
 
   if (checkingUser) {
@@ -176,6 +179,7 @@ function renderPage(
   if (path === '/promo-codes') return <PromoCodesPage {...sharedPageProps} />;
   if (path === '/reviews') return <ReviewsPage {...sharedPageProps} />;
   if (path === '/statistics') return <StatisticsPage {...sharedPageProps} />;
+  if (path === '/seller-bot') return <SellerBotPage {...sharedPageProps} />;
   if (path === '/settings') return <SettingsPage {...sharedPageProps} />;
 
   return <DashboardPage {...sharedPageProps} />;

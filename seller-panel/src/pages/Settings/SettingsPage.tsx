@@ -36,15 +36,11 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
         <dl className="settings-list">
           <div>
             <dt>Mode</dt>
-            <dd>Temporary JWT paste screen</dd>
+            <dd>Email/password seller auth with Telegram Bot 2 verification</dd>
           </div>
           <div>
             <dt>Token storage</dt>
             <dd>{tokenScope === 'local' ? 'This browser' : 'This tab'}</dd>
-          </div>
-          <div>
-            <dt>Replacement path</dt>
-            <dd>Swap the isolated auth screen for a real seller login endpoint when backend support exists.</dd>
           </div>
         </dl>
         <button className="button button-secondary" type="button" onClick={clearToken}>

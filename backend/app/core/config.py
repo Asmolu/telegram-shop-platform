@@ -27,11 +27,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_webapp_bot_token: str | None = None
     telegram_seller_chat_id: str | None = None
+    telegram_seller_bot_username: str | None = None
 
     jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     telegram_auth_max_age_seconds: int = 86_400
+    seller_registration_expires_minutes: int = 30
+    seller_verification_code_expires_minutes: int = 10
 
     uploads_dir: str = "uploads"
     public_uploads_url: str = "/uploads"

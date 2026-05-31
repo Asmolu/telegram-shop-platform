@@ -113,6 +113,24 @@ Seller/admin endpoints are available under the canonical API prefix:
 - `GET /api/v1/audit-logs`
 - `GET /api/v1/audit-logs/{log_id}`
 
+## Seller Portal auth and bot management
+
+Seller Portal now supports email/password auth through `/api/v1/seller-auth`.
+Registration uses Bot 2, configured with `TELEGRAM_BOT_TOKEN`, and a start-token
+flow:
+
+1. `POST /api/v1/seller-auth/register/start` creates a pending seller registration.
+2. The seller opens Bot 2 with `/start seller_<token>`.
+3. The backend links the Telegram user/chat through
+   `POST /api/v1/seller-auth/register/telegram-start`, the MVP manual callback
+   boundary for webhook/polling integration.
+4. Bot 2 sends a verification code, and the seller confirms through
+   `POST /api/v1/seller-auth/register/confirm`.
+
+Seller bot management is available under `/api/v1/seller-bot` for SELLER/ADMIN
+users. MVP broadcast sends only to the configured seller notification chat; it
+does not claim all-user Telegram broadcast unless a recipient registry is added.
+
 ## Production hardening
 
 Sprint 14 adds MVP production readiness:

@@ -827,6 +827,58 @@ textarea:focus {
   line-height: 1.55;
 }
 
+.seller-auth-card {
+  width: min(100%, 720px);
+}
+
+.seller-auth-card .form-error,
+.seller-auth-card .success-banner {
+  margin: 12px 0;
+}
+
+.auth-tabs {
+  margin: 14px 0;
+}
+
+.auth-registration-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.telegram-confirm-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 14px;
+}
+
+.telegram-confirm-panel span {
+  display: block;
+  margin-bottom: 6px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.telegram-confirm-panel code {
+  width: 100%;
+}
+
+.dev-token-link {
+  margin-top: 14px;
+}
+
+.seller-bot-status-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
 .segmented-field {
   display: flex;
   gap: 12px;
@@ -908,6 +960,11 @@ textarea:focus {
   }
 
   .variant-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-registration-grid,
+  .seller-bot-status-grid {
     grid-template-columns: 1fr;
   }
 }

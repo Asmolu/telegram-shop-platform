@@ -451,6 +451,32 @@ Seller Panel становится рабочим интерфейсом упра
 
 ---
 
+# Sprint 15 вЂ” Seller Portal Auth and Bot Management
+
+## Goal
+Р—Р°РјРµРЅРёС‚СЊ РІСЂРµРјРµРЅРЅС‹Р№ JWT-login РІ Seller Panel РЅР° email/password auth СЃ
+Telegram Bot 2 verification Рё РґРѕР±Р°РІРёС‚СЊ СЃС‚СЂР°РЅРёС†Сѓ СѓРїСЂР°РІР»РµРЅРёСЏ Bot 2.
+
+## Backend
+
+- `seller_auth` module with pending registrations and seller credentials.
+- Bot 2 start-token verification flow with hashed passwords, hashed tokens, and expiring hashed codes.
+- `seller_bot` module for Bot 2 status, seller-chat test messages, seller-chat MVP broadcast, and recent Telegram message listing.
+- Alembic migration `20260601_0013_add_seller_auth_tables.py`.
+- Rate limiting for seller registration, login, verification, resend, and start-link callback endpoints.
+- Audit entries for seller bot management actions.
+
+## Frontend
+
+- Seller Panel login/registration screen with email/password auth and Bot 2 verification code confirmation.
+- Development-only JWT fallback remains hidden from production builds.
+- Protected Seller Bot management page with labels that target the seller notification chat only.
+
+## Result
+Seller Portal can authenticate sellers without using Mini App Bot 1, and Bot 2 management is available without exposing bot tokens to the frontend.
+
+---
+
 # Development Rules
 
 - SQLAlchemy models + Alembic migrations are the source of truth for DB schema.

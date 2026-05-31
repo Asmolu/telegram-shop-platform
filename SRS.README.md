@@ -701,3 +701,32 @@ MVP production/staging readiness requires:
 - Documented PostgreSQL and uploads backup/restore workflow.
 - Production settings that reject default JWT secrets and wildcard CORS origins.
 - Alembic migrations for new schema/index changes only; old migrations remain immutable.
+
+---
+
+## 18. Seller Portal email auth and Bot 2 verification
+
+Seller Portal supports email/password login for SELLER/ADMIN users through the
+FastAPI backend. Public registration can create only SELLER accounts and must be
+verified through Bot 2 before JWT login is allowed.
+
+Registration flow:
+
+1. Seller submits email, password, and Telegram username in Seller Panel.
+2. Backend stores a pending registration with hashed password, hashed start
+   token, and no trusted Telegram identity yet.
+3. Seller opens Bot 2 with `/start seller_<token>`.
+4. Backend links the Telegram user/chat identity from Bot 2 and validates the
+   username when available.
+5. Bot 2 sends an expiring verification code.
+6. Seller confirms the code in Seller Panel, backend creates or upgrades a
+   SELLER user, stores `SellerCredential`, and returns a JWT.
+
+Bot 2 is configured only in backend environment variables. The frontend must
+never receive bot tokens. Until webhook/polling is wired, the backend exposes a
+manual HTTP callback boundary for Bot 2 start-link handling.
+
+Seller Bot management is restricted to SELLER/ADMIN users. MVP broadcast sends
+only to the configured seller notification chat and records audit log entries;
+it is not an all-customer broadcast without stored recipient chat IDs and user
+consent.
