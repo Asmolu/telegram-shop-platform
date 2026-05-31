@@ -142,7 +142,7 @@ export function CartPage() {
   return (
     <div className="page">
       <TopBar title="Покупки" />
-      <div className="tab-row">
+      <div className="tab-row cart-tabs">
         {tabs.map(([value, label]) => (
           <button
             className={activeTab === value ? 'is-selected' : ''}

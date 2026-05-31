@@ -6,7 +6,7 @@ import { getTelegramBotUrl } from '../shared/telegram/webApp';
 import { toApiErrorMessage } from '../shared/api';
 
 export function LaunchPage() {
-  const { status, error, loginWithToken, retryTelegramAuth } = useAuth();
+  const { status, error, isTelegram, loginWithToken, retryTelegramAuth } = useAuth();
   const { navigate } = useRouter();
   const [token, setToken] = React.useState('');
   const [tokenError, setTokenError] = React.useState<string | null>(null);
@@ -61,7 +61,19 @@ export function LaunchPage() {
         </section>
       ) : null}
 
-      {status === 'development' ? (
+      {status === 'development' && isTelegram ? (
+        <section className="auth-card">
+          <h1>Не удалось получить Telegram auth</h1>
+          <p>Откройте Mini App через кнопку бота и попробуйте снова.</p>
+          <div className="button-row">
+            <button className="primary-button" type="button" onClick={() => void retryTelegramAuth()}>
+              Повторить
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {status === 'development' && !isTelegram ? (
         <section className="auth-card">
           <h1>Development mode</h1>
           <p>Приложение открыто вне Telegram. Каталог можно смотреть без входа, а для корзины и заказов нужен JWT.</p>

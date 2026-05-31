@@ -23,6 +23,8 @@ export type TelegramWebApp = {
   };
   themeParams?: TelegramThemeParams;
   colorScheme?: 'light' | 'dark';
+  onEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
+  offEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
   ready?: () => void;
   expand?: () => void;
   close?: () => void;
@@ -107,25 +109,123 @@ export function initTelegramApp() {
   }
 }
 
+const themeOverrideTokens = [
+  '--bg',
+  '--surface',
+  '--surface-elevated',
+  '--text',
+  '--text-muted',
+  '--border',
+  '--primary',
+  '--primary-contrast',
+];
+
+function normalizeColor(value?: string) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  const shorthand = /^#([a-f\d])([a-f\d])([a-f\d])$/i.exec(trimmed);
+  if (shorthand) {
+    return `#${shorthand[1]}${shorthand[1]}${shorthand[2]}${shorthand[2]}${shorthand[3]}${shorthand[3]}`;
+  }
+
+  if (/^#[a-f\d]{6}$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+function hexToRgb(hex: string) {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function getLuminance(hex: string) {
+  const { r, g, b } = hexToRgb(hex);
+  const channels = [r, g, b].map((channel) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+
+function getContrastRatio(left: string, right: string) {
+  const lighter = Math.max(getLuminance(left), getLuminance(right));
+  const darker = Math.min(getLuminance(left), getLuminance(right));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function resolveThemeMode(colorScheme?: 'light' | 'dark', bgColor?: string | null) {
+  if (colorScheme === 'dark' || colorScheme === 'light') {
+    return colorScheme;
+  }
+
+  return bgColor && getLuminance(bgColor) < 0.42 ? 'dark' : 'light';
+}
+
+function setThemeToken(root: HTMLElement, token: string, color: string | null, contrastAgainst?: string | null, minContrast = 3) {
+  if (!color || (contrastAgainst && getContrastRatio(color, contrastAgainst) < minContrast)) {
+    return;
+  }
+
+  root.style.setProperty(token, color);
+}
+
 export function applyTelegramTheme() {
+  const webApp = getTelegramWebApp();
   const theme = getTelegramThemeParams();
   const root = document.documentElement;
+  const bgColor = normalizeColor(theme.bg_color);
+  const textColor = normalizeColor(theme.text_color);
+  const hintColor = normalizeColor(theme.hint_color);
+  const buttonColor = normalizeColor(theme.button_color);
+  const buttonTextColor = normalizeColor(theme.button_text_color);
+  const secondaryBgColor = normalizeColor(theme.secondary_bg_color);
+  const mode = resolveThemeMode(webApp?.colorScheme, bgColor);
 
-  if (theme.bg_color) {
-    root.style.setProperty('--tg-bg-color', theme.bg_color);
+  root.dataset.theme = mode;
+  root.dataset.telegram = webApp ? 'true' : 'false';
+
+  themeOverrideTokens.forEach((token) => root.style.removeProperty(token));
+
+  if (!webApp) {
+    return;
   }
 
-  if (theme.text_color) {
-    root.style.setProperty('--tg-text-color', theme.text_color);
+  setThemeToken(root, '--bg', bgColor, textColor, 4.5);
+  setThemeToken(root, '--surface', secondaryBgColor, textColor, 4.5);
+  setThemeToken(root, '--surface-elevated', secondaryBgColor, textColor, 4.5);
+  setThemeToken(root, '--text', textColor, bgColor, 4.5);
+  setThemeToken(root, '--text-muted', hintColor, bgColor, 3);
+
+  if (secondaryBgColor && bgColor && getContrastRatio(secondaryBgColor, bgColor) >= 1.08) {
+    root.style.setProperty('--border', mode === 'dark' ? 'rgba(255, 255, 255, 0.16)' : 'rgba(17, 24, 39, 0.12)');
   }
 
-  if (theme.button_color) {
-    root.style.setProperty('--tg-button-color', theme.button_color);
+  if (buttonColor && (!buttonTextColor || getContrastRatio(buttonColor, buttonTextColor) >= 3)) {
+    root.style.setProperty('--primary', buttonColor);
   }
 
-  if (theme.secondary_bg_color) {
-    root.style.setProperty('--tg-secondary-bg-color', theme.secondary_bg_color);
+  if (buttonColor && buttonTextColor && getContrastRatio(buttonColor, buttonTextColor) >= 4.5) {
+    root.style.setProperty('--primary-contrast', buttonTextColor);
   }
+}
+
+export function subscribeTelegramThemeChanges(handler: () => void) {
+  const webApp = getTelegramWebApp();
+  webApp?.onEvent?.('themeChanged', handler);
+
+  return () => {
+    webApp?.offEvent?.('themeChanged', handler);
+  };
 }
 
 export function getTelegramBotUrl() {

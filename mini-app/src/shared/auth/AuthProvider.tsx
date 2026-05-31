@@ -14,6 +14,7 @@ import {
   getTelegramUser,
   initTelegramApp,
   isTelegramWebView,
+  subscribeTelegramThemeChanges,
   waitForTelegramWebApp,
   type TelegramUser,
 } from '../telegram/webApp';
@@ -92,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     let cancelled = false;
+    let unsubscribeTheme: (() => void) | undefined;
 
     async function bootstrap() {
       await waitForTelegramWebApp();
@@ -101,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       initTelegramApp();
       applyTelegramTheme();
+      unsubscribeTheme = subscribeTelegramThemeChanges(applyTelegramTheme);
       setTelegramUser(getTelegramUser());
       const diagnostics = getTelegramRuntimeDiagnostics();
       setIsTelegram(diagnostics.hasWebApp);
@@ -135,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      unsubscribeTheme?.();
     };
   }, [runTelegramAuth]);
 

@@ -7,14 +7,14 @@ import { getUserDisplayName } from '../shared/utils/format';
 
 export function ProfilePage() {
   const { navigate } = useRouter();
-  const { clearToken, isAuthenticated, status, telegramUser, user } = useAuth();
+  const { clearToken, isAuthenticated, isTelegram, status, telegramUser, user } = useAuth();
   const theme = getTelegramThemeParams();
   const displayUser = user ?? telegramUser;
   const displayName = getUserDisplayName(displayUser);
   const username = displayUser?.username ? `@${displayUser.username}` : 'username не указан';
 
   return (
-    <div className="page">
+    <div className="page profile-page">
       <TopBar title="Личный кабинет" />
 
       {!isAuthenticated && status !== 'development' ? (
@@ -46,9 +46,11 @@ export function ProfilePage() {
         <div><span>Privacy / data policy</span><strong>скоро</strong></div>
       </section>
 
-      <button className="secondary-button full-width" type="button" onClick={clearToken}>
-        Очистить dev token
-      </button>
+      {!isTelegram ? (
+        <button className="secondary-button full-width" type="button" onClick={clearToken}>
+          Очистить dev token
+        </button>
+      ) : null}
     </div>
   );
 }
