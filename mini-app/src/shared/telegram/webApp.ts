@@ -16,7 +16,7 @@ export type TelegramUser = {
   photo_url?: string;
 };
 
-type TelegramWebApp = {
+export type TelegramWebApp = {
   initData: string;
   initDataUnsafe?: {
     user?: TelegramUser;
@@ -28,6 +28,12 @@ type TelegramWebApp = {
   close?: () => void;
 };
 
+export type TelegramRuntimeDiagnostics = {
+  hasTelegramObject: boolean;
+  hasWebApp: boolean;
+  hasInitData: boolean;
+};
+
 declare global {
   interface Window {
     Telegram?: {
@@ -37,12 +43,45 @@ declare global {
 }
 
 export function getTelegramWebApp() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
   return window.Telegram?.WebApp;
 }
 
 export function isTelegramWebView() {
+  return Boolean(getTelegramWebApp());
+}
+
+export function getTelegramRuntimeDiagnostics(): TelegramRuntimeDiagnostics {
   const webApp = getTelegramWebApp();
-  return Boolean(webApp?.initData);
+
+  return {
+    hasTelegramObject: typeof window !== 'undefined' && Boolean(window.Telegram),
+    hasWebApp: Boolean(webApp),
+    hasInitData: Boolean(webApp?.initData),
+  };
+}
+
+export async function waitForTelegramWebApp(timeoutMs = 1200, intervalMs = 50) {
+  const existingWebApp = getTelegramWebApp();
+  if (existingWebApp) {
+    return existingWebApp;
+  }
+
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+
+    const webApp = getTelegramWebApp();
+    if (webApp) {
+      return webApp;
+    }
+  }
+
+  return getTelegramWebApp();
 }
 
 export function getTelegramInitData() {

@@ -10,9 +10,11 @@ import {
 import {
   applyTelegramTheme,
   getTelegramInitData,
+  getTelegramRuntimeDiagnostics,
   getTelegramUser,
   initTelegramApp,
   isTelegramWebView,
+  waitForTelegramWebApp,
   type TelegramUser,
 } from '../telegram/webApp';
 import React from 'react';
@@ -33,6 +35,14 @@ type AuthContextValue = {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+function logTelegramDiagnostics() {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.info('Telegram WebApp detection', getTelegramRuntimeDiagnostics());
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = React.useState<AuthStatus>('booting');
   const [user, setUser] = React.useState<User | null>(null);
@@ -49,6 +59,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const runTelegramAuth = React.useCallback(async () => {
+    const diagnostics = getTelegramRuntimeDiagnostics();
+    setIsTelegram(diagnostics.hasWebApp);
+    setTelegramUser(getTelegramUser());
+    logTelegramDiagnostics();
+
     const initData = getTelegramInitData();
 
     if (!initData) {
@@ -58,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      setStatus('booting');
       const result = await loginWithTelegram(initData);
       storeAccessToken(result.access_token);
       setUser(result.user);
@@ -68,7 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setStatus('error');
       setError('Не удалось открыть приложение через Telegram');
-      console.warn(toApiErrorMessage(authError));
+      if (import.meta.env.DEV) {
+        console.warn(toApiErrorMessage(authError));
+      }
     }
   }, []);
 
@@ -76,10 +94,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function bootstrap() {
+      await waitForTelegramWebApp();
+      if (cancelled) {
+        return;
+      }
+
       initTelegramApp();
       applyTelegramTheme();
       setTelegramUser(getTelegramUser());
-      setIsTelegram(isTelegramWebView());
+      const diagnostics = getTelegramRuntimeDiagnostics();
+      setIsTelegram(diagnostics.hasWebApp);
+      logTelegramDiagnostics();
+
+      if (diagnostics.hasInitData) {
+        await runTelegramAuth();
+        return;
+      }
 
       const savedToken = getStoredAccessToken();
       if (savedToken) {
