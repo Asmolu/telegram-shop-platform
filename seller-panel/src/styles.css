@@ -865,7 +865,10 @@ textarea:focus {
 }
 
 .telegram-confirm-panel code {
+  display: block;
   width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .dev-token-link {

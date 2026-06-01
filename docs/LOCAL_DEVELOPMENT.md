@@ -65,6 +65,7 @@ TELEGRAM_WEBAPP_BOT_TOKEN=<your bot token>
 TELEGRAM_BOT_TOKEN=<seller notification bot token>
 TELEGRAM_SELLER_CHAT_ID=<seller group or chat id>
 TELEGRAM_SELLER_BOT_USERNAME=<seller bot username without token>
+TELEGRAM_SELLER_WEBHOOK_SECRET=<random local webhook secret>
 JWT_SECRET_KEY=<local development secret>
 ```
 
@@ -72,7 +73,8 @@ JWT_SECRET_KEY=<local development secret>
 notifications, and seller-chat broadcast use Bot 2 through `TELEGRAM_BOT_TOKEN`
 and `TELEGRAM_SELLER_CHAT_ID`; the bot token is never exposed to the frontend.
 `TELEGRAM_SELLER_BOT_USERNAME` only enables a direct `t.me` start link in the
-Seller Panel.
+Seller Panel. `TELEGRAM_SELLER_WEBHOOK_SECRET` protects the Bot 2 webhook path
+and optional Telegram `secret_token` header.
 
 3. Run backend:
 
@@ -128,17 +130,23 @@ Default URL:
 http://localhost:5174
 ```
 
-Seller registration uses the Bot 2 start-token flow. The current backend MVP
-does not run a Telegram webhook or polling loop, so local/manual testing can
-simulate the bot receiving `/start seller_<token>` with:
+Seller registration uses the Bot 2 start-token flow. Production uses:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/seller-auth/register/telegram-start \
-  -H "Content-Type: application/json" \
-  -d "{\"start_payload\":\"seller_<token>\",\"telegram_user_id\":123,\"telegram_chat_id\":123,\"telegram_username\":\"sellername\"}"
+```text
+POST /api/v1/telegram/seller-bot/webhook/<secret>
 ```
 
-Production should wire Bot 2 webhook or polling to the same service boundary.
+Local Telegram webhook testing requires a public tunnel to the backend. Once the
+tunnel URL is available, set Bot 2 webhook with:
+
+```bash
+cd backend
+python scripts/set_seller_bot_webhook.py set --base-url https://your-public-tunnel.example
+python scripts/set_seller_bot_webhook.py info
+```
+
+The older manual callback remains available for backend-only service tests:
+`POST /api/v1/seller-auth/register/telegram-start`.
 
 ## API documentation
 

@@ -29,6 +29,8 @@ Backend:
   seller notifications, and seller-chat broadcast
 - `TELEGRAM_SELLER_BOT_USERNAME` if the Seller Panel should show a direct `t.me`
   start link during registration
+- `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook URL and
+  Telegram `secret_token` header
 - cache and rate limit settings from `backend/.env.production.example`
 
 Frontend:
@@ -56,11 +58,40 @@ Run migrations:
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
-Seller Portal email/password auth requires migration
-`20260601_0013_add_seller_auth_tables.py`. Bot 2 must be connected by webhook
-or polling to the seller registration start-token service boundary; until then,
-`POST /api/v1/seller-auth/register/telegram-start` is the documented manual
-callback simulation endpoint.
+Seller Portal email/password auth requires migrations through head
+`20260601_0014`. Bot 2 is connected through:
+
+```text
+POST /api/v1/telegram/seller-bot/webhook/<secret>
+```
+
+Set the webhook after deployment:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
+  python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.ru
+```
+
+Verify Telegram webhook state without printing the bot token:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
+  python scripts/set_seller_bot_webhook.py info
+```
+
+The webhook URL should be:
+
+```text
+https://api.tsplatform.ru/api/v1/telegram/seller-bot/webhook/<secret>
+```
+
+Seller registration verification:
+
+1. Open `https://seller.tsplatform.ru`.
+2. Start seller registration and copy the `/start seller_<token>` command.
+3. Open Bot 2 and send the command.
+4. Confirm Bot 2 replies with a verification code.
+5. Enter the code in Seller Panel and confirm that seller login works.
 
 Smoke checks:
 

@@ -461,6 +461,8 @@ Telegram Bot 2 verification Рё РґРѕР±Р°РІРёС‚СЊ СЃС‚СЂ
 
 - `seller_auth` module with pending registrations and seller credentials.
 - Bot 2 start-token verification flow with hashed passwords, hashed tokens, and expiring hashed codes.
+- Bot 2 Telegram webhook at `/api/v1/telegram/seller-bot/webhook/<secret>`
+  protected by `TELEGRAM_SELLER_WEBHOOK_SECRET`.
 - `seller_bot` module for Bot 2 status, seller-chat test messages, seller-chat MVP broadcast, and recent Telegram message listing.
 - Alembic migration `20260601_0013_add_seller_auth_tables.py`.
 - Rate limiting for seller registration, login, verification, resend, and start-link callback endpoints.

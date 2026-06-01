@@ -8,6 +8,8 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from app.core.log_sanitization import redact_sensitive_path
+
 logger = logging.getLogger("app.requests")
 
 
@@ -31,7 +33,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 extra={
                     "request_id": request_id,
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": redact_sensitive_path(request.url.path),
                     "status_code": status_code,
                     "duration_ms": duration_ms,
                     "client": request.client.host if request.client else None,

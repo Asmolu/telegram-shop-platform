@@ -280,11 +280,7 @@ class SellerAuthService:
     ) -> None:
         if registration.telegram_chat_id is None:
             raise AppError("Telegram chat is not linked", status.HTTP_400_BAD_REQUEST)
-        message = (
-            "Seller Portal verification code\n\n"
-            f"Code: {code}\n"
-            "Enter this code in the Seller Portal to finish registration."
-        )
+        message = f"Код подтверждения: {code}. Введите его в Seller Panel."
         try:
             await self.telegram_service.send_message(str(registration.telegram_chat_id), message)
         except TelegramDeliveryError as exc:

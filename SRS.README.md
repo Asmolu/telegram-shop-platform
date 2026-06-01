@@ -716,15 +716,19 @@ Registration flow:
 2. Backend stores a pending registration with hashed password, hashed start
    token, and no trusted Telegram identity yet.
 3. Seller opens Bot 2 with `/start seller_<token>`.
-4. Backend links the Telegram user/chat identity from Bot 2 and validates the
+4. Telegram sends the update to
+   `POST /api/v1/telegram/seller-bot/webhook/<secret>`, protected by
+   `TELEGRAM_SELLER_WEBHOOK_SECRET` and compatible with Telegram
+   `secret_token` headers.
+5. Backend links the Telegram user/chat identity from Bot 2 and validates the
    username when available.
-5. Bot 2 sends an expiring verification code.
-6. Seller confirms the code in Seller Panel, backend creates or upgrades a
+6. Bot 2 sends an expiring verification code.
+7. Seller confirms the code in Seller Panel, backend creates or upgrades a
    SELLER user, stores `SellerCredential`, and returns a JWT.
 
 Bot 2 is configured only in backend environment variables. The frontend must
-never receive bot tokens. Until webhook/polling is wired, the backend exposes a
-manual HTTP callback boundary for Bot 2 start-link handling.
+never receive bot tokens. The manual HTTP callback boundary remains internal
+and testable, but Seller Panel registration uses the Telegram webhook flow.
 
 Seller Bot management is restricted to SELLER/ADMIN users. MVP broadcast sends
 only to the configured seller notification chat and records audit log entries;

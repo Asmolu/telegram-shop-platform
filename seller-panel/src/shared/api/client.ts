@@ -23,7 +23,6 @@ import type {
   SellerBotStatus,
   SellerRegistrationResendCodeResponse,
   SellerRegistrationStartResponse,
-  SellerTelegramStartResponse,
   Tag,
   TokenResponse,
   UploadedBannerImage,
@@ -180,16 +179,6 @@ export const api = {
     login: (body: { email: string; password: string }) =>
       apiRequest<TokenResponse>('/seller-auth/login', { method: 'POST', body }),
     me: () => apiRequest<User>('/seller-auth/me'),
-    simulateTelegramStart: (body: {
-      start_payload: string;
-      telegram_user_id: number;
-      telegram_chat_id: number;
-      telegram_username?: string | null;
-    }) =>
-      apiRequest<SellerTelegramStartResponse>('/seller-auth/register/telegram-start', {
-        method: 'POST',
-        body,
-      }),
   },
   users: {
     me: () => apiRequest<User>('/users/me'),

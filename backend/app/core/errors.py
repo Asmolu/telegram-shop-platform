@@ -5,6 +5,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.log_sanitization import redact_sensitive_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,5 +71,5 @@ def _request_log_extra(request: Request) -> dict[str, object]:
     return {
         "request_id": getattr(request.state, "request_id", None),
         "method": request.method,
-        "path": request.url.path,
+        "path": redact_sensitive_path(request.url.path),
     }

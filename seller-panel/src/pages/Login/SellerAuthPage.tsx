@@ -78,7 +78,9 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       });
       setRegistration(response);
       setVerificationCode('');
-      setSuccess('Registration started. Open Bot 2 and then enter the code it sends you.');
+      setSuccess(
+        'Registration started. Open Bot 2, send the start command, and enter the code it sends.',
+      );
     } catch (requestError) {
       setError(formatApiError(requestError, 'Could not start registration.'));
     } finally {
@@ -127,7 +129,13 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       });
       setSuccess(`Code resent. It expires at ${formatDateTime(response.verification_expires_at)}.`);
     } catch (requestError) {
-      setError(formatApiError(requestError, 'Could not resend the code.'));
+      if (requestError instanceof ApiError && requestError.message.includes('not linked')) {
+        setError(
+          `Open Bot 2 and send ${registration.start_command} first. Then use resend if the code does not arrive.`,
+        );
+      } else {
+        setError(formatApiError(requestError, 'Could not resend the code.'));
+      }
     } finally {
       setLoadingAction(null);
     }
@@ -275,7 +283,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                   </a>
                 ) : null}
                 <p className="muted-text">
-                  Start Bot 2 with this command. After the bot sends a code, enter it here.
+                  Send this command to Bot 2. The bot will reply with a verification code.
                   Registration expires at {formatDateTime(registration.expires_at)}.
                 </p>
                 <label className="field">

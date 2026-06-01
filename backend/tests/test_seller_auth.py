@@ -222,9 +222,7 @@ async def test_telegram_start_links_identity_and_sends_code() -> None:
     assert telegram.messages == [
         (
             "100",
-            "Seller Portal verification code\n\n"
-            "Code: 123456\n"
-            "Enter this code in the Seller Portal to finish registration.",
+            "Код подтверждения: 123456. Введите его в Seller Panel.",
         )
     ]
 

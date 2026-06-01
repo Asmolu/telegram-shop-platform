@@ -16,6 +16,7 @@ from app.modules.reviews.router import router as reviews_router
 from app.modules.seller_auth.router import router as seller_auth_router
 from app.modules.seller_bot.router import router as seller_bot_router
 from app.modules.tags.router import router as tags_router
+from app.modules.telegram.router import router as telegram_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.users.router import router as users_router
 
@@ -25,6 +26,7 @@ api_router.include_router(audit_router)
 api_router.include_router(auth_router)
 api_router.include_router(seller_auth_router)
 api_router.include_router(seller_bot_router)
+api_router.include_router(telegram_router)
 api_router.include_router(users_router)
 api_router.include_router(banners_router)
 api_router.include_router(cart_router)

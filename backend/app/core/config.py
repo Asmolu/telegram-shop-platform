@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     telegram_webapp_bot_token: str | None = None
     telegram_seller_chat_id: str | None = None
     telegram_seller_bot_username: str | None = None
+    telegram_seller_webhook_secret: str | None = None
 
     jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_algorithm: str = "HS256"

@@ -50,6 +50,8 @@ class SellerTelegramStartRequest(BaseModel):
     telegram_user_id: int = Field(..., gt=0)
     telegram_chat_id: int = Field(..., gt=0)
     telegram_username: str | None = Field(default=None, max_length=33)
+    telegram_first_name: str | None = Field(default=None, max_length=255)
+    telegram_last_name: str | None = Field(default=None, max_length=255)
 
     @field_validator("telegram_username")
     @classmethod
