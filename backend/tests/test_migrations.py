@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+from app.db.models import PendingSellerRegistration, SellerRegistrationStatus
+
 
 def test_user_role_enum_migration_disables_implicit_type_creation() -> None:
     migration_path = (
@@ -269,3 +271,30 @@ def test_seller_auth_migration_adds_credentials_and_pending_registration_tables(
     assert "password_hash" in content
     assert "bot_start_token_hash" in content
     assert "verification_code_hash" in content
+
+
+def test_seller_registration_status_model_matches_head_migration() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260601_0014_fix_seller_registration_status_enum.py"
+    )
+    spec = importlib.util.spec_from_file_location("fix_seller_registration_status", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    expected_values = [status.value for status in SellerRegistrationStatus]
+    status_type = PendingSellerRegistration.__table__.c.status.type
+
+    assert expected_values == ["PENDING", "VERIFIED", "EXPIRED", "REJECTED"]
+    assert status_type.name == "seller_registration_status"
+    assert status_type.enums == expected_values
+    assert migration.CANONICAL_SELLER_REGISTRATION_STATUS_VALUES == tuple(expected_values)
+    assert 'value_transform="upper"' in content
+    assert "status::text" in content
+    assert "ALTER COLUMN status DROP DEFAULT" in content
+    assert "ALTER COLUMN status SET DEFAULT" in content

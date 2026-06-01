@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.common.deps import get_current_user
 from app.core.errors import AppError
@@ -14,6 +15,7 @@ from app.db.models import (
     UserRole,
 )
 from app.main import create_app
+from app.modules.seller_auth.repository import SellerAuthRepository
 from app.modules.seller_auth.router import get_seller_auth_service
 from app.modules.seller_auth.schemas import (
     SellerLoginRequest,
@@ -118,6 +120,21 @@ class FakeSellerAuthRepository:
         return self.users_by_telegram_id.get(telegram_id)
 
 
+class EmptyScalarResult:
+    def scalar_one_or_none(self) -> None:
+        return None
+
+
+class RecordingSession:
+    def __init__(self) -> None:
+        self.statement = None
+
+    async def execute(self, statement):
+        self.statement = statement
+        statement.compile(dialect=postgresql.dialect())
+        return EmptyScalarResult()
+
+
 @pytest.mark.asyncio
 async def test_start_seller_registration_hashes_password_and_returns_start_command() -> None:
     service, repository, _, _ = _seller_auth_service()
@@ -130,6 +147,48 @@ async def test_start_seller_registration_hashes_password_and_returns_start_comma
     assert registration.email == "seller@example.com"
     assert registration.password_hash != "Password1"
     assert verify_password("Password1", registration.password_hash)
+
+
+def test_seller_auth_register_start_route_creates_pending_registration() -> None:
+    app = create_app()
+    service, repository, _, _ = _seller_auth_service()
+    app.dependency_overrides[get_seller_auth_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/seller-auth/register/start",
+                json={
+                    "email": "seller@example.com",
+                    "password": "Password1",
+                    "telegram_username": "@sellername",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    registration = repository.registrations[body["registration_id"]]
+    assert registration.email == "seller@example.com"
+    assert registration.status == SellerRegistrationStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_pending_lookup_by_email_binds_canonical_status_value() -> None:
+    session = RecordingSession()
+    repository = SellerAuthRepository(session)
+
+    registration = await repository.get_active_pending_by_email(
+        email="seller@example.com",
+        now=_now(),
+    )
+
+    status_type = PendingSellerRegistration.__table__.c.status.type
+    bind_processor = status_type.bind_processor(postgresql.dialect())
+    assert registration is None
+    assert session.statement is not None
+    assert bind_processor is not None
+    assert bind_processor(SellerRegistrationStatus.PENDING) == "PENDING"
 
 
 @pytest.mark.asyncio

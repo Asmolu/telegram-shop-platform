@@ -90,10 +90,10 @@ class NotificationStatus(StrEnum):
 
 
 class SellerRegistrationStatus(StrEnum):
-    PENDING = "pending"
-    VERIFIED = "verified"
-    EXPIRED = "expired"
-    REJECTED = "rejected"
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    EXPIRED = "EXPIRED"
+    REJECTED = "REJECTED"
 
 
 class User(Base):
