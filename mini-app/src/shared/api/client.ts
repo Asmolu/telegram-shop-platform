@@ -109,7 +109,7 @@ export async function apiRequest<T>(
 
   if (!response.ok) {
     throw new ApiClientError(
-      getErrorMessage(payload, 'Не удалось выполнить запрос'),
+      getErrorMessage(payload, 'Не удалось выполнить действие'),
       response.status,
       payload,
     );
@@ -122,13 +122,39 @@ export function isUnauthorizedError(error: unknown) {
   return error instanceof ApiClientError && (error.status === 401 || error.status === 403);
 }
 
+const TECHNICAL_MESSAGE_PATTERN =
+  /\b(jwt|token|bearer|request|response|fetch|network|backend|api|unauthorized|forbidden|validation|internal|failed|error|dev)\b/i;
+
+const STATUS_ERROR_MESSAGES: Record<number, string> = {
+  400: 'Проверьте данные и попробуйте снова.',
+  401: 'Войдите через Telegram, чтобы продолжить.',
+  403: 'Войдите через Telegram, чтобы продолжить.',
+  404: 'Не нашли нужные данные.',
+  409: 'Данные изменились. Обновите страницу и попробуйте снова.',
+  422: 'Проверьте заполненные поля.',
+  429: 'Слишком много действий. Попробуйте позже.',
+  500: 'Сервис временно недоступен. Попробуйте позже.',
+};
+
+function getStatusErrorMessage(status: number) {
+  return STATUS_ERROR_MESSAGES[status] ?? (status >= 500
+    ? 'Сервис временно недоступен. Попробуйте позже.'
+    : 'Не удалось выполнить действие. Попробуйте снова.');
+}
+
+function isUserFacingRussianMessage(message: string) {
+  return /[а-яё]/i.test(message) && !TECHNICAL_MESSAGE_PATTERN.test(message);
+}
+
 export function toApiErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
-    return error.message;
+    return isUserFacingRussianMessage(error.message) ? error.message : getStatusErrorMessage(error.status);
   }
 
   if (error instanceof Error) {
-    return error.message;
+    return isUserFacingRussianMessage(error.message)
+      ? error.message
+      : 'Не удалось связаться с сервером. Проверьте интернет и попробуйте снова.';
   }
 
   return 'Что-то пошло не так';

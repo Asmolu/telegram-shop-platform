@@ -105,9 +105,9 @@ export function SearchResultsPage() {
       </button>
       <div className="sort-row">
         {[
-          ['newest', 'newest'],
-          ['price_asc', 'price ↑'],
-          ['price_desc', 'price ↓'],
+          ['newest', 'Сначала новые'],
+          ['price_asc', 'Дешевле'],
+          ['price_desc', 'Дороже'],
         ].map(([value, label]) => (
           <button className={sort === value ? 'is-selected' : ''} key={value} type="button" onClick={() => changeSort(value)}>
             {label}

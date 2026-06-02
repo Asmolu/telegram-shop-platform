@@ -1,13 +1,15 @@
 import React from 'react';
 import { checkoutCart, getCart, toApiErrorMessage, validatePromoCode, type Cart, type PromoValidation } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { useRouter } from '../shared/router/RouterProvider';
+import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { formatPrice, getUserDisplayName } from '../shared/utils/format';
 
 export function CheckoutPage() {
-  const { navigate } = useRouter();
+  const { currentPath, searchParams, navigate } = useRouter();
   const { isAuthenticated, user, telegramUser } = useAuth();
+  const returnToParam = searchParams.get('returnTo');
+  const returnTo = getSafeReturnTo(returnToParam);
   const [cart, setCart] = React.useState<Cart | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -90,7 +92,7 @@ export function CheckoutPage() {
         promo_code: promoCode.trim() || null,
       });
       window.dispatchEvent(new Event('miniapp:cart-updated'));
-      navigate(`/order-success/${order.id}`, { replace: true });
+      navigate(withReturnTo(`/order-success/${order.id}`, returnToParam), { replace: true });
     } catch (checkoutError) {
       setNotice(toApiErrorMessage(checkoutError));
     } finally {
@@ -101,19 +103,24 @@ export function CheckoutPage() {
   if (!isAuthenticated) {
     return (
       <div className="page">
-        <TopBar title="Оформление" onBack={() => navigate('/cart?tab=cart')} />
-        <EmptyState title="Нужен вход через Telegram" message="Оформление заказа доступно только после авторизации." />
+        <TopBar title="Оформление" onBack={() => navigate(withReturnTo('/cart?tab=cart', returnToParam))} />
+        <EmptyState
+          title="Нужен вход через Telegram"
+          message="Оформление заказа доступно после входа."
+          actionLabel="Войти"
+          onAction={() => navigate(getAuthPath(currentPath))}
+        />
       </div>
     );
   }
 
   return (
     <div className="page">
-      <TopBar title="Оформление" onBack={() => navigate('/cart?tab=cart')} />
+      <TopBar title="Оформление" onBack={() => navigate(withReturnTo('/cart?tab=cart', returnToParam))} />
       {loading ? <PageLoader text="Проверяем корзину..." /> : null}
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error && (!cart || cart.items.length === 0) ? (
-        <EmptyState title="Корзина пустая" actionLabel="К товарам" onAction={() => navigate('/main')} />
+        <EmptyState title="Корзина пустая" actionLabel="Вернуться к покупкам" onAction={() => navigate(returnTo)} />
       ) : null}
       {!loading && !error && cart && cart.items.length > 0 ? (
         <>
@@ -145,10 +152,10 @@ export function CheckoutPage() {
               <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
               <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>
             </div>
-            <label>Telegram username<input value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
+            <label>Имя в Telegram<input value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
             <label>Комментарий<textarea value={form.comment} onChange={(event) => updateField('comment', event.target.value)} rows={3} /></label>
             <button className="primary-button" type="submit" disabled={busy}>
-              {busy ? 'Создаем заказ...' : 'Оформить заказ'}
+              {busy ? 'Создаём заказ...' : 'Оформить заказ'}
             </button>
           </form>
         </>

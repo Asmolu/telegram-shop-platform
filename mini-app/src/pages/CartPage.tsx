@@ -16,9 +16,9 @@ import {
   type PromoValidation,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { useRouter } from '../shared/router/RouterProvider';
+import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
-import { formatDate, formatPrice } from '../shared/utils/format';
+import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
 import { getProductImageUrl } from '../shared/utils/images';
 
 type CartTab = 'favorites' | 'cart' | 'orders';
@@ -30,9 +30,11 @@ const tabs: Array<[CartTab, string]> = [
 ];
 
 export function CartPage() {
-  const { searchParams, navigate } = useRouter();
+  const { currentPath, searchParams, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const activeTab = (searchParams.get('tab') as CartTab | null) ?? 'cart';
+  const returnToParam = searchParams.get('returnTo');
+  const returnTo = getSafeReturnTo(returnToParam);
   const [cart, setCart] = React.useState<Cart | null>(null);
   const [favorites, setFavorites] = React.useState<Favorite[]>([]);
   const [favoriteProducts, setFavoriteProducts] = React.useState<Product[]>([]);
@@ -134,7 +136,7 @@ export function CartPage() {
     return (
       <div className="page">
         <TopBar title="Покупки" />
-        <UnauthorizedBlock />
+        <UnauthorizedBlock onAuth={() => navigate(getAuthPath(currentPath))} />
       </div>
     );
   }
@@ -148,7 +150,7 @@ export function CartPage() {
             className={activeTab === value ? 'is-selected' : ''}
             key={value}
             type="button"
-            onClick={() => navigate(`/cart?tab=${value}`)}
+            onClick={() => navigate(withReturnTo(`/cart?tab=${value}`, returnToParam))}
           >
             {label}
           </button>
@@ -174,10 +176,10 @@ export function CartPage() {
           promoCode={promoCode}
           promoValidation={promoValidation}
           onApplyPromo={applyPromo}
-          onCheckout={() => navigate('/checkout')}
+          onCheckout={() => navigate(withReturnTo('/checkout', returnToParam))}
           onPromoCodeChange={setPromoCode}
           onQuantityChange={changeQuantity}
-          onGoShop={() => navigate('/main')}
+          onGoShop={() => navigate(returnTo)}
           onRemove={removeItem}
         />
       ) : null}
@@ -186,11 +188,13 @@ export function CartPage() {
   );
 }
 
-function UnauthorizedBlock() {
+function UnauthorizedBlock({ onAuth }: { onAuth: () => void }) {
   return (
     <EmptyState
       title="Нужен вход через Telegram"
-      message="Избранное, корзина и заказы доступны после Telegram auth или dev JWT."
+      message="Избранное, корзина и заказы доступны после входа. В браузере можно использовать тестовый код доступа."
+      actionLabel="Войти"
+      onAction={onAuth}
     />
   );
 }
@@ -327,7 +331,9 @@ function OrdersTab({ orders }: { orders: Order[] }) {
             <strong>Заказ {order.order_number}</strong>
             <small>{formatDate(order.created_at)} · {order.items.length} поз.</small>
           </div>
-          <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>{order.status}</span>
+          <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>
+            {formatOrderStatus(order.status)}
+          </span>
           <strong>{formatPrice(order.total_amount)}</strong>
           <button className="secondary-button" type="button" onClick={() => navigate(`/order-success/${order.id}`)}>
             Подробнее

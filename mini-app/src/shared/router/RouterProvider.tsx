@@ -5,6 +5,7 @@ type NavigateOptions = {
 };
 
 type RouterContextValue = {
+  currentPath: string;
   pathname: string;
   searchParams: URLSearchParams;
   navigate: (to: string, options?: NavigateOptions) => void;
@@ -43,6 +44,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo(() => {
     const url = new URL(location, window.location.origin);
     return {
+      currentPath: `${url.pathname}${url.search}`,
       pathname: url.pathname,
       searchParams: url.searchParams,
       navigate,
@@ -127,4 +129,37 @@ export function getNumericRouteParam(pathname: string, prefix: string) {
   const raw = pathname.replace(prefix, '').split('/')[0];
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
+}
+
+export function getSafeReturnTo(value: string | null | undefined, fallback = '/main') {
+  if (!value || value.startsWith('//') || !value.startsWith('/') || value.includes('\\')) {
+    return fallback;
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || getRouteId(url.pathname) === 'not-found') {
+      return fallback;
+    }
+
+    const path = `${url.pathname}${url.search}`;
+    return path === '/' ? fallback : path;
+  } catch {
+    return fallback;
+  }
+}
+
+export function withReturnTo(to: string, returnTo: string | null | undefined) {
+  const safeReturnTo = getSafeReturnTo(returnTo, '');
+  if (!safeReturnTo) {
+    return to;
+  }
+
+  const url = new URL(to, window.location.origin);
+  url.searchParams.set('returnTo', safeReturnTo);
+  return `${url.pathname}${url.search}`;
+}
+
+export function getAuthPath(returnTo: string | null | undefined) {
+  return withReturnTo('/', returnTo);
 }

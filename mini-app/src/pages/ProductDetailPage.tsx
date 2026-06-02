@@ -15,13 +15,13 @@ import {
   type Review,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
+import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { formatDate, formatPrice } from '../shared/utils/format';
 import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 
 export function ProductDetailPage() {
-  const { pathname, navigate } = useRouter();
+  const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const productId = getNumericRouteParam(pathname, '/product/');
   const [product, setProduct] = React.useState<Product | null>(null);
@@ -92,7 +92,7 @@ export function ProductDetailPage() {
   async function toggleFavorite() {
     if (!product) return;
     if (!isAuthenticated) {
-      setNotice('Откройте приложение через Telegram, чтобы сохранить товар.');
+      navigate(getAuthPath(currentPath));
       return;
     }
 
@@ -115,11 +115,11 @@ export function ProductDetailPage() {
       return;
     }
     if (!isAuthenticated) {
-      setNotice('Откройте приложение через Telegram или добавьте dev JWT, чтобы оформить покупку.');
+      navigate(getAuthPath(currentPath));
       return;
     }
     if (inCart) {
-      navigate('/cart?tab=cart');
+      navigate(withReturnTo('/cart?tab=cart', currentPath));
       return;
     }
 

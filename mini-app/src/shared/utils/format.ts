@@ -34,6 +34,18 @@ export function pluralizeProducts(count: number) {
   return `${count} товаров`;
 }
 
+export function formatOrderStatus(status: string) {
+  const labels: Record<string, string> = {
+    NEW: 'Новый',
+    PROCESSING: 'В обработке',
+    SHIPPED: 'Отправлен',
+    DELIVERED: 'Доставлен',
+    CANCELLED: 'Отменён',
+  };
+
+  return labels[status] ?? status;
+}
+
 export function getUserDisplayName(user?: { first_name?: string | null; last_name?: string | null; username?: string | null } | null) {
   if (!user) {
     return 'Гость';

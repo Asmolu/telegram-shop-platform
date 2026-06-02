@@ -118,9 +118,9 @@ export function SearchPage() {
             <input
               value={color}
               onChange={(event) => setColor(event.target.value)}
-              placeholder="Например: black"
+              placeholder="Например: черный"
             />
-            <small>Фильтр применится по вариантам товара на клиенте.</small>
+            <small>Покажем товары с подходящим цветом.</small>
           </section>
 
           <section className="filter-section">
@@ -143,11 +143,11 @@ export function SearchPage() {
             <h2>Сортировка</h2>
             <div className="segmented-control">
               {[
-                ['newest', 'newest'],
-                ['price_asc', 'price ↑'],
-                ['price_desc', 'price ↓'],
-                ['popular', 'popular'],
-                ['rating', 'rating'],
+                ['newest', 'Сначала новые'],
+                ['price_asc', 'Дешевле'],
+                ['price_desc', 'Дороже'],
+                ['popular', 'Популярные'],
+                ['rating', 'По рейтингу'],
               ].map(([value, label]) => (
                 <button
                   className={sort === value ? 'is-selected' : ''}

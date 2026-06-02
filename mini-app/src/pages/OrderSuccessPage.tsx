@@ -1,14 +1,15 @@
 import React from 'react';
 import { getOrder, toApiErrorMessage, type Order } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
+import { getAuthPath, getNumericRouteParam, getSafeReturnTo, useRouter } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, PageLoader, TopBar } from '../shared/ui';
-import { formatPrice } from '../shared/utils/format';
+import { formatOrderStatus, formatPrice } from '../shared/utils/format';
 
 export function OrderSuccessPage() {
-  const { pathname, navigate } = useRouter();
+  const { currentPath, pathname, searchParams, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const orderId = getNumericRouteParam(pathname, '/order-success/');
+  const returnTo = getSafeReturnTo(searchParams.get('returnTo'));
   const [order, setOrder] = React.useState<Order | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -43,7 +44,12 @@ export function OrderSuccessPage() {
     return (
       <div className="page">
         <TopBar title="Заказ" />
-        <EmptyState title="Нужен вход через Telegram" />
+        <EmptyState
+          title="Нужен вход через Telegram"
+          message="Детали заказа доступны после входа."
+          actionLabel="Войти"
+          onAction={() => navigate(getAuthPath(currentPath))}
+        />
       </div>
     );
   }
@@ -59,13 +65,15 @@ export function OrderSuccessPage() {
           <h1>Заказ создан</h1>
           <p>Заказ {order.order_number}</p>
           <strong>{formatPrice(order.total_amount)}</strong>
-          <span className="status-pill status-pill--new">{order.status}</span>
+          <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>
+            {formatOrderStatus(order.status)}
+          </span>
           <div className="button-row">
             <button className="primary-button" type="button" onClick={() => navigate('/cart?tab=orders')}>
               Перейти к заказам
             </button>
-            <button className="secondary-button" type="button" onClick={() => navigate('/main')}>
-              Вернуться в магазин
+            <button className="secondary-button" type="button" onClick={() => navigate(returnTo)}>
+              Вернуться к покупкам
             </button>
           </div>
         </section>

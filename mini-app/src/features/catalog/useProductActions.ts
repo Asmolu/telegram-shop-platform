@@ -7,7 +7,7 @@ import {
   type Product,
 } from '../../shared/api';
 import { useAuth } from '../../shared/auth/AuthProvider';
-import { useRouter } from '../../shared/router/RouterProvider';
+import { getAuthPath, useRouter } from '../../shared/router/RouterProvider';
 
 export function useProductActions({
   favoriteIds,
@@ -17,16 +17,16 @@ export function useProductActions({
   setFavoriteIds: React.Dispatch<React.SetStateAction<Set<number>>>;
 }) {
   const { isAuthenticated } = useAuth();
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const [notice, setNotice] = React.useState<string | null>(null);
 
   const requireAuth = React.useCallback(() => {
     if (isAuthenticated) {
       return true;
     }
-    setNotice('Откройте приложение через Telegram или добавьте dev JWT, чтобы выполнить действие.');
+    navigate(getAuthPath(currentPath));
     return false;
-  }, [isAuthenticated]);
+  }, [currentPath, isAuthenticated, navigate]);
 
   const toggleFavorite = React.useCallback(
     async (product: Product) => {
