@@ -79,7 +79,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       setRegistration(response);
       setVerificationCode('');
       setSuccess(
-        'Registration started. Open Bot 2, send the start command, and enter the code it sends.',
+        'Registration started. Open Bot 2 and send the start command. The code is sent after seller group approval.',
       );
     } catch (requestError) {
       setError(formatApiError(requestError, 'Could not start registration.'));
@@ -133,6 +133,11 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
         setError(
           `Open Bot 2 and send ${registration.start_command} first. Then use resend if the code does not arrive.`,
         );
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.message.includes('awaiting approval')
+      ) {
+        setError('Seller group approval is still pending. The code can be resent after approval.');
       } else {
         setError(formatApiError(requestError, 'Could not resend the code.'));
       }
@@ -283,8 +288,9 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                   </a>
                 ) : null}
                 <p className="muted-text">
-                  Send this command to Bot 2. The bot will reply with a verification code.
-                  Registration expires at {formatDateTime(registration.expires_at)}.
+                  Send this command to Bot 2. Seller group approval expires in 2 minutes; after
+                  approval the bot sends a verification code. Registration expires at{' '}
+                  {formatDateTime(registration.expires_at)}.
                 </p>
                 <label className="field">
                   <span>Confirmation code</span>

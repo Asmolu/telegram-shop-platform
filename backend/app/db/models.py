@@ -91,6 +91,8 @@ class NotificationStatus(StrEnum):
 
 class SellerRegistrationStatus(StrEnum):
     PENDING = "PENDING"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPROVED = "APPROVED"
     VERIFIED = "VERIFIED"
     EXPIRED = "EXPIRED"
     REJECTED = "REJECTED"
@@ -209,6 +211,8 @@ class PendingSellerRegistration(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     telegram_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     bot_start_token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
@@ -218,6 +222,18 @@ class PendingSellerRegistration(Base):
         nullable=True,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approval_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    approval_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    approval_decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[SellerRegistrationStatus] = mapped_column(
         Enum(SellerRegistrationStatus, name="seller_registration_status"),

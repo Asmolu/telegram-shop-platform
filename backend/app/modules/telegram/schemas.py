@@ -31,11 +31,21 @@ class TelegramMessage(BaseModel):
     from_user: TelegramUser | None = Field(default=None, alias="from")
 
 
+class TelegramCallbackQuery(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: str
+    from_user: TelegramUser = Field(alias="from")
+    message: TelegramMessage | None = None
+    data: str | None = None
+
+
 class TelegramUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     update_id: int | None = None
     message: TelegramMessage | None = None
+    callback_query: TelegramCallbackQuery | None = None
 
 
 class SellerBotWebhookResponse(BaseModel):

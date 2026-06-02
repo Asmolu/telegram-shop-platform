@@ -722,8 +722,13 @@ Registration flow:
    `secret_token` headers.
 5. Backend links the Telegram user/chat identity from Bot 2 and validates the
    username when available.
-6. Bot 2 sends an expiring verification code.
-7. Seller confirms the code in Seller Panel, backend creates or upgrades a
+6. Bot 2 sends an approval request to the configured seller group with safe
+   seller details and Confirm / Reject inline buttons.
+7. Approval must happen within 2 minutes. The MVP enforces this on the next
+   callback, resend, or confirmation check instead of requiring a background
+   worker.
+8. After approval, Bot 2 sends an expiring verification code.
+9. Seller confirms the code in Seller Panel, backend creates or upgrades a
    SELLER user, stores `SellerCredential`, and returns a JWT.
 
 Bot 2 is configured only in backend environment variables. The frontend must
@@ -734,3 +739,6 @@ Seller Bot management is restricted to SELLER/ADMIN users. MVP broadcast sends
 only to the configured seller notification chat and records audit log entries;
 it is not an all-customer broadcast without stored recipient chat IDs and user
 consent.
+Seller group Bot 2 commands include `/sellers` for a limited safe seller list
+and `/block_seller <user_id>` for deactivating seller access while preserving
+orders and audit history.

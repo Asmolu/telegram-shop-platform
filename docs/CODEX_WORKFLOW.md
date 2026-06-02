@@ -46,7 +46,10 @@ Before merging Codex-generated changes, check:
 - New DB fields have Alembic migrations.
 - Business logic is not inside routers.
 - Seller Portal auth uses the protected Bot 2 webhook start-token verification
-  flow and never exposes bot tokens.
+  flow, requires seller group approval before code delivery, and never exposes
+  bot tokens.
+- Bot 2 seller security commands are restricted to the configured seller group
+  and audit critical actions.
 - Tests or smoke checks were added for important behavior.
 - README/SRS/Sprint Plan were updated if architecture changed.
 

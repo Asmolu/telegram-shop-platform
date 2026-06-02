@@ -1,10 +1,13 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import NotificationChannel
+from app.core.errors import AppError
+from app.db.models import NotificationChannel, UserRole
 from app.modules.audit.service import AuditService
 from app.modules.notifications.schemas import NotificationList
 from app.modules.notifications.service import NotificationsService
+from app.modules.seller_bot.repository import SellerBotRepository
 from app.modules.seller_bot.schemas import (
     SellerBotActionResponse,
     SellerBotBroadcastRequest,
@@ -15,6 +18,10 @@ from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 
 SELLER_BOT_TEST_MESSAGE = "seller_bot.test_message"
 SELLER_BOT_BROADCAST = "seller_bot.broadcast"
+SELLER_BOT_BLOCK_SELLER = "seller_bot.block_seller"
+SELLER_BOT_UNBLOCK_SELLER = "seller_bot.unblock_seller"
+SELLER_BOT_COMMAND_LIMIT = 20
+SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
 
 
 class SellerBotService:
@@ -29,6 +36,7 @@ class SellerBotService:
         audit_service: AuditService | None = None,
     ) -> None:
         self.session = session
+        self.repository = SellerBotRepository(session)
         self.telegram_service = telegram_service or TelegramService()
         self.notifications_service = notifications_service or NotificationsService(
             session,
@@ -119,6 +127,74 @@ class SellerBotService:
             channel=NotificationChannel.TELEGRAM,
         )
 
+    async def format_sellers_command(self, *, chat_id: int) -> str:
+        self._require_seller_group(chat_id)
+        sellers, total = await self.repository.list_sellers(limit=SELLER_BOT_COMMAND_LIMIT)
+        if not sellers:
+            return "No sellers found."
+
+        lines = [f"Sellers ({len(sellers)} of {total}):"]
+        for user, credential in sellers:
+            username = f"@{credential.telegram_username}" if credential.telegram_username else "-"
+            telegram_user_id = (
+                str(credential.telegram_user_id)
+                if credential.telegram_user_id is not None
+                else "-"
+            )
+            telegram_chat_id = (
+                str(credential.telegram_chat_id)
+                if credential.telegram_chat_id is not None
+                else "-"
+            )
+            active_status = "active" if user.is_active else "blocked"
+            lines.append(
+                "\n".join(
+                    (
+                        f"#{user.id} {credential.email}",
+                        f"username: {username}",
+                        f"telegram user/chat: {telegram_user_id} / {telegram_chat_id}",
+                        f"role: {user.role.value}",
+                        f"status: {active_status}",
+                        f"created_at: {user.created_at.isoformat()}",
+                    )
+                )
+            )
+        if total > len(sellers):
+            lines.append(f"Showing first {len(sellers)} sellers. Use the API for full history.")
+        return "\n\n".join(lines)
+
+    async def block_seller_command(
+        self,
+        *,
+        chat_id: int,
+        target_user_id: int,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        return await self._set_seller_active_state(
+            chat_id=chat_id,
+            target_user_id=target_user_id,
+            is_active=False,
+            actor_telegram_user_id=actor_telegram_user_id,
+            actor_username=actor_username,
+        )
+
+    async def unblock_seller_command(
+        self,
+        *,
+        chat_id: int,
+        target_user_id: int,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        return await self._set_seller_active_state(
+            chat_id=chat_id,
+            target_user_id=target_user_id,
+            is_active=True,
+            actor_telegram_user_id=actor_telegram_user_id,
+            actor_username=actor_username,
+        )
+
     async def _audit(
         self,
         *,
@@ -139,3 +215,61 @@ class SellerBotService:
             },
             commit=True,
         )
+
+    async def _set_seller_active_state(
+        self,
+        *,
+        chat_id: int,
+        target_user_id: int,
+        is_active: bool,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        self._require_seller_group(chat_id)
+        user = await self.repository.get_seller_user(target_user_id)
+        if user is None:
+            raise AppError("Seller user not found", 404)
+        if user.role == UserRole.ADMIN and not is_active:
+            raise AppError("ADMIN users cannot be blocked from Bot 2", 400)
+        if user.is_active == is_active:
+            state = "active" if is_active else "blocked"
+            return f"Seller #{user.id} is already {state}."
+
+        before_data = {
+            "id": user.id,
+            "role": user.role.value,
+            "is_active": user.is_active,
+        }
+        user.is_active = is_active
+        action = SELLER_BOT_UNBLOCK_SELLER if is_active else SELLER_BOT_BLOCK_SELLER
+        await self.audit_service.record_action(
+            actor_user_id=None,
+            action=action,
+            entity_type="user",
+            entity_id=user.id,
+            before_data=before_data,
+            after_data={
+                "id": user.id,
+                "role": user.role.value,
+                "is_active": user.is_active,
+            },
+            metadata={
+                "actor_telegram_user_id": actor_telegram_user_id,
+                "actor_username": actor_username,
+                "source": "seller_bot_command",
+            },
+            commit=False,
+        )
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError("Seller active state update failed", 409) from exc
+
+        state = "unblocked" if is_active else "blocked"
+        return f"Seller #{user.id} has been {state}."
+
+    def _require_seller_group(self, chat_id: int) -> None:
+        configured_chat_id = settings.telegram_seller_chat_id
+        if not configured_chat_id or str(chat_id) != configured_chat_id.strip():
+            raise AppError(SELLER_GROUP_ONLY_MESSAGE, 403)

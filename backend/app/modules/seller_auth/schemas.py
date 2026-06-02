@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.db.models import SellerRegistrationStatus
 from app.modules.users.schemas import UserRead
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -67,7 +68,9 @@ class SellerTelegramStartRequest(BaseModel):
 class SellerTelegramStartResponse(BaseModel):
     registration_id: int
     telegram_username: str | None
-    verification_expires_at: datetime
+    status: SellerRegistrationStatus
+    approval_expires_at: datetime | None = None
+    verification_expires_at: datetime | None = None
 
 
 class SellerRegistrationConfirmRequest(BaseModel):

@@ -278,9 +278,12 @@ def test_seller_registration_status_model_matches_head_migration() -> None:
         Path(__file__).resolve().parents[1]
         / "alembic"
         / "versions"
-        / "20260601_0014_fix_seller_registration_status_enum.py"
+        / "20260602_0015_add_seller_registration_approval_flow.py"
     )
-    spec = importlib.util.spec_from_file_location("fix_seller_registration_status", migration_path)
+    spec = importlib.util.spec_from_file_location(
+        "add_seller_registration_approval_flow",
+        migration_path,
+    )
     assert spec is not None
     assert spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
@@ -290,11 +293,20 @@ def test_seller_registration_status_model_matches_head_migration() -> None:
     expected_values = [status.value for status in SellerRegistrationStatus]
     status_type = PendingSellerRegistration.__table__.c.status.type
 
-    assert expected_values == ["PENDING", "VERIFIED", "EXPIRED", "REJECTED"]
+    assert expected_values == [
+        "PENDING",
+        "AWAITING_APPROVAL",
+        "APPROVED",
+        "VERIFIED",
+        "EXPIRED",
+        "REJECTED",
+    ]
     assert status_type.name == "seller_registration_status"
     assert status_type.enums == expected_values
     assert migration.CANONICAL_SELLER_REGISTRATION_STATUS_VALUES == tuple(expected_values)
-    assert 'value_transform="upper"' in content
+    assert "approval_expires_at" in content
+    assert "AWAITING_APPROVAL" in content
+    assert "APPROVED" in content
     assert "status::text" in content
     assert "ALTER COLUMN status DROP DEFAULT" in content
     assert "ALTER COLUMN status SET DEFAULT" in content

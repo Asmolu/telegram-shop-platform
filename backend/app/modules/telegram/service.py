@@ -4,6 +4,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.modules.seller_auth.callbacks import parse_seller_registration_callback_data
 from app.modules.seller_auth.schemas import SellerTelegramStartRequest
 from app.modules.telegram.schemas import SellerBotWebhookResponse, TelegramUpdate
 
@@ -11,6 +12,9 @@ SELLER_START_PREFIX = "seller_"
 START_COMMAND_RE = re.compile(
     r"^/start(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<payload>\S+))?",
     re.IGNORECASE,
+)
+COMMAND_RE = re.compile(
+    r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$"
 )
 INVALID_START_MESSAGE = (
     "Откройте регистрацию в Seller Panel и отправьте Bot 2 команду /start seller_<token>."
@@ -47,8 +51,20 @@ class TelegramService:
 
         await self.send_message(self.seller_chat_id, message)
 
-    async def send_message(self, chat_id: str, message: str) -> None:
-        payload = {"chat_id": chat_id, "text": message, "disable_web_page_preview": True}
+    async def send_message(
+        self,
+        chat_id: str,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "text": message,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         body = await self._post("sendMessage", payload)
         if not body.get("ok", False):
             description = str(body.get("description") or "Telegram API returned an error")
@@ -128,15 +144,31 @@ class SellerBotWebhookService:
         self,
         *,
         seller_auth_service,
+        seller_bot_service=None,
         telegram_service: TelegramService | None = None,
     ) -> None:
         self.seller_auth_service = seller_auth_service
+        self.seller_bot_service = seller_bot_service
         self.telegram_service = telegram_service or seller_auth_service.telegram_service
 
     async def handle_update(self, update: TelegramUpdate) -> SellerBotWebhookResponse:
+        if update.callback_query is not None:
+            return await self._handle_callback_query(update)
+
         message = update.message
         if message is None or message.text is None:
             return self._response(handled=False, result="unsupported_update")
+
+        command_match = COMMAND_RE.match(message.text.strip())
+        if command_match is not None:
+            command = command_match.group("command").lower()
+            args = (command_match.group("args") or "").strip()
+            if command in {"/sellers", "/block_seller", "/unblock_seller"}:
+                return await self._handle_seller_group_command(
+                    command=command,
+                    args=args,
+                    update=update,
+                )
 
         start_payload = self._extract_start_payload(message.text)
         if start_payload is None:
@@ -170,6 +202,93 @@ class SellerBotWebhookService:
 
         return self._response(handled=True, result="registration_linked")
 
+    async def _handle_callback_query(
+        self,
+        update: TelegramUpdate,
+    ) -> SellerBotWebhookResponse:
+        callback_query = update.callback_query
+        if callback_query is None or not callback_query.data:
+            return self._response(handled=False, result="unsupported_callback")
+        if callback_query.message is None:
+            return self._response(handled=False, result="callback_without_message")
+        if not self._is_seller_group_chat(callback_query.message.chat.id):
+            await self._send_chat_message(
+                callback_query.message.chat.id,
+                "Seller registration approval is available only in the seller group.",
+            )
+            return self._response(handled=True, result="approval_rejected_outside_seller_group")
+
+        try:
+            action, registration_id = parse_seller_registration_callback_data(callback_query.data)
+            if action == "approve":
+                await self.seller_auth_service.approve_registration(
+                    registration_id=registration_id,
+                    actor_telegram_user_id=callback_query.from_user.id,
+                    actor_username=callback_query.from_user.username,
+                )
+                return self._response(handled=True, result="registration_approved")
+            await self.seller_auth_service.reject_registration(
+                registration_id=registration_id,
+                actor_telegram_user_id=callback_query.from_user.id,
+                actor_username=callback_query.from_user.username,
+            )
+            return self._response(handled=True, result="registration_rejected")
+        except AppError as exc:
+            await self._send_chat_message(
+                callback_query.message.chat.id,
+                self._registration_error_message(exc),
+            )
+            return self._response(handled=True, result="registration_callback_error")
+
+    async def _handle_seller_group_command(
+        self,
+        *,
+        command: str,
+        args: str,
+        update: TelegramUpdate,
+    ) -> SellerBotWebhookResponse:
+        message = update.message
+        if message is None:
+            return self._response(handled=False, result="unsupported_update")
+        if self.seller_bot_service is None:
+            await self._send_chat_message(
+                message.chat.id,
+                "Seller bot commands are not configured.",
+            )
+            return self._response(handled=True, result="seller_bot_commands_unconfigured")
+
+        try:
+            if command == "/sellers":
+                response_text = await self.seller_bot_service.format_sellers_command(
+                    chat_id=message.chat.id,
+                )
+                await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="sellers_list_sent")
+
+            target_user_id = self._parse_user_id_arg(args)
+            actor_user = message.from_user
+            if command == "/block_seller":
+                response_text = await self.seller_bot_service.block_seller_command(
+                    chat_id=message.chat.id,
+                    target_user_id=target_user_id,
+                    actor_telegram_user_id=actor_user.id if actor_user is not None else None,
+                    actor_username=actor_user.username if actor_user is not None else None,
+                )
+                await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="seller_blocked")
+
+            response_text = await self.seller_bot_service.unblock_seller_command(
+                chat_id=message.chat.id,
+                target_user_id=target_user_id,
+                actor_telegram_user_id=actor_user.id if actor_user is not None else None,
+                actor_username=actor_user.username if actor_user is not None else None,
+            )
+            await self._send_chat_message(message.chat.id, response_text)
+            return self._response(handled=True, result="seller_unblocked")
+        except AppError as exc:
+            await self._send_chat_message(message.chat.id, exc.message)
+            return self._response(handled=True, result="seller_command_error")
+
     def _extract_start_payload(self, text: str) -> str | None:
         match = START_COMMAND_RE.match(text.strip())
         if match is None:
@@ -184,6 +303,19 @@ class SellerBotWebhookService:
             return False
         return True
 
+    def _is_seller_group_chat(self, chat_id: int) -> bool:
+        seller_chat_id = settings.telegram_seller_chat_id
+        return bool(seller_chat_id and str(chat_id) == seller_chat_id.strip())
+
+    def _parse_user_id_arg(self, args: str) -> int:
+        try:
+            user_id = int(args.strip())
+        except ValueError:
+            raise AppError("Usage: /block_seller <user_id>", 400) from None
+        if user_id <= 0:
+            raise AppError("Usage: /block_seller <user_id>", 400)
+        return user_id
+
     def _registration_error_message(self, exc: AppError) -> str:
         message = exc.message.lower()
         if "expired" in message:
@@ -195,6 +327,14 @@ class SellerBotWebhookService:
                 "Telegram username не совпадает с регистрацией. "
                 "Откройте Bot 2 из аккаунта, указанного в Seller Panel."
             )
+        if "awaiting approval" in message:
+            return "Регистрация продавца уже ожидает подтверждения."
+        if "already approved" in message or "already verified" in message:
+            return "Регистрация продавца уже обработана."
+        if "rejected" in message:
+            return "Регистрация продавца уже отклонена."
+        if "invalid approval callback" in message:
+            return "Недействительная кнопка подтверждения регистрации."
         return "Ссылка регистрации недействительна. Начните регистрацию заново в Seller Panel."
 
     def _response(self, *, handled: bool, result: str) -> SellerBotWebhookResponse:

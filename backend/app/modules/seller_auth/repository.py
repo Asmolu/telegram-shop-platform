@@ -11,6 +11,12 @@ from app.db.models import (
     User,
 )
 
+ACTIVE_SELLER_REGISTRATION_STATUSES = (
+    SellerRegistrationStatus.PENDING,
+    SellerRegistrationStatus.AWAITING_APPROVAL,
+    SellerRegistrationStatus.APPROVED,
+)
+
 
 class SellerAuthRepository:
     """Database access for seller credentials and pending registrations."""
@@ -51,7 +57,7 @@ class SellerAuthRepository:
             select(PendingSellerRegistration)
             .where(
                 PendingSellerRegistration.email == email,
-                PendingSellerRegistration.status == SellerRegistrationStatus.PENDING,
+                PendingSellerRegistration.status.in_(ACTIVE_SELLER_REGISTRATION_STATUSES),
                 PendingSellerRegistration.expires_at > now,
             )
             .order_by(PendingSellerRegistration.created_at.desc())

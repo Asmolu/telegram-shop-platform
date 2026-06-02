@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 
 from app.common.deps import get_current_user
+from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import verify_access_token
 from app.db.models import (
@@ -20,6 +21,7 @@ from app.modules.seller_auth.router import get_seller_auth_service
 from app.modules.seller_auth.schemas import (
     SellerLoginRequest,
     SellerRegistrationConfirmRequest,
+    SellerRegistrationResendCodeRequest,
     SellerRegistrationStartRequest,
     SellerTelegramStartRequest,
 )
@@ -30,6 +32,7 @@ class DummySession:
     def __init__(self) -> None:
         self.commits = 0
         self.rolled_back = False
+        self.added: list[object] = []
 
     async def commit(self) -> None:
         self.commits += 1
@@ -43,13 +46,33 @@ class DummySession:
     async def flush(self) -> None:
         return None
 
+    def add(self, instance: object) -> None:
+        self.added.append(instance)
+
 
 class FakeTelegramService:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.reply_markups: list[dict[str, object]] = []
 
-    async def send_message(self, chat_id: str, message: str) -> None:
+    async def send_message(
+        self,
+        chat_id: str,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
         self.messages.append((chat_id, message))
+        if reply_markup is not None:
+            self.reply_markups.append(reply_markup)
+
+
+class FakeAuditService:
+    def __init__(self) -> None:
+        self.records: list[dict[str, object]] = []
+
+    async def record_action(self, **kwargs) -> None:
+        self.records.append(kwargs)
 
 
 class FakeSellerAuthRepository:
@@ -95,7 +118,12 @@ class FakeSellerAuthRepository:
         for registration in self.registrations.values():
             if (
                 registration.email == email
-                and registration.status == SellerRegistrationStatus.PENDING
+                and registration.status
+                in {
+                    SellerRegistrationStatus.PENDING,
+                    SellerRegistrationStatus.AWAITING_APPROVAL,
+                    SellerRegistrationStatus.APPROVED,
+                }
                 and registration.expires_at > now
             ):
                 return registration
@@ -201,7 +229,10 @@ async def test_start_seller_registration_rejects_duplicate_email() -> None:
 
 
 @pytest.mark.asyncio
-async def test_telegram_start_links_identity_and_sends_code() -> None:
+async def test_telegram_start_links_identity_and_sends_approval_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, repository, _, telegram = _seller_auth_service()
     started = await service.start_registration(_start_payload())
 
@@ -216,15 +247,16 @@ async def test_telegram_start_links_identity_and_sends_code() -> None:
 
     registration = repository.registrations[started.registration_id]
     assert response.registration_id == started.registration_id
+    assert response.status == SellerRegistrationStatus.AWAITING_APPROVAL
     assert registration.telegram_user_id == 99
     assert registration.telegram_chat_id == 100
-    assert registration.verification_code_hash != "123456"
-    assert telegram.messages == [
-        (
-            "100",
-            "Код подтверждения: 123456. Введите его в Seller Panel.",
-        )
-    ]
+    assert registration.status == SellerRegistrationStatus.AWAITING_APPROVAL
+    assert registration.approval_expires_at == _now() + timedelta(seconds=120)
+    assert registration.verification_code_hash is None
+    assert telegram.messages[0][0] == "-100"
+    assert "seller@example.com" in telegram.messages[0][1]
+    assert "registration id: 1" in telegram.messages[0][1]
+    assert telegram.reply_markups[0]["inline_keyboard"]
 
 
 @pytest.mark.asyncio
@@ -244,7 +276,97 @@ async def test_telegram_start_rejects_username_mismatch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_confirm_registration_creates_verified_seller_and_token() -> None:
+async def test_approval_sends_verification_code_to_private_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _, telegram = _seller_auth_service()
+    started = await service.start_registration(_start_payload())
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+    telegram.messages.clear()
+
+    await service.approve_registration(
+        registration_id=started.registration_id,
+        actor_telegram_user_id=500,
+        actor_username="approver",
+    )
+
+    registration = repository.registrations[started.registration_id]
+    assert registration.status == SellerRegistrationStatus.APPROVED
+    assert registration.verification_code_hash != "123456"
+    assert telegram.messages == [
+        ("100", "Код подтверждения: 123456. Введите его в Seller Panel."),
+        ("-100", "Регистрация продавца подтверждена. Код отправлен продавцу."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resend_code_before_approval_returns_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _, _ = _seller_auth_service()
+    started = await service.start_registration(_start_payload())
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+
+    with pytest.raises(AppError, match="awaiting approval"):
+        await service.resend_code(
+            SellerRegistrationResendCodeRequest(registration_id=started.registration_id)
+        )
+
+
+@pytest.mark.asyncio
+async def test_reject_blocks_registration_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _, telegram = _seller_auth_service()
+    started = await service.start_registration(_start_payload())
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+    telegram.messages.clear()
+
+    await service.reject_registration(
+        registration_id=started.registration_id,
+        actor_telegram_user_id=500,
+        actor_username="approver",
+    )
+
+    assert ("100", "Регистрация не удалась.") in telegram.messages
+    with pytest.raises(AppError, match="rejected"):
+        await service.confirm_registration(
+            SellerRegistrationConfirmRequest(
+                registration_id=started.registration_id,
+                code="123456",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_expired_approval_cannot_be_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, repository, _, _ = _seller_auth_service()
     started = await service.start_registration(_start_payload())
     await service.handle_telegram_start(
@@ -254,6 +376,73 @@ async def test_confirm_registration_creates_verified_seller_and_token() -> None:
             telegram_chat_id=100,
             telegram_username="@sellername",
         )
+    )
+    registration = repository.registrations[started.registration_id]
+    registration.approval_expires_at = _now() - timedelta(seconds=1)
+
+    with pytest.raises(AppError, match="approval expired"):
+        await service.approve_registration(
+            registration_id=started.registration_id,
+            actor_telegram_user_id=500,
+            actor_username="approver",
+        )
+    assert registration.status == SellerRegistrationStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_duplicate_approval_does_not_send_duplicate_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _, telegram = _seller_auth_service()
+    started = await service.start_registration(_start_payload())
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+    telegram.messages.clear()
+
+    await service.approve_registration(
+        registration_id=started.registration_id,
+        actor_telegram_user_id=500,
+        actor_username="approver",
+    )
+    with pytest.raises(AppError, match="already approved"):
+        await service.approve_registration(
+            registration_id=started.registration_id,
+            actor_telegram_user_id=500,
+            actor_username="approver",
+        )
+
+    private_code_messages = [
+        message for message in telegram.messages if message[0] == "100" and "123456" in message[1]
+    ]
+    assert len(private_code_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_registration_creates_verified_seller_and_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _, _ = _seller_auth_service()
+    started = await service.start_registration(_start_payload())
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+    await service.approve_registration(
+        registration_id=started.registration_id,
+        actor_telegram_user_id=500,
+        actor_username="approver",
     )
 
     response = await service.confirm_registration(
@@ -270,7 +459,10 @@ async def test_confirm_registration_creates_verified_seller_and_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_confirm_registration_rejects_expired_code() -> None:
+async def test_confirm_registration_rejects_expired_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, repository, _, _ = _seller_auth_service()
     started = await service.start_registration(_start_payload())
     await service.handle_telegram_start(
@@ -280,6 +472,11 @@ async def test_confirm_registration_rejects_expired_code() -> None:
             telegram_chat_id=100,
             telegram_username="@sellername",
         )
+    )
+    await service.approve_registration(
+        registration_id=started.registration_id,
+        actor_telegram_user_id=500,
+        actor_username="approver",
     )
     repository.registrations[started.registration_id].verification_expires_at = _now() - timedelta(
         seconds=1
@@ -392,6 +589,7 @@ def _seller_auth_service() -> tuple[
     service = SellerAuthService(
         session,
         telegram_service=telegram,
+        audit_service=FakeAuditService(),
         token_factory=lambda: "start-token",
         code_factory=lambda: "123456",
         now_factory=_now,

@@ -126,12 +126,19 @@ flow:
    `TELEGRAM_SELLER_WEBHOOK_SECRET`.
 4. The backend links the Telegram user/chat through the existing seller
    registration service boundary.
-5. Bot 2 sends a verification code, and the seller confirms through
+5. Bot 2 sends an approval request to `TELEGRAM_SELLER_CHAT_ID` with safe seller
+   details and Confirm / Reject inline buttons.
+6. Approval must happen within 2 minutes. Expiration is enforced on the next
+   registration action or callback, so no separate worker is required for the
+   MVP.
+7. After group approval, Bot 2 sends a verification code, and the seller confirms through
    `POST /api/v1/seller-auth/register/confirm`.
 
 Seller bot management is available under `/api/v1/seller-bot` for SELLER/ADMIN
 users. MVP broadcast sends only to the configured seller notification chat; it
 does not claim all-user Telegram broadcast unless a recipient registry is added.
+In the seller group, Bot 2 also supports `/sellers`, `/block_seller <user_id>`,
+and `/unblock_seller <user_id>` for seller visibility and safe deactivation.
 
 Set the production webhook with:
 

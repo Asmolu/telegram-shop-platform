@@ -47,7 +47,9 @@ export interface SellerRegistrationStartResponse {
 export interface SellerTelegramStartResponse {
   registration_id: number;
   telegram_username: string | null;
-  verification_expires_at: string;
+  status: 'PENDING' | 'AWAITING_APPROVAL' | 'APPROVED' | 'VERIFIED' | 'EXPIRED' | 'REJECTED';
+  approval_expires_at: string | null;
+  verification_expires_at: string | null;
 }
 
 export interface SellerRegistrationResendCodeResponse {

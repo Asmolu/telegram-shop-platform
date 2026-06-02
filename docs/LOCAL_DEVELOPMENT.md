@@ -148,6 +148,13 @@ python scripts/set_seller_bot_webhook.py info
 The older manual callback remains available for backend-only service tests:
 `POST /api/v1/seller-auth/register/telegram-start`.
 
+After `/start seller_<token>`, Bot 2 posts an approval request to
+`TELEGRAM_SELLER_CHAT_ID`. Confirming the inline button sends the seller's
+private verification code. Approval expires after 2 minutes and is enforced on
+the next callback/resend/confirmation check, so a local worker is not required.
+Seller group commands `/sellers`, `/block_seller <user_id>`, and
+`/unblock_seller <user_id>` are rejected outside that configured chat.
+
 ## API documentation
 
 ```text

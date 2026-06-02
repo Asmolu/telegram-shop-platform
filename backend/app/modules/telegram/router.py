@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.deps import get_db_session
 from app.core.config import settings
 from app.modules.seller_auth.service import SellerAuthService
+from app.modules.seller_bot.service import SellerBotService
 from app.modules.telegram.schemas import (
     SellerBotWebhookResponse,
     TelegramStatus,
@@ -21,7 +22,14 @@ def get_seller_bot_webhook_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> SellerBotWebhookService:
     seller_auth_service = SellerAuthService(session)
-    return SellerBotWebhookService(seller_auth_service=seller_auth_service)
+    seller_bot_service = SellerBotService(
+        session,
+        telegram_service=seller_auth_service.telegram_service,
+    )
+    return SellerBotWebhookService(
+        seller_auth_service=seller_auth_service,
+        seller_bot_service=seller_bot_service,
+    )
 
 
 def verify_seller_bot_webhook_secret(

@@ -9,6 +9,7 @@ from app.core.errors import AppError
 from app.core.log_sanitization import redact_sensitive_path
 from app.db.models import PendingSellerRegistration, SellerRegistrationStatus
 from app.main import create_app
+from app.modules.seller_auth.callbacks import build_seller_registration_callback_data
 from app.modules.seller_auth.schemas import SellerRegistrationStartRequest
 from app.modules.seller_auth.service import SellerAuthService
 from app.modules.telegram.router import get_seller_bot_webhook_service
@@ -20,6 +21,7 @@ class DummySession:
     def __init__(self) -> None:
         self.commits = 0
         self.rolled_back = False
+        self.added: list[object] = []
 
     async def commit(self) -> None:
         self.commits += 1
@@ -30,13 +32,30 @@ class DummySession:
     async def refresh(self, _: object) -> None:
         return None
 
+    def add(self, instance: object) -> None:
+        self.added.append(instance)
+
 
 class FakeTelegramService:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.reply_markups: list[dict[str, object]] = []
 
-    async def send_message(self, chat_id: str, message: str) -> None:
+    async def send_message(
+        self,
+        chat_id: str,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
         self.messages.append((chat_id, message))
+        if reply_markup is not None:
+            self.reply_markups.append(reply_markup)
+
+
+class FakeAuditService:
+    async def record_action(self, **_: object) -> None:
+        return None
 
 
 class FakeSellerAuthRepository:
@@ -69,7 +88,12 @@ class FakeSellerAuthRepository:
         for registration in self.registrations.values():
             if (
                 registration.email == email
-                and registration.status == SellerRegistrationStatus.PENDING
+                and registration.status
+                in {
+                    SellerRegistrationStatus.PENDING,
+                    SellerRegistrationStatus.AWAITING_APPROVAL,
+                    SellerRegistrationStatus.APPROVED,
+                }
                 and registration.expires_at > now
             ):
                 return registration
@@ -92,7 +116,10 @@ class FakeSellerAuthRepository:
 
 
 @pytest.mark.asyncio
-async def test_seller_bot_webhook_links_registration_and_sends_code() -> None:
+async def test_seller_bot_webhook_links_registration_and_requests_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, repository, telegram = _webhook_service()
     started = await service.seller_auth_service.start_registration(_start_payload())
 
@@ -120,9 +147,68 @@ async def test_seller_bot_webhook_links_registration_and_sends_code() -> None:
     assert response.result == "registration_linked"
     assert registration.telegram_user_id == 99
     assert registration.telegram_chat_id == 100
-    assert registration.verification_code_hash is not None
+    assert registration.status == SellerRegistrationStatus.AWAITING_APPROVAL
+    assert registration.verification_code_hash is None
+    assert telegram.messages[0][0] == "-100"
+    assert "seller@example.com" in telegram.messages[0][1]
+    assert telegram.reply_markups[0]["inline_keyboard"]
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_confirm_callback_sends_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, telegram = _webhook_service()
+    started = await service.seller_auth_service.start_registration(_start_payload())
+    await service.handle_update(_telegram_start_update())
+    telegram.messages.clear()
+
+    response = await service.handle_update(
+        _callback_update(
+            build_seller_registration_callback_data(
+                action="approve",
+                registration_id=started.registration_id,
+            )
+        )
+    )
+
+    registration = repository.registrations[started.registration_id]
+    assert response.handled is True
+    assert response.result == "registration_approved"
+    assert registration.status == SellerRegistrationStatus.APPROVED
     assert telegram.messages == [
-        ("100", "Код подтверждения: 123456. Введите его в Seller Panel.")
+        ("100", "Код подтверждения: 123456. Введите его в Seller Panel."),
+        ("-100", "Регистрация продавца подтверждена. Код отправлен продавцу."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_reject_callback_sends_failure_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, telegram = _webhook_service()
+    started = await service.seller_auth_service.start_registration(_start_payload())
+    await service.handle_update(_telegram_start_update())
+    telegram.messages.clear()
+
+    response = await service.handle_update(
+        _callback_update(
+            build_seller_registration_callback_data(
+                action="reject",
+                registration_id=started.registration_id,
+            )
+        )
+    )
+
+    registration = repository.registrations[started.registration_id]
+    assert response.handled is True
+    assert response.result == "registration_rejected"
+    assert registration.status == SellerRegistrationStatus.REJECTED
+    assert telegram.messages == [
+        ("100", "Регистрация не удалась."),
+        ("-100", "Регистрация продавца отклонена."),
     ]
 
 
@@ -250,6 +336,7 @@ def _webhook_service() -> tuple[
     seller_auth_service = SellerAuthService(
         DummySession(),
         telegram_service=telegram,
+        audit_service=FakeAuditService(),
         token_factory=lambda: "start-token",
         code_factory=lambda: "123456",
         now_factory=_now,
@@ -283,6 +370,43 @@ def _telegram_update_payload() -> dict[str, object]:
             "from": {"id": 99, "username": "sellername", "first_name": "Ada"},
         },
     }
+
+
+def _telegram_start_update() -> TelegramUpdate:
+    return TelegramUpdate.model_validate(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "text": "/start seller_start-token",
+                "chat": {"id": 100, "type": "private"},
+                "from": {
+                    "id": 99,
+                    "username": "sellername",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                },
+            },
+        }
+    )
+
+
+def _callback_update(callback_data: str, *, chat_id: int = -100) -> TelegramUpdate:
+    return TelegramUpdate.model_validate(
+        {
+            "update_id": 2,
+            "callback_query": {
+                "id": "callback-id",
+                "from": {"id": 500, "username": "approver"},
+                "message": {
+                    "message_id": 11,
+                    "text": "approval",
+                    "chat": {"id": chat_id, "type": "supergroup"},
+                },
+                "data": callback_data,
+            },
+        }
+    )
 
 
 def _now() -> datetime:

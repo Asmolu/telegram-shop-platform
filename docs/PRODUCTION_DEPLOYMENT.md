@@ -58,8 +58,8 @@ Run migrations:
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
-Seller Portal email/password auth requires migrations through head
-`20260601_0014`. Bot 2 is connected through:
+Seller Portal email/password auth and seller approval requires migrations
+through head `20260602_0015`. Bot 2 is connected through:
 
 ```text
 POST /api/v1/telegram/seller-bot/webhook/<secret>
@@ -90,8 +90,13 @@ Seller registration verification:
 1. Open `https://seller.tsplatform.ru`.
 2. Start seller registration and copy the `/start seller_<token>` command.
 3. Open Bot 2 and send the command.
-4. Confirm Bot 2 replies with a verification code.
-5. Enter the code in Seller Panel and confirm that seller login works.
+4. Confirm Bot 2 posts an approval request in `TELEGRAM_SELLER_CHAT_ID`.
+5. Click Confirm in the seller group within 2 minutes.
+6. Confirm Bot 2 sends the private verification code to the seller.
+7. Enter the code in Seller Panel and confirm that seller login works.
+8. In the seller group, verify `/sellers` and, on a test seller only,
+   `/block_seller <user_id>` prevent login/current-user access without deleting
+   seller history.
 
 Smoke checks:
 
