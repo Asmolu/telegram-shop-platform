@@ -22,6 +22,7 @@ SELLER_BOT_BLOCK_SELLER = "seller_bot.block_seller"
 SELLER_BOT_UNBLOCK_SELLER = "seller_bot.unblock_seller"
 SELLER_BOT_COMMAND_LIMIT = 20
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
+POSTGRES_INT32_MAX = 2_147_483_647
 
 
 class SellerBotService:
@@ -150,17 +151,26 @@ class SellerBotService:
             lines.append(
                 "\n".join(
                     (
-                        f"#{user.id} {credential.email}",
-                        f"username: {username}",
-                        f"telegram user/chat: {telegram_user_id} / {telegram_chat_id}",
-                        f"role: {user.role.value}",
-                        f"status: {active_status}",
-                        f"created_at: {user.created_at.isoformat()}",
+                        f"Seller ID for commands: {user.id}",
+                        f"Email: {credential.email}",
+                        f"Telegram: {username}",
+                        f"Telegram user/chat: {telegram_user_id} / {telegram_chat_id}",
+                        f"Role: {user.role.value}",
+                        f"Status: {active_status}",
+                        f"Created at: {user.created_at.isoformat()}",
                     )
                 )
             )
         if total > len(sellers):
             lines.append(f"Showing first {len(sellers)} sellers. Use the API for full history.")
+        lines.append(
+            "\n".join(
+                (
+                    "Use /block_seller <Seller ID>, for example: /block_seller 5",
+                    "Do not use Telegram user id/chat id.",
+                )
+            )
+        )
         return "\n\n".join(lines)
 
     async def block_seller_command(
@@ -226,9 +236,14 @@ class SellerBotService:
         actor_username: str | None,
     ) -> str:
         self._require_seller_group(chat_id)
+        if not 1 <= target_user_id <= POSTGRES_INT32_MAX:
+            raise AppError(
+                "Seller ID is outside the supported range. Get Seller ID with /sellers.",
+                400,
+            )
         user = await self.repository.get_seller_user(target_user_id)
         if user is None:
-            raise AppError("Seller user not found", 404)
+            raise AppError("Seller not found. Check Seller ID with /sellers.", 404)
         if user.role == UserRole.ADMIN and not is_active:
             raise AppError("ADMIN users cannot be blocked from Bot 2", 400)
         if user.is_active == is_active:

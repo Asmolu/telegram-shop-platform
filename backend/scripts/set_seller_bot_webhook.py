@@ -15,9 +15,9 @@ from app.modules.telegram.service import TelegramDeliveryError, TelegramService 
 
 
 def build_webhook_url(base_url: str) -> str:
-    secret = _required_webhook_secret()
+    _required_webhook_secret()
     api_prefix = settings.api_v1_prefix.strip("/")
-    path = f"{api_prefix}/telegram/seller-bot/webhook/{secret}"
+    path = f"{api_prefix}/telegram/seller-bot/webhook"
     return urljoin(base_url.rstrip("/") + "/", path)
 
 
@@ -35,7 +35,7 @@ async def set_webhook(base_url: str) -> None:
     print("Seller Bot 2 webhook configured.")
     print(
         "Webhook path: "
-        f"{settings.api_v1_prefix.rstrip('/')}/telegram/seller-bot/webhook/<secret>"
+        f"{settings.api_v1_prefix.rstrip('/')}/telegram/seller-bot/webhook"
     )
 
 

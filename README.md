@@ -122,7 +122,8 @@ flow:
 1. `POST /api/v1/seller-auth/register/start` creates a pending seller registration.
 2. The seller opens Bot 2 with `/start seller_<token>`.
 3. Telegram delivers the Bot 2 update to
-   `POST /api/v1/telegram/seller-bot/webhook/<secret>`, protected by
+   `POST /api/v1/telegram/seller-bot/webhook`, protected by the
+   `X-Telegram-Bot-Api-Secret-Token` header matching
    `TELEGRAM_SELLER_WEBHOOK_SECRET`.
 4. The backend links the Telegram user/chat through the existing seller
    registration service boundary.
@@ -137,8 +138,10 @@ flow:
 Seller bot management is available under `/api/v1/seller-bot` for SELLER/ADMIN
 users. MVP broadcast sends only to the configured seller notification chat; it
 does not claim all-user Telegram broadcast unless a recipient registry is added.
-In the seller group, Bot 2 also supports `/sellers`, `/block_seller <user_id>`,
-and `/unblock_seller <user_id>` for seller visibility and safe deactivation.
+In the seller group, Bot 2 also supports `/sellers`,
+`/block_seller <Seller ID>`, and `/unblock_seller <Seller ID>` for seller
+visibility and safe deactivation. `/sellers` shows `Seller ID for commands`;
+use that internal ID, not the Telegram user id or chat id.
 
 Set the production webhook with:
 

@@ -34,6 +34,7 @@ class DummySession:
 
 class FakeSellerBotRepository:
     def __init__(self) -> None:
+        self.requested_user_ids: list[int] = []
         self.user = _user(UserRole.SELLER)
         self.credential = SellerCredential(
             id=1,
@@ -54,6 +55,7 @@ class FakeSellerBotRepository:
         return [(self.user, self.credential)], 1
 
     async def get_seller_user(self, user_id: int) -> User | None:
+        self.requested_user_ids.append(user_id)
         if user_id == self.user.id:
             return self.user
         return None
@@ -200,10 +202,13 @@ async def test_sellers_command_lists_sellers_in_seller_group(
 
     message = await service.format_sellers_command(chat_id=-100)
 
-    assert "#1 seller@example.com" in message
-    assert "telegram user/chat: 42 / 42" in message
-    assert "role: SELLER" in message
-    assert "status: active" in message
+    assert "Seller ID for commands: 1" in message
+    assert "Email: seller@example.com" in message
+    assert "Telegram user/chat: 42 / 42" in message
+    assert "Role: SELLER" in message
+    assert "Status: active" in message
+    assert "Use /block_seller <Seller ID>, for example: /block_seller 5" in message
+    assert "Do not use Telegram user id/chat id." in message
     assert repository.credential.password_hash not in message
 
 
@@ -251,6 +256,24 @@ async def test_block_seller_rejects_outside_seller_group(
             actor_telegram_user_id=500,
             actor_username="approver",
         )
+
+
+@pytest.mark.asyncio
+async def test_block_seller_rejects_oversized_internal_id_before_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _ = _seller_bot_command_service()
+
+    with pytest.raises(AppError, match="outside the supported range"):
+        await service.block_seller_command(
+            chat_id=-100,
+            target_user_id=2_147_483_648,
+            actor_telegram_user_id=500,
+            actor_username="approver",
+        )
+
+    assert repository.requested_user_ids == []
 
 
 def _seller_bot_command_service() -> tuple[

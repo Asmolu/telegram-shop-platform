@@ -32,12 +32,29 @@ def get_seller_bot_webhook_service(
     )
 
 
-def verify_seller_bot_webhook_secret(
+def verify_seller_bot_webhook_header(
+    x_telegram_secret_token: Annotated[
+        str | None,
+        Header(alias="X-Telegram-Bot-Api-Secret-Token"),
+    ] = None,
+) -> None:
+    _verify_seller_bot_webhook_secret(header_secret=x_telegram_secret_token)
+
+
+def verify_seller_bot_webhook_path_secret(
     secret: str,
     x_telegram_secret_token: Annotated[
         str | None,
         Header(alias="X-Telegram-Bot-Api-Secret-Token"),
     ] = None,
+) -> None:
+    _verify_seller_bot_webhook_secret(path_secret=secret, header_secret=x_telegram_secret_token)
+
+
+def _verify_seller_bot_webhook_secret(
+    *,
+    path_secret: str | None = None,
+    header_secret: str | None = None,
 ) -> None:
     configured_secret = settings.telegram_seller_webhook_secret
     if not configured_secret:
@@ -45,13 +62,18 @@ def verify_seller_bot_webhook_secret(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Seller bot webhook is not configured",
         )
-    if not hmac.compare_digest(secret, configured_secret):
+    if path_secret is None and header_secret is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid seller bot webhook secret",
         )
-    if x_telegram_secret_token is not None and not hmac.compare_digest(
-        x_telegram_secret_token,
+    if path_secret is not None and not hmac.compare_digest(path_secret, configured_secret):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid seller bot webhook secret",
+        )
+    if header_secret is not None and not hmac.compare_digest(
+        header_secret,
         configured_secret,
     ):
         raise HTTPException(
@@ -66,11 +88,23 @@ async def module_status() -> TelegramStatus:
 
 
 @router.post(
-    "/seller-bot/webhook/{secret}",
+    "/seller-bot/webhook",
     response_model=SellerBotWebhookResponse,
-    dependencies=[Depends(verify_seller_bot_webhook_secret)],
+    dependencies=[Depends(verify_seller_bot_webhook_header)],
 )
 async def handle_seller_bot_webhook(
+    update: TelegramUpdate,
+    service: Annotated[SellerBotWebhookService, Depends(get_seller_bot_webhook_service)],
+) -> SellerBotWebhookResponse:
+    return await service.handle_update(update)
+
+
+@router.post(
+    "/seller-bot/webhook/{secret}",
+    response_model=SellerBotWebhookResponse,
+    dependencies=[Depends(verify_seller_bot_webhook_path_secret)],
+)
+async def handle_legacy_seller_bot_webhook(
     update: TelegramUpdate,
     service: Annotated[SellerBotWebhookService, Depends(get_seller_bot_webhook_service)],
 ) -> SellerBotWebhookResponse:

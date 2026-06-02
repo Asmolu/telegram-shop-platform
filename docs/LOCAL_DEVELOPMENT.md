@@ -73,8 +73,10 @@ JWT_SECRET_KEY=<local development secret>
 notifications, and seller-chat broadcast use Bot 2 through `TELEGRAM_BOT_TOKEN`
 and `TELEGRAM_SELLER_CHAT_ID`; the bot token is never exposed to the frontend.
 `TELEGRAM_SELLER_BOT_USERNAME` only enables a direct `t.me` start link in the
-Seller Panel. `TELEGRAM_SELLER_WEBHOOK_SECRET` protects the Bot 2 webhook path
-and optional Telegram `secret_token` header.
+Seller Panel. `TELEGRAM_SELLER_WEBHOOK_SECRET` protects the Bot 2 webhook
+through Telegram's `X-Telegram-Bot-Api-Secret-Token` header. The legacy
+path-secret webhook remains accepted for compatibility, but new webhook setup
+uses the header-only path.
 
 3. Run backend:
 
@@ -130,10 +132,10 @@ Default URL:
 http://localhost:5174
 ```
 
-Seller registration uses the Bot 2 start-token flow. Production uses:
+Seller registration uses the Bot 2 start-token flow. The Bot 2 webhook uses:
 
 ```text
-POST /api/v1/telegram/seller-bot/webhook/<secret>
+POST /api/v1/telegram/seller-bot/webhook
 ```
 
 Local Telegram webhook testing requires a public tunnel to the backend. Once the
@@ -152,8 +154,10 @@ After `/start seller_<token>`, Bot 2 posts an approval request to
 `TELEGRAM_SELLER_CHAT_ID`. Confirming the inline button sends the seller's
 private verification code. Approval expires after 2 minutes and is enforced on
 the next callback/resend/confirmation check, so a local worker is not required.
-Seller group commands `/sellers`, `/block_seller <user_id>`, and
-`/unblock_seller <user_id>` are rejected outside that configured chat.
+Seller group commands `/sellers`, `/block_seller <Seller ID>`, and
+`/unblock_seller <Seller ID>` are rejected outside that configured chat.
+`/sellers` labels the internal `Seller ID for commands`; do not use the
+Telegram user id or chat id.
 
 ## API documentation
 

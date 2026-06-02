@@ -113,7 +113,7 @@ Seller Portal email/password auth is exposed under `/api/v1/seller-auth`.
 Public registration creates a SELLER account only after Bot 2 verification:
 
 - `POST /seller-auth/register/start`
-- `POST /telegram/seller-bot/webhook/<secret>` for Telegram Bot 2 webhook updates
+- `POST /telegram/seller-bot/webhook` for Telegram Bot 2 webhook updates
 - `POST /seller-auth/register/telegram-start` remains as the internal/manual
   service boundary used by the webhook flow
 - `POST /seller-auth/register/confirm`
@@ -123,7 +123,10 @@ Public registration creates a SELLER account only after Bot 2 verification:
 Use `TELEGRAM_BOT_TOKEN` for Bot 2. Set `TELEGRAM_SELLER_BOT_USERNAME` if the
 API should return a direct `https://t.me/...` start link; otherwise the response
 still includes the `/start seller_<token>` command. Set
-`TELEGRAM_SELLER_WEBHOOK_SECRET` before exposing the webhook publicly.
+`TELEGRAM_SELLER_WEBHOOK_SECRET` before exposing the webhook publicly. The
+canonical webhook URL does not include the secret in the path; Telegram sends it
+through the `X-Telegram-Bot-Api-Secret-Token` header configured by the webhook
+setup script.
 Verification codes and passwords are stored hashed, not in plain text.
 
 Set and verify the production Bot 2 webhook without printing the bot token:
@@ -146,3 +149,6 @@ App authentication and must not be used for seller notification delivery.
 Seller bot management endpoints are exposed under `/api/v1/seller-bot`.
 `/seller-bot/broadcast` targets only `TELEGRAM_SELLER_CHAT_ID` in the MVP and
 creates audit log entries for seller/admin actions.
+In the seller group, use `/sellers` to find `Seller ID for commands`, then use
+`/block_seller <Seller ID>` or `/unblock_seller <Seller ID>`. Do not use the
+Telegram user id or chat id for these commands.

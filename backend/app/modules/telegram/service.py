@@ -16,6 +16,15 @@ START_COMMAND_RE = re.compile(
 COMMAND_RE = re.compile(
     r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$"
 )
+SELLER_ID_RE = re.compile(r"^[0-9]+$")
+POSTGRES_INT32_MAX = 2_147_483_647
+TELEGRAM_ID_HINT_MAX = 20_000_000_000
+TELEGRAM_ID_GUIDANCE_MESSAGE = (
+    "Похоже, вы указали Telegram ID. Используйте Seller ID из /sellers, например #5."
+)
+SELLER_ID_RANGE_MESSAGE = (
+    "Seller ID is outside the supported range. Get Seller ID with /sellers."
+)
 INVALID_START_MESSAGE = (
     "Откройте регистрацию в Seller Panel и отправьте Bot 2 команду /start seller_<token>."
 )
@@ -265,7 +274,7 @@ class SellerBotWebhookService:
                 await self._send_chat_message(message.chat.id, response_text)
                 return self._response(handled=True, result="sellers_list_sent")
 
-            target_user_id = self._parse_user_id_arg(args)
+            target_user_id = self._parse_seller_id_arg(args, command=command)
             actor_user = message.from_user
             if command == "/block_seller":
                 response_text = await self.seller_bot_service.block_seller_command(
@@ -307,14 +316,20 @@ class SellerBotWebhookService:
         seller_chat_id = settings.telegram_seller_chat_id
         return bool(seller_chat_id and str(chat_id) == seller_chat_id.strip())
 
-    def _parse_user_id_arg(self, args: str) -> int:
-        try:
-            user_id = int(args.strip())
-        except ValueError:
-            raise AppError("Usage: /block_seller <user_id>", 400) from None
-        if user_id <= 0:
-            raise AppError("Usage: /block_seller <user_id>", 400)
-        return user_id
+    def _parse_seller_id_arg(self, args: str, *, command: str) -> int:
+        seller_id_text = args.strip()
+        usage_message = f"Usage: {command} <Seller ID>. Get Seller ID with /sellers."
+        if not seller_id_text or SELLER_ID_RE.fullmatch(seller_id_text) is None:
+            raise AppError(usage_message, 400)
+
+        seller_id = int(seller_id_text)
+        if seller_id <= 0:
+            raise AppError(usage_message, 400)
+        if seller_id > POSTGRES_INT32_MAX:
+            if seller_id <= TELEGRAM_ID_HINT_MAX:
+                raise AppError(TELEGRAM_ID_GUIDANCE_MESSAGE, 400)
+            raise AppError(SELLER_ID_RANGE_MESSAGE, 400)
+        return seller_id
 
     def _registration_error_message(self, exc: AppError) -> str:
         message = exc.message.lower()

@@ -717,9 +717,8 @@ Registration flow:
    token, and no trusted Telegram identity yet.
 3. Seller opens Bot 2 with `/start seller_<token>`.
 4. Telegram sends the update to
-   `POST /api/v1/telegram/seller-bot/webhook/<secret>`, protected by
-   `TELEGRAM_SELLER_WEBHOOK_SECRET` and compatible with Telegram
-   `secret_token` headers.
+   `POST /api/v1/telegram/seller-bot/webhook`, protected by
+   `TELEGRAM_SELLER_WEBHOOK_SECRET` through Telegram's `secret_token` header.
 5. Backend links the Telegram user/chat identity from Bot 2 and validates the
    username when available.
 6. Bot 2 sends an approval request to the configured seller group with safe
@@ -740,5 +739,7 @@ only to the configured seller notification chat and records audit log entries;
 it is not an all-customer broadcast without stored recipient chat IDs and user
 consent.
 Seller group Bot 2 commands include `/sellers` for a limited safe seller list
-and `/block_seller <user_id>` for deactivating seller access while preserving
-orders and audit history.
+that labels `Seller ID for commands`, plus `/block_seller <Seller ID>` and
+`/unblock_seller <Seller ID>` for deactivating or restoring seller access while
+preserving orders and audit history. The command ID is the internal Seller ID
+shown by `/sellers`, not the Telegram user id or chat id.

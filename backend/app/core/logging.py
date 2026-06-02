@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
+from app.core.log_sanitization import SensitiveDataLogFilter, redact_sensitive_text
 
 _CONFIGURED = False
 
@@ -16,7 +17,7 @@ class JsonLogFormatter(logging.Formatter):
             "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_sensitive_text(record.getMessage()),
         }
         for field in (
             "request_id",
@@ -31,7 +32,7 @@ class JsonLogFormatter(logging.Formatter):
                 payload[field] = value
 
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            payload["exception"] = redact_sensitive_text(self.formatException(record.exc_info))
 
         return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -43,6 +44,7 @@ def configure_logging() -> None:
 
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     handler = logging.StreamHandler()
+    handler.addFilter(SensitiveDataLogFilter())
     if settings.log_format.lower() == "json":
         handler.setFormatter(JsonLogFormatter())
     else:
@@ -58,4 +60,6 @@ def configure_logging() -> None:
 
     logging.getLogger("uvicorn.access").handlers = []
     logging.getLogger("uvicorn.access").propagate = True
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     _CONFIGURED = True

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -6,7 +7,11 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.log_sanitization import redact_sensitive_path
+from app.core.log_sanitization import (
+    SensitiveDataLogFilter,
+    redact_sensitive_path,
+    redact_sensitive_text,
+)
 from app.db.models import PendingSellerRegistration, SellerRegistrationStatus
 from app.main import create_app
 from app.modules.seller_auth.callbacks import build_seller_registration_callback_data
@@ -234,6 +239,50 @@ async def test_seller_bot_webhook_ignores_non_start_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_block_seller_command_uses_internal_seller_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/block_seller 5"))
+
+    assert response.handled is True
+    assert response.result == "seller_blocked"
+    assert seller_bot.blocked_user_ids == [5]
+    assert telegram.messages == [("-100", "Seller #5 has been blocked.")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command_text", "expected_fragment"),
+    [
+        ("/block_seller", "Usage: /block_seller <Seller ID>. Get Seller ID with /sellers."),
+        (
+            "/block_seller nope",
+            "Usage: /block_seller <Seller ID>. Get Seller ID with /sellers.",
+        ),
+        ("/block_seller 6902459394", "Telegram ID"),
+        ("/block_seller 999999999999999999999999", "outside the supported range"),
+    ],
+)
+async def test_block_seller_invalid_id_is_handled_without_seller_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    command_text: str,
+    expected_fragment: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update(command_text))
+
+    assert response.handled is True
+    assert response.result == "seller_command_error"
+    assert seller_bot.blocked_user_ids == []
+    assert expected_fragment in telegram.messages[0][1]
+
+
+@pytest.mark.asyncio
 async def test_seller_bot_webhook_sends_error_for_expired_token() -> None:
     telegram = FakeTelegramService()
 
@@ -283,6 +332,46 @@ def test_seller_bot_webhook_route_requires_secret(monkeypatch: pytest.MonkeyPatc
     assert response.status_code == 403
 
 
+def test_seller_bot_webhook_route_requires_secret_header_on_safe_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_webhook_secret", "secret")
+    app = create_app()
+    app.dependency_overrides[get_seller_bot_webhook_service] = lambda: FakeWebhookService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/telegram/seller-bot/webhook",
+                json=_telegram_update_payload(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
+def test_seller_bot_webhook_route_accepts_secret_header_without_path_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_webhook_secret", "secret")
+    fake_service = FakeWebhookService()
+    app = create_app()
+    app.dependency_overrides[get_seller_bot_webhook_service] = lambda: fake_service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/telegram/seller-bot/webhook",
+                headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+                json=_telegram_update_payload(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "handled": True, "result": "registration_linked"}
+    assert fake_service.update is not None
+
+
 def test_seller_bot_webhook_route_accepts_secret_header(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -308,6 +397,30 @@ def test_seller_bot_webhook_route_accepts_secret_header(
     assert fake_service.update.message.from_user.username == "sellername"
 
 
+def test_seller_bot_webhook_route_returns_200_for_oversized_block_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    monkeypatch.setattr(settings, "telegram_seller_webhook_secret", "secret")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+    app = create_app()
+    app.dependency_overrides[get_seller_bot_webhook_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/telegram/seller-bot/webhook",
+                headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+                json=_seller_group_command_payload("/block_seller 999999999999999999999999"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "handled": True, "result": "seller_command_error"}
+    assert seller_bot.blocked_user_ids == []
+    assert "outside the supported range" in telegram.messages[0][1]
+
+
 def test_seller_bot_webhook_secret_path_is_redacted_from_logs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -318,6 +431,42 @@ def test_seller_bot_webhook_secret_path_is_redacted_from_logs(
     assert redacted == "/api/v1/telegram/seller-bot/webhook/<secret>"
 
 
+def test_sensitive_tokens_are_redacted_from_log_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "telegram_bot_token", "seller-bot-token")
+    monkeypatch.setattr(settings, "telegram_webapp_bot_token", "webapp-bot-token")
+    monkeypatch.setattr(settings, "telegram_seller_webhook_secret", "seller-webhook-secret")
+
+    redacted = redact_sensitive_text(
+        "POST https://api.telegram.org/botseller-bot-token/sendMessage "
+        "webapp-bot-token /api/v1/telegram/seller-bot/webhook/seller-webhook-secret"
+    )
+
+    assert "seller-bot-token" not in redacted
+    assert "webapp-bot-token" not in redacted
+    assert "seller-webhook-secret" not in redacted
+    assert "/bot<redacted>/sendMessage" in redacted
+    assert "/api/v1/telegram/seller-bot/webhook/<secret>" in redacted
+
+
+def test_log_filter_redacts_uvicorn_access_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_webhook_secret", "seller-webhook-secret")
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='127.0.0.1 - "POST %s HTTP/1.1" 200',
+        args=("/api/v1/telegram/seller-bot/webhook/seller-webhook-secret",),
+        exc_info=None,
+    )
+
+    SensitiveDataLogFilter().filter(record)
+
+    message = record.getMessage()
+    assert "seller-webhook-secret" not in message
+    assert "/api/v1/telegram/seller-bot/webhook/<secret>" in message
+
+
 class FakeWebhookService:
     def __init__(self) -> None:
         self.update: TelegramUpdate | None = None
@@ -325,6 +474,37 @@ class FakeWebhookService:
     async def handle_update(self, update: TelegramUpdate) -> SellerBotWebhookResponse:
         self.update = update
         return SellerBotWebhookResponse(handled=True, result="registration_linked")
+
+
+class FakeSellerBotCommandService:
+    def __init__(self) -> None:
+        self.blocked_user_ids: list[int] = []
+        self.unblocked_user_ids: list[int] = []
+
+    async def format_sellers_command(self, *, chat_id: int) -> str:
+        return f"Seller list for {chat_id}"
+
+    async def block_seller_command(
+        self,
+        *,
+        chat_id: int,
+        target_user_id: int,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        self.blocked_user_ids.append(target_user_id)
+        return f"Seller #{target_user_id} has been blocked."
+
+    async def unblock_seller_command(
+        self,
+        *,
+        chat_id: int,
+        target_user_id: int,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        self.unblocked_user_ids.append(target_user_id)
+        return f"Seller #{target_user_id} has been unblocked."
 
 
 def _webhook_service() -> tuple[
@@ -353,6 +533,28 @@ def _webhook_service() -> tuple[
     )
 
 
+def _seller_command_webhook_service() -> tuple[
+    SellerBotWebhookService,
+    FakeSellerBotCommandService,
+    FakeTelegramService,
+]:
+    telegram = FakeTelegramService()
+
+    class FakeSellerAuthService:
+        telegram_service = telegram
+
+    seller_bot = FakeSellerBotCommandService()
+    return (
+        SellerBotWebhookService(
+            seller_auth_service=FakeSellerAuthService(),
+            seller_bot_service=seller_bot,
+            telegram_service=telegram,
+        ),
+        seller_bot,
+        telegram,
+    )
+
+
 def _start_payload() -> SellerRegistrationStartRequest:
     return SellerRegistrationStartRequest(
         email="seller@example.com",
@@ -370,6 +572,22 @@ def _telegram_update_payload() -> dict[str, object]:
             "from": {"id": 99, "username": "sellername", "first_name": "Ada"},
         },
     }
+
+
+def _seller_group_command_payload(text: str) -> dict[str, object]:
+    return {
+        "update_id": 10,
+        "message": {
+            "message_id": 20,
+            "text": text,
+            "chat": {"id": -100, "type": "supergroup"},
+            "from": {"id": 500, "username": "approver"},
+        },
+    }
+
+
+def _seller_group_command_update(text: str) -> TelegramUpdate:
+    return TelegramUpdate.model_validate(_seller_group_command_payload(text))
 
 
 def _telegram_start_update() -> TelegramUpdate:

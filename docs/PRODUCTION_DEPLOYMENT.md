@@ -29,8 +29,8 @@ Backend:
   seller notifications, and seller-chat broadcast
 - `TELEGRAM_SELLER_BOT_USERNAME` if the Seller Panel should show a direct `t.me`
   start link during registration
-- `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook URL and
-  Telegram `secret_token` header
+- `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook
+  `X-Telegram-Bot-Api-Secret-Token` header
 - cache and rate limit settings from `backend/.env.production.example`
 
 Frontend:
@@ -62,7 +62,7 @@ Seller Portal email/password auth and seller approval requires migrations
 through head `20260602_0015`. Bot 2 is connected through:
 
 ```text
-POST /api/v1/telegram/seller-bot/webhook/<secret>
+POST /api/v1/telegram/seller-bot/webhook
 ```
 
 Set the webhook after deployment:
@@ -82,7 +82,7 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml exe
 The webhook URL should be:
 
 ```text
-https://api.tsplatform.ru/api/v1/telegram/seller-bot/webhook/<secret>
+https://api.tsplatform.ru/api/v1/telegram/seller-bot/webhook
 ```
 
 Seller registration verification:
@@ -94,9 +94,11 @@ Seller registration verification:
 5. Click Confirm in the seller group within 2 minutes.
 6. Confirm Bot 2 sends the private verification code to the seller.
 7. Enter the code in Seller Panel and confirm that seller login works.
-8. In the seller group, verify `/sellers` and, on a test seller only,
-   `/block_seller <user_id>` prevent login/current-user access without deleting
-   seller history.
+8. In the seller group, verify `/sellers` shows `Seller ID for commands`.
+9. Verify `/block_seller 6902459394` returns guidance to use Seller ID and does
+   not produce a webhook 503.
+10. On a test seller only, verify `/block_seller <Seller ID>` prevents
+   login/current-user access without deleting seller history.
 
 Smoke checks:
 
