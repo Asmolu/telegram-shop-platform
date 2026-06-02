@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { api } from '../../shared/api';
+import { ApiError, api } from '../../shared/api';
 import type { Notification, SellerBotStatus } from '../../shared/api';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { formatDate } from '../../shared/utils/format';
@@ -15,18 +15,23 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingAction, setSavingAction] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   function loadBotData() {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
+    setActionError(null);
     Promise.all([api.sellerBot.status(), api.sellerBot.messages({ limit: 20, offset: 0 })])
       .then(([botStatus, messageList]) => {
         setStatus(botStatus);
         setMessages(messageList.items);
       })
-      .catch(setError)
+      .catch((requestError) => {
+        logBotError(requestError);
+        setLoadError(requestError);
+      })
       .finally(() => setLoading(false));
   }
 
@@ -52,31 +57,46 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
   ) {
     const cleanMessage = message.trim();
     if (!cleanMessage) {
-      setError(new Error('Enter a message before sending.'));
+      setActionError('Введите сообщение перед отправкой.');
       return;
     }
 
     setSavingAction(action);
-    setError(null);
+    setLoadError(null);
+    setActionError(null);
     setSuccess(null);
     try {
       const response = await request(cleanMessage);
-      setSuccess(`Notification ${response.notification_id} saved with status ${response.status}.`);
+      setSuccess(
+        `Уведомление ${response.notification_id} сохранено со статусом ${response.status}.`,
+      );
       const messageList = await api.sellerBot.messages({ limit: 20, offset: 0 });
       setMessages(messageList.items);
     } catch (requestError) {
-      setError(requestError);
+      logBotError(requestError);
+      setActionError('Не удалось отправить сообщение. Проверьте настройки Telegram-бота.');
     } finally {
       setSavingAction(null);
     }
   }
 
   if (loading) return <LoadingState title="Loading seller bot" />;
-  if (error) return <ErrorState error={error} onRetry={loadBotData} onAuthExpired={onAuthExpired} />;
+  if (loadError) {
+    if (isAuthError(loadError)) {
+      return <ErrorState error={loadError} onRetry={loadBotData} onAuthExpired={onAuthExpired} />;
+    }
+
+    return <SellerBotLoadError onRetry={loadBotData} />;
+  }
 
   return (
     <div className="page-stack">
       {success ? <div className="success-banner">{success}</div> : null}
+      {actionError ? (
+        <div className="form-error" role="alert">
+          {actionError}
+        </div>
+      ) : null}
 
       <section className="seller-bot-status-grid">
         <article className="panel">
@@ -210,4 +230,28 @@ function statusClass(status: Notification['status']): string {
   if (status === 'sent') return 'status-success';
   if (status === 'failed') return 'status-danger';
   return 'status-warning';
+}
+
+function SellerBotLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="state-panel state-panel-error" role="alert">
+      <div>
+        <h3>Не удалось загрузить данные бота</h3>
+        <p>Проверьте настройки Telegram-бота</p>
+      </div>
+      <button className="button button-primary" type="button" onClick={onRetry}>
+        Повторить
+      </button>
+    </div>
+  );
+}
+
+function isAuthError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
+function logBotError(error: unknown): void {
+  if (import.meta.env.DEV) {
+    console.error('Seller bot request failed', error);
+  }
 }

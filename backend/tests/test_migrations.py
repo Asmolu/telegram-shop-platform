@@ -1,7 +1,15 @@
 import importlib.util
 from pathlib import Path
 
-from app.db.models import PendingSellerRegistration, SellerRegistrationStatus
+from app.db.models import (
+    Banner,
+    BannerTargetType,
+    Notification,
+    NotificationChannel,
+    NotificationStatus,
+    PendingSellerRegistration,
+    SellerRegistrationStatus,
+)
 
 
 def test_user_role_enum_migration_disables_implicit_type_creation() -> None:
@@ -310,3 +318,21 @@ def test_seller_registration_status_model_matches_head_migration() -> None:
     assert "status::text" in content
     assert "ALTER COLUMN status DROP DEFAULT" in content
     assert "ALTER COLUMN status SET DEFAULT" in content
+
+
+def test_model_enums_bind_database_values_not_member_names() -> None:
+    assert Banner.__table__.c.target_type.type.enums == [
+        BannerTargetType.PRODUCT.value,
+        BannerTargetType.CATEGORY.value,
+        BannerTargetType.PROMO.value,
+        BannerTargetType.EXTERNAL_URL.value,
+    ]
+    assert Notification.__table__.c.channel.type.enums == [
+        NotificationChannel.TELEGRAM.value,
+        NotificationChannel.INTERNAL.value,
+    ]
+    assert Notification.__table__.c.status.type.enums == [
+        NotificationStatus.PENDING.value,
+        NotificationStatus.SENT.value,
+        NotificationStatus.FAILED.value,
+    ]

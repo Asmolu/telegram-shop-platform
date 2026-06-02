@@ -98,6 +98,10 @@ class SellerRegistrationStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
+    return [item.value for item in enum_cls]
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -108,7 +112,7 @@ class User(Base):
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="user_role"),
+        Enum(UserRole, name="user_role", values_callable=_enum_values),
         nullable=False,
         default=UserRole.USER,
         server_default=UserRole.USER.value,
@@ -236,7 +240,11 @@ class PendingSellerRegistration(Base):
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[SellerRegistrationStatus] = mapped_column(
-        Enum(SellerRegistrationStatus, name="seller_registration_status"),
+        Enum(
+            SellerRegistrationStatus,
+            name="seller_registration_status",
+            values_callable=_enum_values,
+        ),
         nullable=False,
         default=SellerRegistrationStatus.PENDING,
         server_default=SellerRegistrationStatus.PENDING.value,
@@ -310,7 +318,7 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     status: Mapped[ProductStatus] = mapped_column(
-        Enum(ProductStatus, name="product_status"),
+        Enum(ProductStatus, name="product_status", values_callable=_enum_values),
         nullable=False,
         default=ProductStatus.DRAFT,
         server_default=ProductStatus.DRAFT.value,
@@ -513,7 +521,7 @@ class Order(Base):
         index=True,
     )
     status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus, name="order_status"),
+        Enum(OrderStatus, name="order_status", values_callable=_enum_values),
         nullable=False,
         default=OrderStatus.NEW,
         server_default=OrderStatus.NEW.value,
@@ -653,7 +661,7 @@ class Banner(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
     target_type: Mapped[BannerTargetType | None] = mapped_column(
-        Enum(BannerTargetType, name="banner_target_type"),
+        Enum(BannerTargetType, name="banner_target_type", values_callable=_enum_values),
         nullable=True,
         index=True,
     )
@@ -711,7 +719,7 @@ class PromoCode(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     discount_type: Mapped[DiscountType] = mapped_column(
-        Enum(DiscountType, name="discount_type"),
+        Enum(DiscountType, name="discount_type", values_callable=_enum_values),
         nullable=False,
     )
     discount_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -804,7 +812,7 @@ class Review(Base):
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ReviewStatus] = mapped_column(
-        Enum(ReviewStatus, name="review_status"),
+        Enum(ReviewStatus, name="review_status", values_callable=_enum_values),
         nullable=False,
         default=ReviewStatus.PENDING,
         server_default=ReviewStatus.PENDING.value,
@@ -881,14 +889,14 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     channel: Mapped[NotificationChannel] = mapped_column(
-        Enum(NotificationChannel, name="notification_channel"),
+        Enum(NotificationChannel, name="notification_channel", values_callable=_enum_values),
         nullable=False,
         default=NotificationChannel.INTERNAL,
         server_default=NotificationChannel.INTERNAL.value,
         index=True,
     )
     status: Mapped[NotificationStatus] = mapped_column(
-        Enum(NotificationStatus, name="notification_status"),
+        Enum(NotificationStatus, name="notification_status", values_callable=_enum_values),
         nullable=False,
         default=NotificationStatus.PENDING,
         server_default=NotificationStatus.PENDING.value,
