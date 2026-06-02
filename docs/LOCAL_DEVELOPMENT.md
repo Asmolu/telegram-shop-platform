@@ -8,6 +8,8 @@
 - Node.js 20+
 - npm
 
+Backend image dimension validation uses Pillow, installed through `backend/requirements.txt`.
+
 ## Start infrastructure
 
 From repository root:
@@ -92,6 +94,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Sprint 14 adds Redis-backed caching and rate limiting. Local development can keep the defaults from
 `backend/.env.example`; if Redis is stopped, public catalog reads still work and rate limiting uses
 the isolated in-memory fallback.
+
+Image upload validation checks decoded dimensions in addition to extension, MIME, and byte size:
+product images use 4:5 at 1200x1500 recommended, native banners use 16:9 at 1600x900 recommended,
+and aggressive promo banners use 3:1 at 1800x600 recommended.
 
 Useful local toggles:
 

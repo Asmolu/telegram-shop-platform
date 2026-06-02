@@ -1,6 +1,8 @@
+from io import BytesIO
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import UploadFile, status
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,12 +10,19 @@ from app.common.cache import CacheService, banner_cache_patterns, product_cache_
 from app.core.errors import AppError
 from app.db.models import Banner, ProductImage
 from app.modules.products.repository import ProductsRepository
+from app.modules.uploads.image_profiles import (
+    BANNER_IMAGE_PROFILES,
+    PRODUCT_IMAGE_PROFILE,
+    ImageUploadKind,
+    ImageUploadProfile,
+)
 from app.modules.uploads.repository import UploadsRepository
 from app.modules.uploads.storage import LocalStorageService
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+PIL_IMAGE_MIME_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
 
 
 class UploadsService:
@@ -42,7 +51,7 @@ class UploadsService:
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
 
-        upload = await self._validate_and_read_image(file)
+        upload = await self._validate_and_read_image(file, profile=PRODUCT_IMAGE_PROFILE)
         file_path = self.storage.save_bytes(
             upload.content,
             folder="products",
@@ -80,8 +89,12 @@ class UploadsService:
         *,
         file: UploadFile,
         alt_text: str | None = None,
+        image_kind: ImageUploadKind = ImageUploadKind.NATIVE_BANNER,
     ) -> Banner:
-        upload = await self._validate_and_read_image(file)
+        upload = await self._validate_and_read_image(
+            file,
+            profile=BANNER_IMAGE_PROFILES[image_kind],
+        )
         file_path = self.storage.save_bytes(
             upload.content,
             folder="banners",
@@ -108,7 +121,12 @@ class UploadsService:
         await self._invalidate_banner_cache()
         return banner
 
-    async def _validate_and_read_image(self, file: UploadFile) -> "_ValidatedUpload":
+    async def _validate_and_read_image(
+        self,
+        file: UploadFile,
+        *,
+        profile: ImageUploadProfile,
+    ) -> "_ValidatedUpload":
         original_filename = _safe_original_filename(file.filename)
         extension = Path(original_filename).suffix.lower()
         if extension not in ALLOWED_IMAGE_EXTENSIONS:
@@ -124,6 +142,8 @@ class UploadsService:
         if not content:
             raise AppError("Uploaded file is empty", status.HTTP_400_BAD_REQUEST)
 
+        self._validate_image_dimensions(content, mime_type=mime_type, profile=profile)
+
         return _ValidatedUpload(
             content=content,
             extension=extension,
@@ -131,6 +151,50 @@ class UploadsService:
             mime_type=mime_type,
             size_bytes=len(content),
         )
+
+    def _validate_image_dimensions(
+        self,
+        content: bytes,
+        *,
+        mime_type: str,
+        profile: ImageUploadProfile,
+    ) -> None:
+        try:
+            with Image.open(BytesIO(content)) as image:
+                width, height = image.size
+                detected_mime_type = PIL_IMAGE_MIME_TYPES.get(image.format or "")
+                if detected_mime_type != mime_type:
+                    raise AppError("Invalid MIME type", status.HTTP_400_BAD_REQUEST)
+                image.verify()
+        except AppError:
+            raise
+        except (OSError, UnidentifiedImageError) as exc:
+            raise AppError("Invalid image content", status.HTTP_400_BAD_REQUEST) from exc
+
+        if width < profile.min_width or height < profile.min_height:
+            raise AppError(
+                f"Минимальный размер изображения {profile.display_name}: {profile.min_size_label}",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+
+        pixels = width * height
+        if (
+            width > profile.max_width
+            or height > profile.max_height
+            or pixels > profile.max_pixels
+        ):
+            raise AppError(
+                f"Максимальный размер изображения {profile.display_name}: {profile.max_size_label}",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+
+        actual_ratio = width / height
+        ratio_delta = abs(actual_ratio - profile.aspect_ratio) / profile.aspect_ratio
+        if ratio_delta > profile.aspect_tolerance:
+            raise AppError(
+                f"Изображение {profile.display_name} должно быть {profile.aspect_label}",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
 
     async def _invalidate_product_cache(self) -> None:
         if self.cache is None:

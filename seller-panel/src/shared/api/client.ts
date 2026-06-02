@@ -3,6 +3,7 @@ import type {
   AnalyticsEvent,
   AnalyticsSummary,
   Banner,
+  BannerImageKind,
   BannerPayload,
   Category,
   Notification,
@@ -249,9 +250,10 @@ export const api = {
       apiRequest<Banner>(`/banners/admin/${bannerId}/activate`, { method: 'PATCH' }),
     deactivate: (bannerId: number) =>
       apiRequest<Banner>(`/banners/admin/${bannerId}/deactivate`, { method: 'PATCH' }),
-    uploadImage: (file: File, altText?: string) => {
+    uploadImage: (file: File, altText?: string, imageKind: BannerImageKind = 'native_banner') => {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('image_kind', imageKind);
       if (altText) {
         formData.append('alt_text', altText);
       }

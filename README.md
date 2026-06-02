@@ -23,6 +23,21 @@ This is a project scaffold and architecture baseline, not a completed product. T
 | API contract   | OpenAPI                             |
 | Auth           | Telegram initData validation + JWT  |
 
+## Image upload standards
+
+Seller-uploaded product and banner images are validated on the backend after decoding the file.
+The Seller Panel crops images before upload to match these display-safe standards:
+
+| Surface | Aspect ratio | Recommended | Minimum | Maximum accepted |
+| ------- | ------------ | ----------- | ------- | ---------------- |
+| Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Native Mini App banner | 16:9 | 1600x900 | 800x450 | 2400x1350 |
+| Aggressive promo banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+
+Backend uploads keep the existing extension, MIME, and 5 MB file-size checks and also reject
+images that are too small, too large, or outside the expected aspect-ratio tolerance.
+
 ## Repository structure
 
 ```text

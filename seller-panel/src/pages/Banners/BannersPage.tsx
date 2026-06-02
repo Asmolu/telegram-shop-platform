@@ -1,7 +1,13 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
-import type { Banner, BannerPayload, BannerTargetType } from '../../shared/api';
+import type { Banner, BannerImageKind, BannerPayload, BannerTargetType } from '../../shared/api';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
+import {
+  AGGRESSIVE_BANNER_CROP_SPEC,
+  ImageCropEditor,
+  NATIVE_BANNER_CROP_SPEC,
+  type ImageCropSpec,
+} from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, fromDateTimeInput, toDateTimeInput } from '../../shared/utils/format';
 
@@ -40,6 +46,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   const [editingBanner, setEditingBanner] = useState<Banner | null>(null);
   const [form, setForm] = useState<BannerFormState>(initialForm);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [cropSourceFile, setCropSourceFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -75,6 +82,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
       endsAt: toDateTimeInput(banner.ends_at),
     });
     setImageFile(null);
+    setCropSourceFile(null);
     setFormError(null);
   }
 
@@ -82,11 +90,22 @@ export function BannersPage({ onAuthExpired }: PageProps) {
     setEditingBanner(null);
     setForm(initialForm);
     setImageFile(null);
+    setCropSourceFile(null);
     setFormError(null);
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
-    setImageFile(event.target.files?.[0] ?? null);
+    setCropSourceFile(event.target.files?.[0] ?? null);
+    event.target.value = '';
+  }
+
+  function handleBannerCropApply(file: File) {
+    setImageFile(file);
+    setCropSourceFile(null);
+  }
+
+  function handleBannerCropCancel() {
+    setCropSourceFile(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -98,7 +117,11 @@ export function BannersPage({ onAuthExpired }: PageProps) {
     try {
       let imagePath = form.imagePath.trim();
       if (imageFile) {
-        const uploaded = await api.banners.uploadImage(imageFile, form.title);
+        const uploaded = await api.banners.uploadImage(
+          imageFile,
+          form.title,
+          getBannerImageKind(form.targetType),
+        );
         imagePath = uploaded.file_path;
       }
 
@@ -157,6 +180,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   if (error) {
     return <ErrorState error={error} onRetry={loadBanners} onAuthExpired={onAuthExpired} />;
   }
+  const bannerCropSpec = getBannerCropSpec(form.targetType);
 
   return (
     <div className="split-view">
@@ -259,8 +283,26 @@ export function BannersPage({ onAuthExpired }: PageProps) {
           </label>
           <label className="field">
             <span>Image file</span>
+            <p className="image-hints">
+              Рекомендуемый размер: {bannerCropSpec.outputWidth}x{bannerCropSpec.outputHeight}.
+              Минимальный размер: {bannerCropSpec.minWidth}x{bannerCropSpec.minHeight}.
+            </p>
             <input accept="image/*" type="file" onChange={handleImageChange} />
           </label>
+          {imageFile ? (
+            <div className="upload-list">
+              <span>
+                {imageFile.name}
+                <button
+                  className="text-button danger-text"
+                  type="button"
+                  onClick={() => setImageFile(null)}
+                >
+                  Remove
+                </button>
+              </span>
+            </div>
+          ) : null}
           <label className="field">
             <span>Image path</span>
             <input
@@ -361,6 +403,22 @@ export function BannersPage({ onAuthExpired }: PageProps) {
           </button>
         </form>
       </aside>
+      {cropSourceFile ? (
+        <ImageCropEditor
+          file={cropSourceFile}
+          spec={bannerCropSpec}
+          onApply={handleBannerCropApply}
+          onCancel={handleBannerCropCancel}
+        />
+      ) : null}
     </div>
   );
+}
+
+function getBannerCropSpec(targetType: BannerTargetType): ImageCropSpec {
+  return targetType === 'promo' ? AGGRESSIVE_BANNER_CROP_SPEC : NATIVE_BANNER_CROP_SPEC;
+}
+
+function getBannerImageKind(targetType: BannerTargetType): BannerImageKind {
+  return targetType === 'promo' ? 'aggressive_banner' : 'native_banner';
 }

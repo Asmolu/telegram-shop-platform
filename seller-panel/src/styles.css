@@ -647,7 +647,7 @@ textarea:focus {
 
 .image-strip img {
   width: 96px;
-  height: 96px;
+  height: 120px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   object-fit: cover;
@@ -656,7 +656,7 @@ textarea:focus {
 .table-image {
   display: grid;
   width: 58px;
-  height: 58px;
+  height: 72px;
   place-items: center;
   border: 1px solid #e5e7eb;
   border-radius: 7px;
@@ -667,7 +667,8 @@ textarea:focus {
 }
 
 .banner-thumb {
-  width: 84px;
+  width: 96px;
+  height: 54px;
 }
 
 .table-image-empty {
@@ -812,6 +813,92 @@ textarea:focus {
 
 .banner-preview span {
   color: #6b7280;
+}
+
+.image-hints {
+  margin: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.upload-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.upload-list span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #f9fafb;
+  padding: 7px 9px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.crop-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.58);
+}
+
+.crop-modal__surface {
+  display: grid;
+  width: min(100%, 760px);
+  max-height: calc(100vh - 48px);
+  gap: 14px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(17, 24, 39, 0.26);
+  padding: 18px;
+}
+
+.crop-preview-frame {
+  display: grid;
+  justify-items: center;
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #111827;
+  padding: 10px;
+}
+
+.crop-preview {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 56vh;
+  border-radius: 6px;
+}
+
+.crop-preview-loading {
+  display: grid;
+  width: 100%;
+  min-height: 220px;
+  place-items: center;
+  color: #ffffff;
+}
+
+.crop-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .login-page,
@@ -969,7 +1056,8 @@ textarea:focus {
   .kpi-grid,
   .widget-grid,
   .form-grid,
-  .date-grid {
+  .date-grid,
+  .crop-controls {
     grid-template-columns: 1fr;
   }
 

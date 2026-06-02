@@ -522,6 +522,18 @@ uploads/
 - upload service должен скрывать конкретный storage backend;
 - миграция в S3/R2 не должна требовать изменения бизнес-логики.
 
+### Image dimension standards
+
+Seller-uploaded images must be decoded and validated server-side in addition to extension, MIME,
+and file-size checks. The Seller Panel should crop uploads before sending them to the backend.
+
+| Surface | Aspect ratio | Recommended | Minimum | Maximum accepted |
+| ------- | ------------ | ----------- | ------- | ---------------- |
+| Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Native banner | 16:9 | 1600x900 | 800x450 | 2400x1350 |
+| Aggressive promo banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+
 ---
 
 ## 10. Основные бизнес-процессы

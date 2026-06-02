@@ -4,6 +4,7 @@ export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANC
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
+export type BannerImageKind = 'native_banner' | 'aggressive_banner';
 
 export type ApiDecimal = string | number;
 

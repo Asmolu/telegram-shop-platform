@@ -132,9 +132,16 @@ Seller/Admin может управлять товарами, Mini App может
 - `ProductImage` model.
 - Upload endpoint для изображений товаров.
 - Upload endpoint для баннеров.
-- File validation: size, extension, mime-type.
+- File validation: size, extension, mime-type, decoded dimensions, pixel bounds, and aspect ratio.
 - Local storage path persistence.
 - Static serving `/uploads/*`.
+- Seller Panel crop/fit editor before product and banner image upload.
+
+Image standards:
+
+- Product card/detail images: 4:5, recommended 1200x1500, minimum 600x750, maximum 1600x2000.
+- Native banners: 16:9, recommended 1600x900, minimum 800x450, maximum 2400x1350.
+- Aggressive promo banners: 3:1, recommended 1800x600, minimum 900x300, maximum 2400x800.
 
 ## Backend modules
 

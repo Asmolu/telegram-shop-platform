@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
+from PIL import Image
 from starlette.datastructures import Headers
 
 from app.common.deps import get_current_user
@@ -15,6 +16,7 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import Product, ProductStatus, User, UserRole
 from app.main import create_app
+from app.modules.uploads.image_profiles import ImageUploadKind
 from app.modules.uploads.router import get_uploads_service
 from app.modules.uploads.service import MAX_IMAGE_SIZE_BYTES, UploadsService
 from app.modules.uploads.storage import LocalStorageService
@@ -51,10 +53,11 @@ async def test_product_image_upload_succeeds_and_links_existing_product(tmp_path
         captured["image"] = image
 
     service.repository.add_product_image = capture_image
+    content = _image_bytes(1200, 1500, "JPEG")
 
     image = await service.upload_product_image(
         product_id=1,
-        file=_upload_file("hoodie.jpg", b"image-bytes", "image/jpeg"),
+        file=_upload_file("hoodie.jpg", content, "image/jpeg"),
         alt_text="Black hoodie",
         is_primary=True,
     )
@@ -63,7 +66,7 @@ async def test_product_image_upload_succeeds_and_links_existing_product(tmp_path
     assert image.file_path.startswith("products/")
     assert image.original_filename == "hoodie.jpg"
     assert image.mime_type == "image/jpeg"
-    assert image.size_bytes == len(b"image-bytes")
+    assert image.size_bytes == len(content)
     assert image.is_primary is True
     assert (tmp_path / image.file_path).is_file()
     assert captured["image"] is image
@@ -106,6 +109,44 @@ async def test_upload_rejects_file_size_limit(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_upload_rejects_below_minimum_dimensions(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+
+    with pytest.raises(AppError, match="600x750") as exc_info:
+        await service.upload_product_image(
+            product_id=1,
+            file=_upload_file("small-product.jpg", _image_bytes(400, 500, "JPEG"), "image/jpeg"),
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_banner_upload_rejects_below_minimum_dimensions(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="800x450") as exc_info:
+        await service.upload_banner_image(
+            file=_upload_file("small-banner.png", _image_bytes(640, 360, "PNG"), "image/png"),
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_banner_upload_rejects_wrong_aspect_ratio(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="16:9") as exc_info:
+        await service.upload_banner_image(
+            file=_upload_file("portrait-banner.png", _image_bytes(900, 600, "PNG"), "image/png"),
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
     session = DummySession()
     service = UploadsService(session, storage=LocalStorageService(tmp_path))
@@ -115,18 +156,40 @@ async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
         captured["banner"] = banner
 
     service.repository.add_banner = capture_banner
+    content = _image_bytes(1600, 900, "PNG")
 
     banner = await service.upload_banner_image(
-        file=_upload_file("../promo.webp", b"banner-bytes", "image/webp"),
+        file=_upload_file("../promo.png", content, "image/png"),
         alt_text="Promo",
     )
 
     assert banner.file_path.startswith("banners/")
-    assert banner.original_filename == "promo.webp"
-    assert banner.mime_type == "image/webp"
-    assert banner.size_bytes == len(b"banner-bytes")
+    assert banner.original_filename == "promo.png"
+    assert banner.mime_type == "image/png"
+    assert banner.size_bytes == len(content)
     assert banner.alt_text == "Promo"
     assert (tmp_path / banner.file_path).is_file()
+    assert captured["banner"] is banner
+
+
+@pytest.mark.asyncio
+async def test_aggressive_banner_upload_accepts_three_to_one_image(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    captured = {}
+
+    def capture_banner(banner: object) -> None:
+        captured["banner"] = banner
+
+    service.repository.add_banner = capture_banner
+
+    banner = await service.upload_banner_image(
+        file=_upload_file("promo-strip.jpg", _image_bytes(1800, 600, "JPEG"), "image/jpeg"),
+        alt_text="Promo strip",
+        image_kind=ImageUploadKind.AGGRESSIVE_BANNER,
+    )
+
+    assert banner.file_path.startswith("banners/")
+    assert banner.mime_type == "image/jpeg"
     assert captured["banner"] is banner
 
 
@@ -249,6 +312,12 @@ def _upload_file(filename: str, content: bytes, content_type: str) -> UploadFile
         filename=filename,
         headers=Headers({"content-type": content_type}),
     )
+
+
+def _image_bytes(width: int, height: int, image_format: str) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (width, height), color=(124, 58, 237)).save(output, format=image_format)
+    return output.getvalue()
 
 
 def _product() -> Product:

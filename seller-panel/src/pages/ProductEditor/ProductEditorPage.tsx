@@ -8,6 +8,7 @@ import type {
   Tag,
 } from '../../shared/api';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
+import { ImageCropEditor, PRODUCT_IMAGE_CROP_SPEC } from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, formatMoney, slugify } from '../../shared/utils/format';
 
@@ -69,6 +70,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [tags, setTags] = useState<Tag[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [pendingCropFiles, setPendingCropFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(mode === 'edit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -129,7 +131,24 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   }
 
   function handleImageSelection(event: ChangeEvent<HTMLInputElement>) {
-    setImageFiles(Array.from(event.target.files ?? []));
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (selectedFiles.length > 0) {
+      setPendingCropFiles((current) => [...current, ...selectedFiles]);
+    }
+    event.target.value = '';
+  }
+
+  function handleProductCropApply(file: File) {
+    setImageFiles((current) => [...current, file]);
+    setPendingCropFiles((current) => current.slice(1));
+  }
+
+  function handleProductCropCancel() {
+    setPendingCropFiles((current) => current.slice(1));
+  }
+
+  function removePreparedImage(index: number) {
+    setImageFiles((current) => current.filter((_, currentIndex) => currentIndex !== index));
   }
 
   function toggleTag(tagId: number) {
@@ -194,6 +213,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
       setCreatedProductId(savedProduct.id);
       setSuccess(`Product ${savedProduct.name} saved.`);
+      setImageFiles([]);
 
       if (mode === 'edit') {
         loadFormData();
@@ -252,6 +272,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   }
 
   const visibleVariants = variants.filter((variant) => !variant.remove);
+  const activeCropFile = pendingCropFiles[0] ?? null;
 
   return (
     <form className="page-stack" onSubmit={handleSubmit}>
@@ -407,8 +428,29 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         )}
         <label className="field">
           <span>Upload images</span>
+          <p className="image-hints">
+            Рекомендуемый размер: {PRODUCT_IMAGE_CROP_SPEC.outputWidth}x
+            {PRODUCT_IMAGE_CROP_SPEC.outputHeight}. Минимальный размер:{' '}
+            {PRODUCT_IMAGE_CROP_SPEC.minWidth}x{PRODUCT_IMAGE_CROP_SPEC.minHeight}.
+          </p>
           <input accept="image/*" multiple type="file" onChange={handleImageSelection} />
         </label>
+        {imageFiles.length > 0 ? (
+          <div className="upload-list">
+            {imageFiles.map((file, index) => (
+              <span key={`${file.name}-${index}`}>
+                {file.name}
+                <button
+                  className="text-button danger-text"
+                  type="button"
+                  onClick={() => removePreparedImage(index)}
+                >
+                  Remove
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -494,6 +536,14 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           {saving ? 'Saving...' : mode === 'create' ? 'Create product' : 'Save changes'}
         </button>
       </div>
+      {activeCropFile ? (
+        <ImageCropEditor
+          file={activeCropFile}
+          spec={PRODUCT_IMAGE_CROP_SPEC}
+          onApply={handleProductCropApply}
+          onCancel={handleProductCropCancel}
+        />
+      ) : null}
     </form>
   );
 }

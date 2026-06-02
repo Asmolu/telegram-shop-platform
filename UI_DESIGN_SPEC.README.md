@@ -135,6 +135,14 @@ Seller Portal использует те же фиолетовые акценты
 - изображение: около `125–150px` по высоте;
 - gap между карточками: `8–10px`.
 
+Product image upload standard:
+
+- aspect ratio: `4:5`;
+- recommended crop output: `1200x1500`;
+- minimum source/output size: `600x750`;
+- maximum accepted upload: `1600x2000`;
+- card and detail/gallery rendering must reserve a stable `4 / 5` media box with `object-fit: cover`.
+
 Визуально:
 
 - фон белый;
@@ -235,6 +243,14 @@ Search:
 - CTA: `Смотреть`.
 
 Баннер должен выглядеть как часть интерфейса, а не как чужая реклама.
+
+Native banner image upload standard:
+
+- aspect ratio: `16:9`;
+- recommended crop output: `1600x900`;
+- minimum source/output size: `800x450`;
+- maximum accepted upload: `2400x1350`;
+- Mini App rendering must reserve a stable `16 / 9` image box with `object-fit: cover`.
 
 ### Product Grid
 
@@ -1060,6 +1076,12 @@ CTA:
 
 - как он будет выглядеть на main;
 - как будет выглядеть aggressive banner, если этот формат будет добавлен позже.
+
+Banner image upload standards:
+
+- native banner: `16:9`, recommended `1600x900`, minimum `800x450`, maximum `2400x1350`;
+- aggressive promo banner: `3:1`, recommended `1800x600`, minimum `900x300`, maximum `2400x800`;
+- Seller Portal must show the matching recommended and minimum dimensions before upload.
 
 ---
 
