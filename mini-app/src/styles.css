@@ -1355,6 +1355,63 @@ label {
   margin: 10px 0;
 }
 
+.notification-settings-card__heading,
+.notification-row,
+.toggle-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.notification-settings-card__heading h2 {
+  margin: 0;
+}
+
+.notification-row {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.toggle-setting {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+}
+
+.toggle-setting > span {
+  display: grid;
+  gap: 3px;
+}
+
+.toggle-setting strong,
+.toggle-setting small {
+  overflow-wrap: anywhere;
+}
+
+.toggle-setting small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.toggle-setting input {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
+}
+
+.status-text-success {
+  color: var(--success-text);
+}
+
+.status-text-warning {
+  color: var(--warning-text);
+}
+
 .accordion-item {
   display: block;
   overflow: hidden;

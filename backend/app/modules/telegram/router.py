@@ -6,6 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_db_session
 from app.core.config import settings
+from app.modules.customer_notifications.schemas import CustomerBotWebhookResponse
+from app.modules.customer_notifications.service import (
+    CustomerBotWebhookService,
+    CustomerNotificationsService,
+)
 from app.modules.seller_auth.service import SellerAuthService
 from app.modules.seller_bot.service import SellerBotService
 from app.modules.telegram.schemas import (
@@ -32,6 +37,12 @@ def get_seller_bot_webhook_service(
     )
 
 
+def get_customer_bot_webhook_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> CustomerBotWebhookService:
+    return CustomerBotWebhookService(CustomerNotificationsService(session))
+
+
 def verify_seller_bot_webhook_header(
     x_telegram_secret_token: Annotated[
         str | None,
@@ -49,6 +60,28 @@ def verify_seller_bot_webhook_path_secret(
     ] = None,
 ) -> None:
     _verify_seller_bot_webhook_secret(path_secret=secret, header_secret=x_telegram_secret_token)
+
+
+def verify_customer_bot_webhook_header(
+    x_telegram_secret_token: Annotated[
+        str | None,
+        Header(alias="X-Telegram-Bot-Api-Secret-Token"),
+    ] = None,
+) -> None:
+    configured_secret = settings.telegram_customer_webhook_secret
+    if not configured_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Customer bot webhook is not configured",
+        )
+    if x_telegram_secret_token is None or not hmac.compare_digest(
+        x_telegram_secret_token,
+        configured_secret,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid customer bot webhook secret",
+        )
 
 
 def _verify_seller_bot_webhook_secret(
@@ -96,6 +129,18 @@ async def handle_seller_bot_webhook(
     update: TelegramUpdate,
     service: Annotated[SellerBotWebhookService, Depends(get_seller_bot_webhook_service)],
 ) -> SellerBotWebhookResponse:
+    return await service.handle_update(update)
+
+
+@router.post(
+    "/customer-bot/webhook",
+    response_model=CustomerBotWebhookResponse,
+    dependencies=[Depends(verify_customer_bot_webhook_header)],
+)
+async def handle_customer_bot_webhook(
+    update: TelegramUpdate,
+    service: Annotated[CustomerBotWebhookService, Depends(get_customer_bot_webhook_service)],
+) -> CustomerBotWebhookResponse:
     return await service.handle_update(update)
 
 

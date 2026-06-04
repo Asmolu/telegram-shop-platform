@@ -28,6 +28,7 @@ export type TelegramWebApp = {
   ready?: () => void;
   expand?: () => void;
   close?: () => void;
+  openTelegramLink?: (url: string) => void;
 };
 
 export type TelegramRuntimeDiagnostics = {
@@ -235,4 +236,19 @@ export function getTelegramBotUrl() {
   }
 
   return `https://t.me/${String(username).replace(/^@/, '')}`;
+}
+
+export function openTelegramLink(url: string) {
+  const webApp = getTelegramWebApp();
+
+  try {
+    webApp?.openTelegramLink?.(url);
+    if (webApp?.openTelegramLink) {
+      return;
+    }
+  } catch {
+    // Browser fallback below is used outside Telegram or when the method is unavailable.
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer');
 }

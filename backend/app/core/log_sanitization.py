@@ -7,6 +7,7 @@ from typing import Any
 from app.core.config import settings
 
 SELLER_BOT_WEBHOOK_PATH = "/telegram/seller-bot/webhook/"
+CUSTOMER_BOT_WEBHOOK_PATH = "/telegram/customer-bot/webhook"
 TELEGRAM_BOT_API_TOKEN_RE = re.compile(r"/bot[^/\s]+/")
 
 
@@ -16,6 +17,11 @@ def redact_sensitive_path(path: str) -> str:
     )
     if path.startswith(seller_webhook_prefix):
         return f"{seller_webhook_prefix}<secret>"
+    customer_webhook_path = (
+        f"{settings.api_v1_prefix.rstrip('/')}{CUSTOMER_BOT_WEBHOOK_PATH}"
+    )
+    if path == customer_webhook_path:
+        return customer_webhook_path
     return path
 
 
@@ -56,6 +62,8 @@ def _configured_secret_values() -> tuple[str, ...]:
             settings.telegram_bot_token,
             settings.telegram_webapp_bot_token,
             settings.telegram_seller_webhook_secret,
+            settings.telegram_customer_bot_token,
+            settings.telegram_customer_webhook_secret,
         )
         if value
     )

@@ -329,3 +329,24 @@ export interface SellerBotActionResponse {
   status: NotificationStatus;
   message: string;
 }
+
+export interface CustomerNotificationSubscription {
+  id: number;
+  user_id: number | null;
+  telegram_user_id: number;
+  telegram_chat_id_masked: string | null;
+  telegram_username: string | null;
+  telegram_first_name: string | null;
+  telegram_last_name: string | null;
+  chat_type: string;
+  has_chat: boolean;
+  service_opt_in: boolean;
+  marketing_opt_in: boolean;
+  blocked_at: string | null;
+  last_start_at: string | null;
+  last_stop_at: string | null;
+  last_settings_at: string | null;
+  last_delivery_error: string | null;
+  created_at: string;
+  updated_at: string;
+}

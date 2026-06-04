@@ -50,6 +50,15 @@ Before merging Codex-generated changes, check:
   bot tokens.
 - Bot 2 seller security commands are restricted to the configured seller group
   and audit critical actions.
+- Customer notification changes keep Bot 1 separate from Bot 2, use
+  `POST /api/v1/telegram/customer-bot/webhook` protected by
+  `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`, and never expose bot tokens or raw
+  Telegram chat IDs in frontend responses.
+- Mini App customer notification settings must use backend APIs and the
+  Telegram WebApp UI boundary only; do not store or forward raw `initData`.
+- Seller Panel customer notification views are registry/listing only for MVP
+  Phase 1. Do not add customer campaigns, mass sending, broadcast deliveries,
+  or campaign UI unless a later sprint explicitly asks for them.
 - Tests or smoke checks were added for important behavior.
 - README/SRS/Sprint Plan were updated if architecture changed.
 

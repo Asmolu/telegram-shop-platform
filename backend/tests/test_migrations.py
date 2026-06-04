@@ -4,6 +4,7 @@ from pathlib import Path
 from app.db.models import (
     Banner,
     BannerTargetType,
+    CustomerTelegramSubscription,
     Notification,
     NotificationChannel,
     NotificationStatus,
@@ -336,3 +337,31 @@ def test_model_enums_bind_database_values_not_member_names() -> None:
         NotificationStatus.SENT.value,
         NotificationStatus.FAILED.value,
     ]
+
+
+def test_customer_notifications_migration_adds_subscription_registry() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260604_0016_add_customer_telegram_subscriptions.py"
+    )
+    content = migration_path.read_text()
+
+    assert "customer_telegram_subscriptions" in content
+    assert "telegram_user_id" in content
+    assert "telegram_chat_id" in content
+    assert "service_opt_in" in content
+    assert "marketing_opt_in" in content
+    assert "uq_customer_telegram_subscriptions_user_id" in content
+    assert "uq_customer_telegram_subscriptions_telegram_user_id" in content
+
+
+def test_customer_subscription_model_has_unique_user_and_telegram_constraints() -> None:
+    table = CustomerTelegramSubscription.__table__
+    constraint_names = {constraint.name for constraint in table.constraints}
+
+    assert "uq_customer_telegram_subscriptions_user_id" in constraint_names
+    assert "uq_customer_telegram_subscriptions_telegram_user_id" in constraint_names
+    assert table.c.telegram_user_id.index is True
+    assert table.c.telegram_chat_id.index is True

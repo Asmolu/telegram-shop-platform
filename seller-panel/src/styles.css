@@ -980,6 +980,14 @@ textarea:focus {
   align-items: start;
 }
 
+.customer-notification-filters {
+  margin-top: 16px;
+}
+
+.customer-notification-filters label {
+  min-width: 150px;
+}
+
 .segmented-field {
   display: flex;
   gap: 12px;

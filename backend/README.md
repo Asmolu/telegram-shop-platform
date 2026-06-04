@@ -152,3 +152,25 @@ creates audit log entries for seller/admin actions.
 In the seller group, use `/sellers` to find `Seller ID for commands`, then use
 `/block_seller <Seller ID>` or `/unblock_seller <Seller ID>`. Do not use the
 Telegram user id or chat id for these commands.
+
+Customer Bot 1 notification subscription MVP is exposed through:
+
+- `POST /api/v1/telegram/customer-bot/webhook`
+- `GET /api/v1/customer-notifications/me/subscription`
+- `PATCH /api/v1/customer-notifications/me/subscription`
+- `POST /api/v1/customer-notifications/me/start-link`
+- `GET /api/v1/customer-notifications/subscriptions`
+
+Set `TELEGRAM_CUSTOMER_BOT_TOKEN`, `TELEGRAM_CUSTOMER_BOT_USERNAME`, and
+`TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for Bot 1. The webhook is protected only by
+the Telegram `X-Telegram-Bot-Api-Secret-Token` header and uses the header-only
+path, not a path secret. Bot 1 stores customer private chat state in
+`CustomerTelegramSubscription` and does not implement campaign sending in this
+phase.
+
+Set and verify the production Bot 1 webhook without printing the bot token:
+
+```bash
+python scripts/set_customer_bot_webhook.py set --base-url https://api.tsplatform.ru
+python scripts/set_customer_bot_webhook.py info
+```

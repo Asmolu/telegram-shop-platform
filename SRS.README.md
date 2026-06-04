@@ -755,3 +755,33 @@ that labels `Seller ID for commands`, plus `/block_seller <Seller ID>` and
 `/unblock_seller <Seller ID>` for deactivating or restoring seller access while
 preserving orders and audit history. The command ID is the internal Seller ID
 shown by `/sellers`, not the Telegram user id or chat id.
+
+---
+
+## 19. Customer Notifications MVP Phase 1
+
+Customer-facing Telegram notifications use Bot 1 and remain separate from Bot 2
+seller verification and seller operations.
+
+MVP Phase 1 scope:
+
+- Store customer Bot 1 private-chat subscription state in PostgreSQL.
+- Link a subscription to an existing user by trusted Telegram user id when
+  possible.
+- Store Telegram user id and chat id separately, with chat id treated as
+  delivery metadata and masked in seller/admin listing responses.
+- Protect the Bot 1 webhook with Telegram's
+  `X-Telegram-Bot-Api-Secret-Token` header and
+  `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`.
+- Support `/start`, `/settings`, `/stop`, and consent callbacks for service
+  and marketing preferences.
+- Expose Mini App profile settings for the current authenticated customer.
+- Expose a Seller Panel read-only subscription registry for SELLER/ADMIN users.
+
+Out of scope for Phase 1:
+
+- Customer campaigns.
+- Mass sending or broadcast delivery.
+- BroadcastCampaign or Delivery persistence.
+- Campaign creation UI.
+- Storing raw Telegram `initData`.

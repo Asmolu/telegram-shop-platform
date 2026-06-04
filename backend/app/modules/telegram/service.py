@@ -96,6 +96,20 @@ class TelegramService:
             "supports_inline_queries": result.get("supports_inline_queries"),
         }
 
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str | None = None,
+    ) -> None:
+        payload: dict[str, object] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        body = await self._post("answerCallbackQuery", payload)
+        if not body.get("ok", False):
+            description = str(body.get("description") or "Telegram API returned an error")
+            raise TelegramDeliveryError(description)
+
     async def set_webhook(
         self,
         url: str,

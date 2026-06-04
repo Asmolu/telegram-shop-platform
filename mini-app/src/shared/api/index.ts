@@ -4,6 +4,9 @@ import type {
   Cart,
   Category,
   CheckoutPayload,
+  CustomerNotificationStartLink,
+  CustomerNotificationSubscription,
+  CustomerNotificationSubscriptionUpdate,
   Favorite,
   FavoriteList,
   Order,
@@ -132,5 +135,24 @@ export function createProductReview(productId: number, rating: number, text: str
   return apiRequest<Review>(`/products/${productId}/reviews`, {
     method: 'POST',
     body: JSON.stringify({ rating, text }),
+  });
+}
+
+export function getCustomerNotificationSubscription() {
+  return apiRequest<CustomerNotificationSubscription>('/customer-notifications/me/subscription');
+}
+
+export function updateCustomerNotificationSubscription(
+  payload: CustomerNotificationSubscriptionUpdate,
+) {
+  return apiRequest<CustomerNotificationSubscription>('/customer-notifications/me/subscription', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createCustomerNotificationStartLink() {
+  return apiRequest<CustomerNotificationStartLink>('/customer-notifications/me/start-link', {
+    method: 'POST',
   });
 }

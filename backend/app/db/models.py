@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -175,6 +176,98 @@ class User(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    customer_telegram_subscription: Mapped["CustomerTelegramSubscription | None"] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
+
+class CustomerTelegramSubscription(Base):
+    __tablename__ = "customer_telegram_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_customer_telegram_subscriptions_user_id"),
+        UniqueConstraint(
+            "telegram_user_id",
+            name="uq_customer_telegram_subscriptions_telegram_user_id",
+        ),
+        Index(
+            "ix_customer_telegram_subscriptions_consent",
+            "has_chat",
+            "service_opt_in",
+            "marketing_opt_in",
+        ),
+        Index("ix_customer_telegram_subscriptions_blocked_at", "blocked_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    chat_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="unknown",
+        server_default="unknown",
+    )
+    has_chat: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    service_opt_in: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    marketing_opt_in: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    opt_in_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    marketing_opted_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    marketing_opted_out_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    service_opted_out_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_stop_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_settings_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped[User | None] = relationship(back_populates="customer_telegram_subscription")
 
 
 class SellerCredential(Base):

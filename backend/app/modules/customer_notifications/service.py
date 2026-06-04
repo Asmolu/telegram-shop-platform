@@ -1,0 +1,653 @@
+from __future__ import annotations
+
+import re
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import quote
+
+from fastapi import status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.common.pagination import PageMeta
+from app.core.config import settings
+from app.core.errors import AppError
+from app.db.models import CustomerTelegramSubscription, User
+from app.modules.audit.service import AuditService
+from app.modules.customer_notifications.repository import CustomerNotificationsRepository
+from app.modules.customer_notifications.schemas import (
+    CustomerBotWebhookResponse,
+    CustomerSubscriptionAdminRead,
+    CustomerSubscriptionList,
+    CustomerSubscriptionMe,
+    CustomerSubscriptionStartLink,
+    CustomerSubscriptionUpdate,
+)
+from app.modules.telegram.schemas import TelegramCallbackQuery, TelegramMessage, TelegramUpdate
+from app.modules.telegram.service import TelegramDeliveryError, TelegramService
+from app.modules.users.repository import UsersRepository
+
+START_COMMAND_RE = re.compile(
+    r"^/start(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<payload>\S+))?$",
+    re.IGNORECASE,
+)
+COMMAND_RE = re.compile(
+    r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$"
+)
+PRIVATE_CHAT_TYPE = "private"
+UNKNOWN_CHAT_TYPE = "unknown"
+START_LINK_PAYLOAD = "notify"
+CALLBACK_PREFIX = "customer_notifications"
+ACTION_SUBSCRIPTION_UPDATED = "customer_notifications.subscription_updated"
+
+WELCOME_MESSAGE = (
+    "Уведомления подключены. Мы будем писать сюда о заказах и важных изменениях. "
+    "Рекламные предложения выключены, их можно включить отдельно в настройках."
+)
+STOP_MESSAGE = "Уведомления выключены. Чтобы снова получать сообщения, отправьте /start."
+CONNECT_PRIVATE_CHAT_MESSAGE = (
+    "Уведомления можно подключить только в личном чате с ботом. Откройте бота и отправьте /start."
+)
+
+
+class CustomerNotificationsService:
+    """Customer Bot 1 subscription registry and consent business logic."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_service: TelegramService | None = None,
+        audit_service: AuditService | None = None,
+        now_factory: Any | None = None,
+    ) -> None:
+        self.session = session
+        self.repository = CustomerNotificationsRepository(session)
+        self.users_repository = UsersRepository(session)
+        self.telegram_service = telegram_service or TelegramService(
+            bot_token=settings.telegram_customer_bot_token,
+        )
+        self.audit_service = audit_service or AuditService(session)
+        self.now_factory = now_factory or (lambda: datetime.now(UTC))
+
+    async def get_my_subscription(self, user: User) -> CustomerSubscriptionMe:
+        subscription = await self._get_or_link_subscription_for_user(user, commit_link=True)
+        return self._me_response(subscription)
+
+    async def update_my_subscription(
+        self,
+        *,
+        user: User,
+        payload: CustomerSubscriptionUpdate,
+    ) -> CustomerSubscriptionMe:
+        subscription = await self._get_or_create_subscription_for_user(user)
+        before_data = self._subscription_snapshot(subscription)
+        now = self._now()
+
+        if payload.service_opt_in is not None:
+            if payload.service_opt_in and self._has_active_private_chat(subscription):
+                subscription.service_opt_in = True
+                subscription.service_opted_out_at = None
+                subscription.opt_in_source = "mini_app_profile"
+            elif not payload.service_opt_in:
+                subscription.service_opt_in = False
+                subscription.service_opted_out_at = now
+
+        if payload.marketing_opt_in is not None:
+            if payload.marketing_opt_in and self._has_active_private_chat(subscription):
+                subscription.marketing_opt_in = True
+                subscription.marketing_opted_in_at = now
+                subscription.marketing_opted_out_at = None
+                subscription.opt_in_source = "mini_app_profile"
+            elif not payload.marketing_opt_in:
+                subscription.marketing_opt_in = False
+                subscription.marketing_opted_out_at = now
+
+        await self._audit_if_changed(
+            subscription=subscription,
+            before_data=before_data,
+            actor_user_id=user.id,
+            source="mini_app_profile",
+        )
+        await self._commit("Customer notification subscription update failed")
+        await self._refresh(subscription)
+        return self._me_response(subscription)
+
+    async def create_start_link(self, _: User) -> CustomerSubscriptionStartLink:
+        return self._start_link()
+
+    async def list_subscriptions(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        has_chat: bool | None = None,
+        service_opt_in: bool | None = None,
+        marketing_opt_in: bool | None = None,
+        blocked: bool | None = None,
+        user_id: int | None = None,
+        telegram_username: str | None = None,
+    ) -> CustomerSubscriptionList:
+        items, total = await self.repository.list(
+            limit=limit,
+            offset=offset,
+            has_chat=has_chat,
+            service_opt_in=service_opt_in,
+            marketing_opt_in=marketing_opt_in,
+            blocked=blocked,
+            user_id=user_id,
+            telegram_username=telegram_username,
+        )
+        return CustomerSubscriptionList(
+            items=[self._admin_response(item) for item in items],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+
+    async def handle_start(
+        self,
+        message: TelegramMessage,
+        *,
+        start_payload: str,
+    ) -> CustomerBotWebhookResponse:
+        if not self._is_private_message(message):
+            await self._send_chat_message(message.chat.id, CONNECT_PRIVATE_CHAT_MESSAGE)
+            return self._response(handled=True, result="private_chat_required")
+        if message.from_user is None:
+            return self._response(handled=False, result="missing_telegram_user")
+
+        subscription = await self._upsert_from_private_message(message)
+        before_data = self._subscription_snapshot(subscription)
+        now = self._now()
+
+        subscription.has_chat = True
+        subscription.service_opt_in = True
+        subscription.service_opted_out_at = None
+        subscription.marketing_opt_in = False
+        subscription.blocked_at = None
+        subscription.last_delivery_error = None
+        subscription.last_start_at = now
+        subscription.opt_in_source = "bot_start"
+
+        await self._audit_if_changed(
+            subscription=subscription,
+            before_data=before_data,
+            actor_user_id=subscription.user_id,
+            source="bot_start",
+        )
+        await self._commit("Customer notification subscription start failed")
+        await self._send_settings_message(
+            message.chat.id,
+            subscription=subscription,
+            intro=WELCOME_MESSAGE,
+        )
+        result = "started_with_payload" if start_payload else "started"
+        return self._response(handled=True, result=result)
+
+    async def handle_stop(self, message: TelegramMessage) -> CustomerBotWebhookResponse:
+        if not self._is_private_message(message):
+            return self._response(handled=False, result="ignored_non_private_stop")
+        if message.from_user is None:
+            return self._response(handled=False, result="missing_telegram_user")
+
+        subscription = await self._upsert_from_private_message(message)
+        before_data = self._subscription_snapshot(subscription)
+        now = self._now()
+        subscription.service_opt_in = False
+        subscription.marketing_opt_in = False
+        subscription.service_opted_out_at = now
+        subscription.marketing_opted_out_at = now
+        subscription.last_stop_at = now
+
+        await self._audit_if_changed(
+            subscription=subscription,
+            before_data=before_data,
+            actor_user_id=subscription.user_id,
+            source="bot_stop",
+        )
+        await self._commit("Customer notification subscription stop failed")
+        await self._send_chat_message(message.chat.id, STOP_MESSAGE)
+        return self._response(handled=True, result="stopped")
+
+    async def handle_settings(self, message: TelegramMessage) -> CustomerBotWebhookResponse:
+        if not self._is_private_message(message):
+            return self._response(handled=False, result="ignored_non_private_settings")
+        if message.from_user is None:
+            return self._response(handled=False, result="missing_telegram_user")
+
+        subscription = await self._upsert_from_private_message(message)
+        subscription.last_settings_at = self._now()
+        await self._commit("Customer notification settings update failed")
+        await self._send_settings_message(message.chat.id, subscription=subscription)
+        return self._response(handled=True, result="settings_sent")
+
+    async def handle_callback_query(
+        self,
+        callback_query: TelegramCallbackQuery,
+    ) -> CustomerBotWebhookResponse:
+        parsed = self._parse_callback_data(callback_query.data)
+        if parsed is None:
+            await self._answer_callback(callback_query.id, "Настройка недоступна.")
+            return self._response(handled=False, result="unsupported_callback")
+        if callback_query.message is None:
+            await self._answer_callback(callback_query.id, "Откройте настройки заново.")
+            return self._response(handled=False, result="callback_without_message")
+        if not self._is_private_message(callback_query.message):
+            await self._answer_callback(callback_query.id, "Настройки доступны в личном чате.")
+            return self._response(handled=True, result="private_chat_required")
+
+        message = callback_query.message
+        subscription = await self._upsert_from_callback(callback_query, message)
+        before_data = self._subscription_snapshot(subscription)
+        consent_type, enabled = parsed
+        now = self._now()
+
+        if consent_type == "service":
+            subscription.service_opt_in = enabled
+            subscription.service_opted_out_at = None if enabled else now
+        else:
+            subscription.marketing_opt_in = enabled
+            if enabled:
+                subscription.marketing_opted_in_at = now
+                subscription.marketing_opted_out_at = None
+                subscription.opt_in_source = "bot_settings"
+            else:
+                subscription.marketing_opted_out_at = now
+
+        subscription.last_settings_at = now
+        await self._audit_if_changed(
+            subscription=subscription,
+            before_data=before_data,
+            actor_user_id=subscription.user_id,
+            source="bot_settings",
+        )
+        await self._commit("Customer notification settings callback failed")
+        await self._answer_callback(callback_query.id, "Настройки обновлены.")
+        await self._send_settings_message(message.chat.id, subscription=subscription)
+        callback_result = f"{consent_type}_{'enabled' if enabled else 'disabled'}"
+        return self._response(handled=True, result=callback_result)
+
+    async def _get_or_link_subscription_for_user(
+        self,
+        user: User,
+        *,
+        commit_link: bool,
+    ) -> CustomerTelegramSubscription | None:
+        subscription = await self.repository.get_by_user_id(user.id)
+        if subscription is not None:
+            return subscription
+
+        subscription = await self.repository.get_by_telegram_user_id(user.telegram_id)
+        if subscription is None:
+            return None
+        if subscription.user_id is None:
+            subscription.user_id = user.id
+            if commit_link:
+                await self._commit("Customer notification subscription link failed")
+                await self._refresh(subscription)
+        return subscription
+
+    async def _get_or_create_subscription_for_user(
+        self,
+        user: User,
+    ) -> CustomerTelegramSubscription:
+        subscription = await self._get_or_link_subscription_for_user(user, commit_link=False)
+        if subscription is not None:
+            return subscription
+
+        subscription = CustomerTelegramSubscription(
+            user_id=user.id,
+            telegram_user_id=user.telegram_id,
+            chat_type=UNKNOWN_CHAT_TYPE,
+            has_chat=False,
+            service_opt_in=False,
+            marketing_opt_in=False,
+        )
+        self.repository.add(subscription)
+        return subscription
+
+    async def _upsert_from_private_message(
+        self,
+        message: TelegramMessage,
+    ) -> CustomerTelegramSubscription:
+        if message.from_user is None:
+            raise AppError("Telegram user is missing", status.HTTP_400_BAD_REQUEST)
+        subscription = await self._upsert_by_telegram_user_id(message.from_user.id)
+        self._update_telegram_fields(subscription, message)
+        return subscription
+
+    async def _upsert_from_callback(
+        self,
+        callback_query: TelegramCallbackQuery,
+        message: TelegramMessage,
+    ) -> CustomerTelegramSubscription:
+        subscription = await self._upsert_by_telegram_user_id(callback_query.from_user.id)
+        self._update_telegram_fields(
+            subscription,
+            message,
+            callback_user=callback_query.from_user,
+        )
+        return subscription
+
+    async def _upsert_by_telegram_user_id(
+        self,
+        telegram_user_id: int,
+    ) -> CustomerTelegramSubscription:
+        user = await self.users_repository.get_by_telegram_id(telegram_user_id)
+        subscription = await self.repository.get_by_telegram_user_id(telegram_user_id)
+        if subscription is None and user is not None:
+            subscription = await self.repository.get_by_user_id(user.id)
+        if subscription is None:
+            subscription = CustomerTelegramSubscription(
+                user_id=user.id if user is not None else None,
+                telegram_user_id=telegram_user_id,
+                chat_type=UNKNOWN_CHAT_TYPE,
+                has_chat=False,
+                service_opt_in=False,
+                marketing_opt_in=False,
+            )
+            self.repository.add(subscription)
+        elif user is not None and subscription.user_id is None:
+            subscription.user_id = user.id
+        return subscription
+
+    def _update_telegram_fields(
+        self,
+        subscription: CustomerTelegramSubscription,
+        message: TelegramMessage,
+        *,
+        callback_user: Any | None = None,
+    ) -> None:
+        telegram_user = callback_user or message.from_user
+        if telegram_user is not None:
+            subscription.telegram_username = telegram_user.username
+            subscription.telegram_first_name = telegram_user.first_name
+            subscription.telegram_last_name = telegram_user.last_name
+
+        subscription.telegram_chat_id = message.chat.id
+        subscription.chat_type = message.chat.type or UNKNOWN_CHAT_TYPE
+        subscription.has_chat = (
+            subscription.chat_type == PRIVATE_CHAT_TYPE and subscription.blocked_at is None
+        )
+
+    async def _audit_if_changed(
+        self,
+        *,
+        subscription: CustomerTelegramSubscription,
+        before_data: dict[str, Any],
+        actor_user_id: int | None,
+        source: str,
+    ) -> None:
+        after_data = self._subscription_snapshot(subscription)
+        if before_data == after_data:
+            return
+        await self._flush_if_supported()
+        await self.audit_service.record_action(
+            actor_user_id=actor_user_id,
+            action=ACTION_SUBSCRIPTION_UPDATED,
+            entity_type="customer_telegram_subscription",
+            entity_id=subscription.id,
+            before_data=before_data,
+            after_data=after_data,
+            metadata={"source": source},
+            commit=False,
+        )
+
+    async def _send_settings_message(
+        self,
+        chat_id: int,
+        *,
+        subscription: CustomerTelegramSubscription | None,
+        intro: str | None = None,
+    ) -> None:
+        lines = []
+        if intro:
+            lines.append(intro)
+            lines.append("")
+        if subscription is None:
+            lines.append("Настройки уведомлений пока не найдены. Отправьте /start.")
+            reply_markup = None
+        else:
+            lines.append(self._settings_text(subscription))
+            reply_markup = self._settings_reply_markup(subscription)
+        await self._send_chat_message(chat_id, "\n".join(lines), reply_markup=reply_markup)
+
+    def _settings_text(self, subscription: CustomerTelegramSubscription) -> str:
+        chat_state = "подключен" if self._has_active_private_chat(subscription) else "не подключен"
+        service_state = "включены" if subscription.service_opt_in else "выключены"
+        marketing_state = "включены" if subscription.marketing_opt_in else "выключены"
+        return "\n".join(
+            (
+                "Настройки уведомлений",
+                f"Telegram-чат: {chat_state}",
+                f"Заказы и сервисные сообщения: {service_state}",
+                f"Рекламные предложения: {marketing_state}",
+                "",
+                "Команда /stop выключит все сообщения от этого бота.",
+            )
+        )
+
+    def _settings_reply_markup(
+        self,
+        subscription: CustomerTelegramSubscription,
+    ) -> dict[str, object]:
+        service_action = "off" if subscription.service_opt_in else "on"
+        marketing_action = "off" if subscription.marketing_opt_in else "on"
+        return {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": (
+                            "Выключить заказы"
+                            if subscription.service_opt_in
+                            else "Включить заказы"
+                        ),
+                        "callback_data": f"{CALLBACK_PREFIX}:service:{service_action}",
+                    }
+                ],
+                [
+                    {
+                        "text": (
+                            "Выключить предложения"
+                            if subscription.marketing_opt_in
+                            else "Включить предложения"
+                        ),
+                        "callback_data": f"{CALLBACK_PREFIX}:marketing:{marketing_action}",
+                    }
+                ],
+            ]
+        }
+
+    async def _send_chat_message(
+        self,
+        chat_id: int,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> bool:
+        try:
+            await self.telegram_service.send_message(
+                str(chat_id),
+                message,
+                reply_markup=reply_markup,
+            )
+        except TelegramDeliveryError:
+            return False
+        return True
+
+    async def _answer_callback(self, callback_query_id: str, text: str) -> bool:
+        try:
+            await self.telegram_service.answer_callback_query(callback_query_id, text=text)
+        except TelegramDeliveryError:
+            return False
+        return True
+
+    def _parse_callback_data(self, data: str | None) -> tuple[str, bool] | None:
+        if not data:
+            return None
+        parts = data.split(":")
+        if len(parts) != 3 or parts[0] != CALLBACK_PREFIX:
+            return None
+        consent_type, action = parts[1], parts[2]
+        if consent_type not in {"service", "marketing"} or action not in {"on", "off"}:
+            return None
+        return consent_type, action == "on"
+
+    def _is_private_message(self, message: TelegramMessage) -> bool:
+        return message.chat.type == PRIVATE_CHAT_TYPE
+
+    def _has_active_private_chat(self, subscription: CustomerTelegramSubscription) -> bool:
+        return (
+            subscription.has_chat
+            and subscription.telegram_chat_id is not None
+            and subscription.chat_type == PRIVATE_CHAT_TYPE
+            and subscription.blocked_at is None
+        )
+
+    def _me_response(
+        self,
+        subscription: CustomerTelegramSubscription | None,
+    ) -> CustomerSubscriptionMe:
+        start_link = self._start_link()
+        if subscription is None:
+            return CustomerSubscriptionMe(
+                has_chat=False,
+                service_opt_in=False,
+                marketing_opt_in=False,
+                blocked_at=None,
+                telegram_username=None,
+                bot_start_link=start_link.bot_start_link,
+                start_command=start_link.start_command,
+            )
+
+        has_chat = self._has_active_private_chat(subscription)
+        return CustomerSubscriptionMe(
+            has_chat=has_chat,
+            service_opt_in=subscription.service_opt_in,
+            marketing_opt_in=subscription.marketing_opt_in,
+            blocked_at=subscription.blocked_at,
+            telegram_username=subscription.telegram_username,
+            bot_start_link=None if has_chat else start_link.bot_start_link,
+            start_command=start_link.start_command,
+        )
+
+    def _admin_response(
+        self,
+        subscription: CustomerTelegramSubscription,
+    ) -> CustomerSubscriptionAdminRead:
+        return CustomerSubscriptionAdminRead(
+            id=subscription.id,
+            user_id=subscription.user_id,
+            telegram_user_id=subscription.telegram_user_id,
+            telegram_chat_id_masked=self._mask_chat_id(subscription.telegram_chat_id),
+            telegram_username=subscription.telegram_username,
+            telegram_first_name=subscription.telegram_first_name,
+            telegram_last_name=subscription.telegram_last_name,
+            chat_type=subscription.chat_type,
+            has_chat=subscription.has_chat,
+            service_opt_in=subscription.service_opt_in,
+            marketing_opt_in=subscription.marketing_opt_in,
+            blocked_at=subscription.blocked_at,
+            last_start_at=subscription.last_start_at,
+            last_stop_at=subscription.last_stop_at,
+            last_settings_at=subscription.last_settings_at,
+            last_delivery_error=subscription.last_delivery_error,
+            created_at=subscription.created_at,
+            updated_at=subscription.updated_at,
+        )
+
+    def _start_link(self) -> CustomerSubscriptionStartLink:
+        username = (settings.telegram_customer_bot_username or "").strip().lstrip("@")
+        start_command = f"/start {START_LINK_PAYLOAD}"
+        bot_start_link = None
+        if username:
+            bot_start_link = f"https://t.me/{quote(username)}?start={quote(START_LINK_PAYLOAD)}"
+        return CustomerSubscriptionStartLink(
+            bot_start_link=bot_start_link,
+            start_command=start_command,
+        )
+
+    def _subscription_snapshot(
+        self,
+        subscription: CustomerTelegramSubscription,
+    ) -> dict[str, Any]:
+        return {
+            "user_id": subscription.user_id,
+            "telegram_user_id": subscription.telegram_user_id,
+            "has_chat": subscription.has_chat,
+            "chat_type": subscription.chat_type,
+            "service_opt_in": subscription.service_opt_in,
+            "marketing_opt_in": subscription.marketing_opt_in,
+            "blocked_at": (
+                subscription.blocked_at.isoformat()
+                if subscription.blocked_at is not None
+                else None
+            ),
+        }
+
+    def _mask_chat_id(self, chat_id: int | None) -> str | None:
+        if chat_id is None:
+            return None
+        value = str(chat_id)
+        prefix = "-" if value.startswith("-") else ""
+        tail = value[-4:] if len(value) > 4 else value
+        return f"{prefix}***{tail}"
+
+    async def _commit(self, error_message: str) -> None:
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError(error_message, status.HTTP_409_CONFLICT) from exc
+
+    async def _flush_if_supported(self) -> None:
+        flush = getattr(self.session, "flush", None)
+        if callable(flush):
+            await flush()
+
+    async def _refresh(self, subscription: CustomerTelegramSubscription) -> None:
+        refresh = getattr(self.session, "refresh", None)
+        if callable(refresh):
+            await refresh(subscription)
+
+    def _now(self) -> datetime:
+        return self.now_factory()
+
+    def _response(self, *, handled: bool, result: str) -> CustomerBotWebhookResponse:
+        return CustomerBotWebhookResponse(handled=handled, result=result)
+
+
+class CustomerBotWebhookService:
+    """Telegram webhook adapter for Bot 1 customer updates."""
+
+    def __init__(self, customer_notifications_service: CustomerNotificationsService) -> None:
+        self.customer_notifications_service = customer_notifications_service
+
+    async def handle_update(self, update: TelegramUpdate) -> CustomerBotWebhookResponse:
+        if update.callback_query is not None:
+            return await self.customer_notifications_service.handle_callback_query(
+                update.callback_query
+            )
+
+        message = update.message
+        if message is None or message.text is None:
+            return CustomerBotWebhookResponse(handled=False, result="unsupported_update")
+
+        text = message.text.strip()
+        start_match = START_COMMAND_RE.match(text)
+        if start_match is not None:
+            return await self.customer_notifications_service.handle_start(
+                message,
+                start_payload=(start_match.group("payload") or "").strip(),
+            )
+
+        command_match = COMMAND_RE.match(text)
+        if command_match is None:
+            return CustomerBotWebhookResponse(handled=False, result="ignored")
+
+        command = command_match.group("command").lower()
+        if command == "/stop":
+            return await self.customer_notifications_service.handle_stop(message)
+        if command == "/settings":
+            return await self.customer_notifications_service.handle_settings(message)
+
+        return CustomerBotWebhookResponse(handled=False, result="ignored")

@@ -6,6 +6,7 @@ import type {
   BannerImageKind,
   BannerPayload,
   Category,
+  CustomerNotificationSubscription,
   Notification,
   Order,
   OrderStatus,
@@ -302,5 +303,12 @@ export const api = {
       }),
     messages: (query: QueryParams = {}) =>
       apiRequest<PageList<Notification>>('/seller-bot/messages', { query }),
+  },
+  customerNotifications: {
+    subscriptions: (query: QueryParams = {}) =>
+      apiRequest<PageList<CustomerNotificationSubscription>>(
+        '/customer-notifications/subscriptions',
+        { query },
+      ),
   },
 };

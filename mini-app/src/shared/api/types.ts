@@ -240,3 +240,23 @@ export type CheckoutPayload = {
   delivery_comment?: string | null;
   promo_code?: string | null;
 };
+
+export type CustomerNotificationSubscription = {
+  has_chat: boolean;
+  service_opt_in: boolean;
+  marketing_opt_in: boolean;
+  blocked_at?: string | null;
+  telegram_username?: string | null;
+  bot_start_link?: string | null;
+  start_command: string;
+};
+
+export type CustomerNotificationSubscriptionUpdate = {
+  service_opt_in?: boolean;
+  marketing_opt_in?: boolean;
+};
+
+export type CustomerNotificationStartLink = {
+  bot_start_link?: string | null;
+  start_command: string;
+};

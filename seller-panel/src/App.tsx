@@ -14,6 +14,7 @@ import { PromoCodesPage } from './pages/PromoCodes/PromoCodesPage';
 import { ReviewsPage } from './pages/Reviews/ReviewsPage';
 import { StatisticsPage } from './pages/Statistics/StatisticsPage';
 import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
+import { CustomerNotificationsPage } from './pages/CustomerNotifications/CustomerNotificationsPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 
 const navItems: NavItem[] = [
@@ -25,6 +26,7 @@ const navItems: NavItem[] = [
   { path: '/promo-codes', label: 'Promo Codes' },
   { path: '/reviews', label: 'Reviews' },
   { path: '/statistics', label: 'Statistics' },
+  { path: '/customer-notifications', label: 'Customer Notifications' },
   { path: '/seller-bot', label: 'Seller Bot' },
   { path: '/settings', label: 'Settings' },
 ];
@@ -46,6 +48,7 @@ function getPageTitle(path: string): string {
   if (path.startsWith('/promo-codes')) return 'Promo Codes';
   if (path.startsWith('/reviews')) return 'Reviews';
   if (path.startsWith('/statistics')) return 'Statistics';
+  if (path.startsWith('/customer-notifications')) return 'Customer Notifications';
   if (path.startsWith('/seller-bot')) return 'Seller Bot';
   if (path.startsWith('/settings')) return 'Settings';
   return 'Dashboard';
@@ -179,6 +182,7 @@ function renderPage(
   if (path === '/promo-codes') return <PromoCodesPage {...sharedPageProps} />;
   if (path === '/reviews') return <ReviewsPage {...sharedPageProps} />;
   if (path === '/statistics') return <StatisticsPage {...sharedPageProps} />;
+  if (path === '/customer-notifications') return <CustomerNotificationsPage {...sharedPageProps} />;
   if (path === '/seller-bot') return <SellerBotPage {...sharedPageProps} />;
   if (path === '/settings') return <SettingsPage {...sharedPageProps} />;
 

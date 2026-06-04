@@ -68,6 +68,9 @@ TELEGRAM_BOT_TOKEN=<seller notification bot token>
 TELEGRAM_SELLER_CHAT_ID=<seller group or chat id>
 TELEGRAM_SELLER_BOT_USERNAME=<seller bot username without token>
 TELEGRAM_SELLER_WEBHOOK_SECRET=<random local webhook secret>
+TELEGRAM_CUSTOMER_BOT_TOKEN=<customer Bot 1 token>
+TELEGRAM_CUSTOMER_BOT_USERNAME=<customer Bot 1 username without token>
+TELEGRAM_CUSTOMER_WEBHOOK_SECRET=<random local customer webhook secret>
 JWT_SECRET_KEY=<local development secret>
 ```
 
@@ -79,6 +82,14 @@ Seller Panel. `TELEGRAM_SELLER_WEBHOOK_SECRET` protects the Bot 2 webhook
 through Telegram's `X-Telegram-Bot-Api-Secret-Token` header. The legacy
 path-secret webhook remains accepted for compatibility, but new webhook setup
 uses the header-only path.
+
+Customer notification settings use Bot 1 through `TELEGRAM_CUSTOMER_BOT_TOKEN`.
+Bot 1 remains separate from Bot 2 and receives webhook updates at
+`POST /api/v1/telegram/customer-bot/webhook`, protected by
+`TELEGRAM_CUSTOMER_WEBHOOK_SECRET` through Telegram's
+`X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_CUSTOMER_BOT_USERNAME`
+enables the Mini App Profile to return a `t.me` start link. Phase 1 only stores
+subscription/consent state and does not send marketing campaigns.
 
 3. Run backend:
 
@@ -151,6 +162,14 @@ tunnel URL is available, set Bot 2 webhook with:
 cd backend
 python scripts/set_seller_bot_webhook.py set --base-url https://your-public-tunnel.example
 python scripts/set_seller_bot_webhook.py info
+```
+
+Set Bot 1 customer webhook with the same tunnel:
+
+```bash
+cd backend
+python scripts/set_customer_bot_webhook.py set --base-url https://your-public-tunnel.example
+python scripts/set_customer_bot_webhook.py info
 ```
 
 The older manual callback remains available for backend-only service tests:

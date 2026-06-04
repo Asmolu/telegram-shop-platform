@@ -11,12 +11,19 @@
 
 ## Non-goals
 
-- No implementation code in this phase.
-- No migrations, dependencies, backend code, frontend code, or `.env` changes in this phase.
-- No change to Mini App auth, Bot 2 seller auth, or existing seller bot management.
+- No customer campaigns, mass sending, broadcast deliveries, or campaign UI in
+  MVP Phase 1.
+- No change to Mini App auth, Bot 2 seller auth, or existing seller bot
+  management.
 - No marketing messages to users without marketing opt-in.
 - No attempt to message arbitrary Telegram users who have not interacted with Bot 1.
 - No storage of raw Telegram `initData`, bot tokens, webhook secrets, or sensitive Telegram update payloads in logs.
+
+## Implementation Status
+
+MVP Phase 1 is implemented as a customer subscription registry, Bot 1 webhook,
+Mini App Profile settings, and Seller Panel read-only listing. The campaign and
+delivery models in this document remain Phase 2 design notes only.
 
 ## Current State
 
@@ -63,11 +70,14 @@ Required interaction to collect a valid Bot 1 `chat_id`:
 
 ## Proposed Data Model
 
-Add these SQLAlchemy models in a future implementation sprint. Keep them in `backend/app/db/models.py` until the model layer is split, following current project rules.
+Keep customer notification SQLAlchemy models in `backend/app/db/models.py` until
+the model layer is split, following current project rules.
 
 ### CustomerTelegramSubscription
 
 Purpose: customer Bot 1 recipient registry and consent source of truth.
+
+Status: implemented in MVP Phase 1.
 
 Suggested fields:
 
@@ -107,6 +117,8 @@ Indexes and constraints:
 
 Purpose: reusable message templates for service and marketing sends.
 
+Status: future Phase 2 scope.
+
 Suggested fields:
 
 | Field | Type | Notes |
@@ -129,6 +141,8 @@ Suggested fields:
 ### BroadcastCampaign
 
 Purpose: seller/admin-created customer campaign, including service or marketing sends.
+
+Status: future Phase 2 scope. Do not add this model or campaign APIs in Phase 1.
 
 Suggested fields:
 
@@ -166,6 +180,8 @@ Recommended audience filters for MVP:
 ### BroadcastDelivery
 
 Purpose: one row per campaign recipient and delivery attempt state.
+
+Status: future Phase 2 scope. Do not add this model or delivery queue in Phase 1.
 
 Suggested fields:
 
@@ -231,6 +247,11 @@ Webhook endpoint:
 | `POST` | `/api/v1/telegram/customer-bot/webhook` | Bot 1 webhook protected by Telegram secret header. |
 
 Legacy path-secret routes should be avoided for Bot 1. Prefer the safe Telegram header `X-Telegram-Bot-Api-Secret-Token`.
+
+MVP Phase 1 implements only the Mini App subscription endpoints, the
+seller/admin subscription registry endpoint, and the Bot 1 webhook. Template,
+campaign, preview, test-send, process-batch, and delivery-report endpoints are
+Phase 2 design only.
 
 ## Bot 1 Webhook Design
 
@@ -417,9 +438,10 @@ Backend design scope for the first implementation sprint:
 - Add `CustomerTelegramSubscription`.
 - Add Bot 1 webhook endpoint with `/start`, `/stop`, `/settings`, and settings callbacks.
 - Add customer subscription read/update APIs for Mini App Profile.
-- Add Bot 1 status endpoint for Seller Panel or admin diagnostics.
-- Add audit logs for consent changes initiated through admin/seller APIs if present.
-- Add tests for webhook secret validation, chat id collection, opt-in/opt-out, blocked user handling, and no raw initData storage.
+- Add a Seller/Admin subscription registry endpoint for read-only listing.
+- Add audit logs for subscription state changes.
+- Add tests for webhook secret validation, chat id collection, group-chat
+  rejection, opt-in/opt-out, settings callbacks, and route authorization.
 
 Frontend design scope:
 
@@ -476,6 +498,11 @@ Manual smoke tests:
 - Set Bot 1 webhook in staging using a safe script equivalent to the seller bot script.
 - Open Mini App profile, generate Bot 1 link, send `/start`, confirm chat connected.
 - Toggle marketing on/off and verify recipient eligibility.
+- Open Seller Panel Customer Notifications and verify the subscription appears
+  with masked chat metadata.
+
+Phase 2 manual smoke tests:
+
 - Send a test campaign to an internal test account.
 - Run a small campaign batch and verify delivery report counts.
 

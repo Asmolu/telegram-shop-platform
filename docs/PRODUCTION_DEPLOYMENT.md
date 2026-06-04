@@ -31,6 +31,12 @@ Backend:
   start link during registration
 - `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook
   `X-Telegram-Bot-Api-Secret-Token` header
+- `TELEGRAM_CUSTOMER_BOT_TOKEN` for Bot 1 customer notification registry
+  webhook setup and future customer-facing notification delivery
+- `TELEGRAM_CUSTOMER_BOT_USERNAME` for Mini App customer notification start
+  links
+- `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for the protected Bot 1 webhook
+  `X-Telegram-Bot-Api-Secret-Token` header
 - cache and rate limit settings from `backend/.env.production.example`
 
 Frontend:
@@ -58,8 +64,9 @@ Run migrations:
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
-Seller Portal email/password auth and seller approval requires migrations
-through head `20260602_0015`. Bot 2 is connected through:
+Seller Portal email/password auth, seller approval, and Customer Notifications
+MVP Phase 1 require migrations through head `20260604_0016`. Bot 2 is connected
+through:
 
 ```text
 POST /api/v1/telegram/seller-bot/webhook
@@ -85,6 +92,32 @@ The webhook URL should be:
 https://api.tsplatform.ru/api/v1/telegram/seller-bot/webhook
 ```
 
+Bot 1 customer notification registry is connected through:
+
+```text
+POST /api/v1/telegram/customer-bot/webhook
+```
+
+Set the Bot 1 webhook after deployment:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
+  python scripts/set_customer_bot_webhook.py set --base-url https://api.tsplatform.ru
+```
+
+Verify Bot 1 webhook state without printing the bot token or webhook secret:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
+  python scripts/set_customer_bot_webhook.py info
+```
+
+The Bot 1 webhook URL should be:
+
+```text
+https://api.tsplatform.ru/api/v1/telegram/customer-bot/webhook
+```
+
 Seller registration verification:
 
 1. Open `https://seller.tsplatform.ru`.
@@ -107,6 +140,14 @@ curl http://localhost:8000/health
 curl http://localhost:8000/api/v1/products
 curl http://localhost:8000/api/v1/categories
 curl http://localhost:8000/api/v1/tags
+```
+
+Public production smoke checks:
+
+```bash
+curl -i https://api.tsplatform.ru/health
+curl -i https://tsplatform.ru
+curl -i https://seller.tsplatform.ru
 ```
 
 ## Services
@@ -136,3 +177,6 @@ Error monitoring is prepared through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`
 - Compose is intended for MVP staging or a single-node deployment, not high availability.
 - Public review and seller moderation lists keep their current response shape; review admin pagination is documented as a later compatibility-safe improvement.
 - Redis is a cache and rate-limit accelerator. Public endpoints fall back to PostgreSQL if Redis is unavailable.
+- Customer Notifications MVP Phase 1 stores Bot 1 private-chat subscription and
+  consent state only. It does not include campaigns, mass sending, delivery
+  queues, or customer broadcast UI.

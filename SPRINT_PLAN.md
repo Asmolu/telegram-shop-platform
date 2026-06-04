@@ -489,6 +489,39 @@ Seller Portal can authenticate sellers without using Mini App Bot 1, and Bot 2 m
 
 ---
 
+# Sprint 16 - Customer Notifications MVP Phase 1
+
+## Goal
+Add the customer-facing Bot 1 subscription registry and customer notification
+settings without adding campaigns, mass sending, or broadcast delivery.
+
+## Backend
+
+- `CustomerTelegramSubscription` model and Alembic migration for Bot 1
+  private-chat state, consent flags, timestamps, and masked listing metadata.
+- Bot 1 webhook at `/api/v1/telegram/customer-bot/webhook`, protected by
+  `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`.
+- `/start`, `/settings`, `/stop`, and consent callback handling for service and
+  marketing preferences.
+- Mini App authenticated APIs for current-customer subscription state, opt-in
+  updates, and Bot 1 start links.
+- Seller/Admin read-only registry endpoint for subscription listing.
+- Audit entries when customer notification settings change.
+
+## Frontend
+
+- Mini App Profile notification settings card with Bot 1 open-link action and
+  consent toggles.
+- Seller Panel customer notification registry page with filters and pagination.
+- No campaign creation, send controls, or broadcast UI.
+
+## Result
+Customers can connect a private Bot 1 chat, manage notification consent, and
+sellers/admins can inspect the subscription registry without exposing raw chat
+IDs or bot secrets.
+
+---
+
 # Development Rules
 
 - SQLAlchemy models + Alembic migrations are the source of truth for DB schema.
