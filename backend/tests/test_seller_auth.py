@@ -163,8 +163,13 @@ class RecordingSession:
         return EmptyScalarResult()
 
 
+@pytest.fixture(autouse=True)
+def _default_seller_bot_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_bot_username", None)
+
+
 @pytest.mark.asyncio
-async def test_start_seller_registration_hashes_password_and_returns_start_command() -> None:
+async def test_start_seller_registration_without_bot_username_returns_start_command_only() -> None:
     service, repository, _, _ = _seller_auth_service()
 
     response = await service.start_registration(_start_payload())
@@ -175,6 +180,19 @@ async def test_start_seller_registration_hashes_password_and_returns_start_comma
     assert registration.email == "seller@example.com"
     assert registration.password_hash != "Password1"
     assert verify_password("Password1", registration.password_hash)
+
+
+@pytest.mark.asyncio
+async def test_start_seller_registration_with_bot_username_returns_link_and_start_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_bot_username", "@sellerbot")
+    service, _, _, _ = _seller_auth_service()
+
+    response = await service.start_registration(_start_payload())
+
+    assert response.start_command == "/start seller_start-token"
+    assert response.bot_start_link == "https://t.me/sellerbot?start=seller_start-token"
 
 
 def test_seller_auth_register_start_route_creates_pending_registration() -> None:

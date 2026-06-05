@@ -3,31 +3,85 @@ services:
     build:
       context: ./backend
     container_name: telegram-shop-backend
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
     env_file:
       - ./backend/.env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-telegram_shop}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/uploads:/app/uploads
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  seller-panel:
+    build:
+      context: ./seller-panel
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${SELLER_PANEL_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+    container_name: telegram-shop-seller-panel
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mini-app:
+    build:
+      context: ./mini-app
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${MINI_APP_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        VITE_TELEGRAM_BOT_USERNAME: ${VITE_TELEGRAM_BOT_USERNAME:-CheckYouStyleBot}
+    container_name: telegram-shop-mini-app
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
     container_name: telegram-shop-postgres
     environment:
-      POSTGRES_DB: telegram_shop
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-telegram_shop}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d telegram_shop"]
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,13 +89,22 @@ services:
   redis:
     image: redis:7-alpine
     container_name: telegram-shop-redis
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - CMD
+        - redis-cli
+        - ping
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   postgres_data:
+  redis_data:
+  uploads_data:
