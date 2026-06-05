@@ -1,0 +1,13 @@
+[Unit]
+Description=Telegram Shop Platform production backup
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/TelegramShopPlatform
+EnvironmentFile=/opt/TelegramShopPlatform/backend/.env.production
+ExecStart=/opt/TelegramShopPlatform/backend/.venv/bin/python /opt/TelegramShopPlatform/backend/scripts/backup_production.py --env-file /opt/TelegramShopPlatform/backend/.env.production --compose-file /opt/TelegramShopPlatform/docker-compose.prod.yml run
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

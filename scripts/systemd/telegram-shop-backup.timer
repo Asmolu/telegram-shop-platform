@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Telegram Shop Platform production backup every 6 hours
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=5min
+Persistent=true
+Unit=telegram-shop-backup.service
+
+[Install]
+WantedBy=timers.target

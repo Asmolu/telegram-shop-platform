@@ -1,75 +1,224 @@
 # Backup and Restore
 
-Back up both PostgreSQL and uploaded files. PostgreSQL is the source of truth for business data, while uploads are stored on disk and referenced by path.
+Production backups are automated for the single-node VDS deployment under
+`tsplatform.ru`. PostgreSQL is the source of truth for business data. Uploaded
+files live on disk in the `uploads_data` Docker volume and are backed up
+separately. Redis is cache and rate-limit state only and is not backed up as
+durable data.
 
-## PostgreSQL Backup
+The normal production target is Yandex Disk:
 
-Custom format backup:
+```text
+/TelegramShopPlatform/storage/
+```
+
+Do not include `backend/.env.production`, tokens, database passwords, webhook
+secrets, private keys, uploaded user files outside the uploads archive, or
+database dumps in git.
+
+## Backup Contents
+
+Each run creates a timestamped working directory under `BACKUP_LOCAL_DIR`:
+
+```text
+backups/
+  telegram-shop-prod-YYYYMMDD-HHMMSS/
+    postgres.dump
+    uploads.tar.gz
+    backup_metadata.json
+    checksums.sha256
+```
+
+The final local/offsite artifact is:
+
+```text
+telegram-shop-prod-YYYYMMDD-HHMMSS.tar.gz
+```
+
+`postgres.dump` is a PostgreSQL custom-format dump from the production
+`postgres` service. `uploads.tar.gz` is an archive of `/app/uploads` from the
+backend service with relative paths preserved. `backup_metadata.json` stores
+only non-secret operational metadata, restore verification status, and the
+Yandex Disk path. `.env.production` is not included.
+
+## Required Environment
+
+Set these in `backend/.env.production` on the VDS. Keep real values out of git;
+only placeholders belong in example files.
+
+```text
+BACKUP_ENABLED=true
+BACKUP_ENVIRONMENT=production
+BACKUP_LOCAL_DIR=backups
+BACKUP_REMOTE_DIR=/TelegramShopPlatform/storage
+BACKUP_INTERVAL_HOURS=6
+BACKUP_RETENTION_DAYS=5
+BACKUP_RETENTION_MAX_COUNT=20
+BACKUP_RESTORE_VERIFY_ENABLED=true
+
+YANDEX_CLIENT_ID=
+YANDEX_CLIENT_SECRET=
+YANDEX_REFRESH_TOKEN=
+
+BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true
+TELEGRAM_BOT_TOKEN=<Bot 2 token>
+TELEGRAM_SELLER_CHAT_ID=<seller/admin chat id>
+```
+
+`YANDEX_REFRESH_TOKEN` is stored only in `backend/.env.production` on the VDS.
+Telegram is notification-only and is never used as backup storage.
+
+## CLI Commands
+
+Run commands from the repository root on the VDS.
+
+Validate configuration without requiring local Yandex credentials:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec postgres pg_dump -U telegram_shop -d telegram_shop -Fc -f /backups/telegram_shop_$(date +%Y%m%d_%H%M%S).dump
+python backend/scripts/backup_production.py validate-config
 ```
 
-Plain SQL backup:
+Validate full VDS production configuration:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec postgres pg_dump -U telegram_shop -d telegram_shop -f /backups/telegram_shop_$(date +%Y%m%d_%H%M%S).sql
+python backend/scripts/backup_production.py validate-config --strict-yandex
 ```
 
-Copy backup files from `./backups` to off-host storage after creation.
-
-## PostgreSQL Restore
-
-Restore custom format into an empty database:
+Run a full production backup, restore verification, Yandex upload, and
+retention cleanup:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec postgres pg_restore -U telegram_shop -d telegram_shop --clean --if-exists /backups/telegram_shop_YYYYMMDD_HHMMSS.dump
+python backend/scripts/backup_production.py run
 ```
 
-Restore plain SQL:
+Run a local verified backup without Yandex upload for a dry run:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec -T postgres psql -U telegram_shop -d telegram_shop < ./backups/telegram_shop_YYYYMMDD_HHMMSS.sql
+python backend/scripts/backup_production.py run --skip-remote-upload
 ```
 
-Run migrations after restoring if the application version expects a newer schema:
+Verify that an existing archive is readable:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
+python backend/scripts/backup_production.py verify-archive backups/telegram-shop-prod-YYYYMMDD-HHMMSS.tar.gz
 ```
 
-## Uploads Backup
-
-Archive the production uploads volume:
+List remote Yandex Disk backups:
 
 ```bash
-docker run --rm -v telegramshopplatform_uploads_data:/uploads -v "%cd%/backups:/backups" alpine tar -czf /backups/uploads_$(date +%Y%m%d_%H%M%S).tar.gz -C /uploads .
+python backend/scripts/backup_production.py list-remote
 ```
 
-PowerShell timestamp variant:
+## Restore Verification
 
-```powershell
-$stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-docker run --rm -v telegramshopplatform_uploads_data:/uploads -v "${PWD}/backups:/backups" alpine tar -czf "/backups/uploads_$stamp.tar.gz" -C /uploads .
+Every normal backup is restore-verified before it is marked successful or
+uploaded to Yandex Disk.
+
+The script creates a temporary database named
+`telegram_shop_restore_check_<timestamp>`, restores `postgres.dump` into it,
+checks that `alembic_version` and key commerce tables exist, runs basic count
+queries, verifies `uploads.tar.gz` is readable, and then drops the temporary
+database. It never restores into the production database.
+
+If restore verification fails, the backup is marked failed, no successful
+Yandex upload is performed, and Bot 2 sends a failure notification.
+
+## Retention
+
+The MVP retention policy is:
+
+- Schedule: every 6 hours.
+- Maximum age: 5 days.
+- Maximum count: 20 archives locally and in Yandex Disk.
+
+Retention cleanup never deletes the current archive. If backup creation,
+restore verification, and upload succeed but retention cleanup fails, the
+backup notification reports a warning.
+
+## Telegram Notifications
+
+Backup status notifications are sent through Bot 2 using:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_SELLER_CHAT_ID
 ```
 
-## Uploads Restore
+Messages include backup id, environment, status, failed step, restore
+verification status, remote path, archive size, and retention results. The
+script sanitizes configured secret values, bot tokens, OAuth tokens, and long
+secret-looking strings before sending errors. It never sends signed URLs,
+refresh tokens, database passwords, `.env.production`, or raw exception traces.
 
-Restore uploads into the production uploads volume:
+## Install Systemd Timer
+
+Template files live in:
+
+```text
+scripts/systemd/telegram-shop-backup.service
+scripts/systemd/telegram-shop-backup.timer
+```
+
+The templates assume the repository is deployed to:
+
+```text
+/opt/TelegramShopPlatform
+```
+
+Adjust paths if the VDS uses a different deploy directory. The service expects
+a Python environment with backend dependencies installed, for example:
 
 ```bash
-docker run --rm -v telegramshopplatform_uploads_data:/uploads -v "$(pwd)/backups:/backups" alpine sh -c "rm -rf /uploads/* && tar -xzf /backups/uploads_YYYYMMDD_HHMMSS.tar.gz -C /uploads"
+cd /opt/TelegramShopPlatform/backend
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-On Windows PowerShell:
+Install and enable the timer manually:
 
-```powershell
-docker run --rm -v telegramshopplatform_uploads_data:/uploads -v "${PWD}/backups:/backups" alpine sh -c "rm -rf /uploads/* && tar -xzf /backups/uploads_YYYYMMDD_HHMMSS.tar.gz -C /uploads"
+```bash
+sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.service /etc/systemd/system/
+sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now telegram-shop-backup.timer
+systemctl list-timers telegram-shop-backup.timer
 ```
 
-## Backup Schedule
+Check logs:
 
-- PostgreSQL: at least daily for MVP, more often before launches or data imports.
-- Uploads: daily, and immediately before storage migrations.
-- Keep at least one recent restore-tested backup outside the deployment host.
-- Do not store backups in git.
+```bash
+journalctl -u telegram-shop-backup.service -n 100 --no-pager
+```
+
+Do not add automatic pre-deploy backup hooks for this MVP task.
+
+## Manual Restore Drill
+
+Practice restores in staging or an isolated VDS before relying on production
+backups during an incident.
+
+1. Download the selected archive from Yandex Disk or copy it from local
+   `backups/`.
+2. Run `python backend/scripts/backup_production.py verify-archive <archive>`.
+3. Extract the archive and verify `checksums.sha256`.
+4. Stop or isolate the backend so users cannot write during restore.
+5. Restore `postgres.dump` into a clean database with `pg_restore`.
+6. Restore `uploads.tar.gz` into the `uploads_data` volume.
+7. Recreate `backend/.env.production` from the password manager or other secure
+   secret source; it is not inside the backup archive.
+8. Run `alembic current` and compare with `backup_metadata.json`.
+9. Run migrations deliberately only if the restored database must be moved
+   forward to the deployed code.
+10. Restart Compose services and run smoke checks:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic current
+curl -i https://api.tsplatform.ru/health
+curl -i https://api.tsplatform.ru/api/v1/products
+curl -i https://tsplatform.ru
+curl -i https://seller.tsplatform.ru
+```
+
+For local VDS-only smoke checks, use `http://localhost:8000`,
+`http://localhost:8080`, and `http://localhost:8081`.

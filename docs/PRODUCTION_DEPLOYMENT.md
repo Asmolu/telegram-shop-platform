@@ -186,6 +186,76 @@ curl -i https://seller.tsplatform.ru
 Application logs are JSON by default and include request id, method, path, status, and duration.
 Error monitoring is prepared through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`, but no external SDK is required for MVP.
 
+## Production Backups
+
+Production backups run from the VDS host and target the production Compose
+services. PostgreSQL is dumped in custom format, uploads are archived
+separately, Redis is not backed up as durable data, and `.env.production` is
+not included in normal backup archives.
+
+Required backup variables in `backend/.env.production`:
+
+```text
+BACKUP_ENABLED=true
+BACKUP_ENVIRONMENT=production
+BACKUP_LOCAL_DIR=backups
+BACKUP_REMOTE_DIR=/TelegramShopPlatform/storage
+BACKUP_INTERVAL_HOURS=6
+BACKUP_RETENTION_DAYS=5
+BACKUP_RETENTION_MAX_COUNT=20
+BACKUP_RESTORE_VERIFY_ENABLED=true
+YANDEX_CLIENT_ID=<placeholder>
+YANDEX_CLIENT_SECRET=<placeholder>
+YANDEX_REFRESH_TOKEN=<placeholder>
+BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true
+```
+
+The script also uses existing Bot 2 variables:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_SELLER_CHAT_ID
+```
+
+Validate on the VDS:
+
+```bash
+python backend/scripts/backup_production.py validate-config --strict-yandex
+```
+
+Run a manual production backup:
+
+```bash
+python backend/scripts/backup_production.py run
+```
+
+Every successful run restore-verifies the PostgreSQL dump in a temporary
+database, verifies the uploads archive is readable, uploads the final archive to
+Yandex Disk under `/TelegramShopPlatform/storage/`, checks remote file size,
+applies 5-day / 20-archive local and remote retention, and sends a sanitized
+Bot 2 notification.
+
+Systemd templates are provided but not enabled automatically:
+
+```text
+scripts/systemd/telegram-shop-backup.service
+scripts/systemd/telegram-shop-backup.timer
+```
+
+Install manually, adjusting `/opt/TelegramShopPlatform` if the VDS uses another
+path:
+
+```bash
+sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.service /etc/systemd/system/
+sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now telegram-shop-backup.timer
+systemctl list-timers telegram-shop-backup.timer
+```
+
+See `docs/BACKUP_AND_RESTORE.md` and `docs/BACKUP_STRATEGY.md` for restore
+drill steps, failure behavior, and notification contents.
+
 ## Known MVP Limits
 
 - Compose is intended for MVP staging or a single-node deployment, not high availability.

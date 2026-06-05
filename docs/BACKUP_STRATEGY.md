@@ -1,76 +1,57 @@
 # Production Backup Strategy
 
-This document defines the production backup and restore strategy for the
-single-node Docker Compose production profile on a VDS. It is a design document
-only. It does not implement scripts, add dependencies, or change application,
-Docker, migration, or environment files.
+This document defines the implemented MVP backup strategy for the single-node
+Docker Compose production profile on the VDS serving `tsplatform.ru`.
 
-## 1. Goals
+## Goals
 
-- Protect PostgreSQL data, which is the source of truth for business data.
+- Protect PostgreSQL business data, the system source of truth.
 - Protect uploaded product, banner, review, and temporary files stored in the
   production uploads volume.
-- Support recovery after total VDS loss, bad deployment, bad migration,
-  accidental file loss, operator error, and partial local disk failure.
-- Support both manual backup flows before risky operations and automated daily
-  backup flows.
-- Keep backup artifacts verifiable, portable, and independent of the running
-  application code.
-- Keep offsite copies because local access to the VDS can fail.
+- Keep offsite copies in Yandex Disk so VDS loss is recoverable.
+- Automatically restore-verify every backup before it is marked successful.
+- Notify the existing seller/admin chat through Bot 2.
+- Keep secrets out of backups, logs, metadata, git, and Telegram messages.
 
-## 2. Non-goals
+## Non-Goals
 
 - No high availability.
 - No live PostgreSQL replication.
-- No Kubernetes.
-- No automated restore in the MVP.
-- No plain-text `.env.production` or secret backup to Telegram.
-- No use of Telegram as the only or primary backup storage.
-- No backup of Redis as durable business data; Redis is cache/rate-limit state
-  and can be rebuilt.
+- No Redis durability guarantee; Redis is cache and rate-limit state only.
+- No backup storage in Telegram.
+- No automatic pre-deploy backup hook in this MVP task.
+- No backup archive encryption in this MVP task.
+- No plain `.env.production` backup inside normal archives.
 
-## 3. Assets To Back Up
+## Assets Backed Up
 
-Required production assets:
+Each backup includes:
 
-- PostgreSQL logical dump from the `postgres` service.
-- Uploads directory/volume mounted as `uploads_data` and available to the
-  backend at `/app/uploads`.
-- Backup metadata describing when, where, and how the backup was created.
-- Git commit hash of the deployed repository revision.
-- Alembic current revision at backup time.
-- Docker Compose file hash/checksum for `docker-compose.prod.yml`.
-- Checksums for all backup payload files.
+- `postgres.dump`: PostgreSQL custom-format logical dump from the production
+  `postgres` Compose service.
+- `uploads.tar.gz`: archive of `/app/uploads` from the backend service with
+  relative paths preserved.
+- `backup_metadata.json`: non-secret metadata only.
+- `checksums.sha256`: SHA-256 checksums for `postgres.dump`,
+  `uploads.tar.gz`, and `backup_metadata.json`.
 
-Recommended metadata:
+Each backup excludes:
 
-- Application environment name, for example `production` or `staging`.
-- Docker image ids or tags for backend, Mini App, Seller Panel, PostgreSQL, and
-  Redis when available.
-- PostgreSQL database name and user name only, not the password.
-- Upload volume name and source path.
-- Backup command/tool version.
-- Sanitized environment key list without values, so missing configuration can
-  be noticed during restore without exposing secrets.
+- `backend/.env.production`
+- Telegram bot tokens
+- Yandex OAuth tokens
+- database passwords
+- JWT and webhook secrets
+- private keys
+- Redis data
+- raw logs or stack traces
 
-Secrets and `.env.production`:
+Production secrets must be recoverable from a password manager, secure operator
+vault, or a separately encrypted secret backup.
 
-- `backend/.env.production` is operationally critical but must not be included
-  in a plain backup archive by default.
-- Store production secrets in a password manager, secure operator vault, or a
-  separately encrypted secret backup.
-- If `.env.production` must be backed up, it must be encrypted before leaving
-  the VDS and must never be sent to Telegram in plain text.
-- Telegram bot tokens, JWT secrets, webhook secrets, database passwords, Yandex
-  Disk tokens, Sentry DSNs, and private keys are secret values and must not
-  appear in logs, backup metadata, notification text, or unencrypted archives.
+## Archive Layout
 
-## 4. Backup Archive Structure
-
-Each backup should produce a timestamped directory first, then a single archive
-for retention and upload.
-
-Suggested working directory:
+Working directory:
 
 ```text
 backups/
@@ -81,452 +62,184 @@ backups/
     checksums.sha256
 ```
 
-Suggested final archive:
+Final archive:
 
 ```text
 telegram-shop-prod-YYYYMMDD-HHMMSS.tar.gz
 ```
 
-`backup_metadata.json` should include only non-secret values:
+The archive keeps the timestamped directory as its top-level entry.
 
-```json
-{
-  "backup_id": "telegram-shop-prod-YYYYMMDD-HHMMSS",
-  "created_at_utc": "YYYY-MM-DDTHH:MM:SSZ",
-  "environment": "production",
-  "git_commit": "placeholder",
-  "alembic_current": "placeholder",
-  "compose_file": "docker-compose.prod.yml",
-  "compose_sha256": "placeholder",
-  "postgres_dump_format": "custom",
-  "uploads_archive": "uploads.tar.gz",
-  "env_keys_present": ["APP_ENV", "DATABASE_URL", "JWT_SECRET_KEY"],
-  "notes": "No secret values are stored in metadata."
-}
-```
+## Metadata
 
-## 5. Backup Formats
+`backup_metadata.json` includes only non-secret values:
 
-PostgreSQL:
+- backup id
+- UTC creation time
+- environment
+- deployed git commit if available
+- current Alembic revision if available
+- Compose file name
+- payload filenames
+- restore verification status
+- Yandex Disk provider/path
+- checksum filename
+- notes that secrets and Redis data are not stored
 
-- Prefer PostgreSQL custom format (`pg_dump -Fc`) for MVP backups.
-- Custom dumps support `pg_restore --list`, selective restore inspection, and
-  cleaner restore workflows than plain SQL.
-- Plain SQL dumps are useful for manual inspection, but they are larger, less
-  flexible, and slower to selectively restore.
-- Do not rely on filesystem-level copies of the PostgreSQL data volume for MVP
-  backups unless the database is stopped and the process is documented
-  separately.
+Metadata must never include `.env.production` values, tokens, passwords,
+private keys, signed URLs, webhook secrets, or database connection strings.
 
-Uploads:
+## Verification
 
-- Use `tar.gz` for uploads because the production data is a directory tree in a
-  Docker volume.
-- Preserve paths relative to the uploads root.
-- Do not store uploaded files in PostgreSQL. PostgreSQL stores only paths/URLs.
+Every normal run must pass automatic restore verification before the archive is
+uploaded as successful.
 
-Final archive:
+The script:
 
-- Package `postgres.dump`, `uploads.tar.gz`, `backup_metadata.json`, and
-  `checksums.sha256` into a final `tar.gz` archive.
-- Generate checksums before upload and verify them after download.
+1. Creates a temporary PostgreSQL database named
+   `telegram_shop_restore_check_<timestamp>`.
+2. Restores `postgres.dump` into that temporary database.
+3. Verifies `alembic_version` exists and has a revision row.
+4. Verifies key commerce tables exist.
+5. Runs basic count queries against key tables.
+6. Verifies `uploads.tar.gz` can be listed.
+7. Drops the temporary database.
 
-Encryption:
+The production database is never used as the restore target. If verification
+fails, the backup is failed and no successful Yandex upload is performed.
 
-- Optional in Phase 3, strongly recommended before storing secret archives or
-  sending any backup file through a chat channel.
-- Prefer recipient-based encryption, for example age/GPG, over a shared
-  passphrase when multiple operators need access.
-- If passphrase encryption is used, read the passphrase from a protected file or
-  secret manager, not from command-line arguments or logs.
+## Offsite Target
 
-## 6. Storage Targets
-
-Local server backup directory:
-
-- Use a local directory such as `./backups` on the VDS as the first landing
-  area.
-- Keep it outside git and ensure it is excluded from commits.
-- Treat it as short-term fallback only. It does not protect against VDS loss.
-- Restrict permissions to the deployment user and backup operator group.
-
-Yandex Disk:
-
-- Use Yandex Disk as the primary offsite target for MVP.
-- Store production backups under a dedicated app path, for example
-  `/TelegramShopPlatform/production/`.
-- Upload the final archive and a small sidecar status/metadata file if useful.
-- Verify upload completion and remote size/checksum where the API allows it.
-- Keep the Yandex Disk token as a backend/server secret, not in git and not in
-  notification text.
-
-Telegram:
-
-- Use Telegram as a notification channel only.
-- Notification content may include backup id, status, size, retention result,
-  and masked target names.
-- Notification content must not include secrets, tokens, database passwords,
-  raw `.env.production`, signed URLs, or full chat IDs when masking is
-  practical.
-- Telegram is not reliable long-term backup storage and must not be the only
-  offsite copy.
-- Optional Telegram file upload is allowed only for small encrypted archives or
-  small encrypted metadata bundles. This should stay disabled by default.
-
-Optional future target:
-
-- S3-compatible storage such as Cloudflare R2 can be added later if Yandex Disk
-  reliability, lifecycle rules, or automation become limiting.
-
-## 7. Retention Policy
-
-Recommended MVP retention:
-
-- Local VDS backups: daily backups, keep last 7.
-- Yandex Disk offsite backups: keep daily 14, weekly 4, monthly 3.
-- Keep at least one manual pre-deploy backup until the deployment is confirmed
-  healthy and the next scheduled backup succeeds offsite.
-
-Justification:
-
-- The local last-7 window gives quick recovery for recent mistakes without
-  consuming too much VDS disk.
-- The offsite 14/4/3 policy gives short-term rollback depth, weekly coverage for
-  slower discoveries, and three monthly recovery anchors after VDS loss.
-- If uploads grow quickly, retention cleanup must consider archive size and
-  alert before disk pressure becomes critical.
-
-Retention classes:
-
-- `daily`: scheduled backup.
-- `weekly`: first successful daily backup of the week.
-- `monthly`: first successful daily backup of the month.
-- `manual`: operator-created backup before deploy, migration, import, or
-  storage change.
-
-Manual backups should either expire with the same policy after explicit tagging
-or be reviewed during weekly maintenance to avoid unbounded storage growth.
-
-## 8. Scheduling
-
-Manual backups:
-
-- Create a manual backup before production deploys, Alembic migrations, data
-  imports, bulk product changes, storage changes, or risky maintenance.
-- A deploy or migration should not proceed if the pre-deploy backup fails local
-  verification.
-- A deploy may proceed if offsite upload fails only after an explicit operator
-  decision, because this increases risk during VDS incidents.
-
-Automated backups:
-
-- Run daily scheduled backups during low-traffic hours.
-- Prefer a `systemd` timer on the VDS for production scheduling because it
-  provides logs, missed-run handling, and explicit service state.
-- Cron is acceptable for MVP if the script logs clearly and sends failure
-  notifications.
-- Do not schedule inside the application backend process.
-
-Overlap with deploys:
-
-- Backups and deploys must use a lock so they do not run destructive or
-  high-load operations at the same time.
-- If a backup is running, deployment should wait or require an explicit
-  operator override.
-- If deployment is running, scheduled backup should skip or wait, then send a
-  notification that the run was delayed.
-- A migration should always have a fresh verified PostgreSQL dump before it
-  starts.
-
-## 9. Restore Strategy
-
-Restore is manual in the MVP and should be practiced in staging before it is
-needed in production.
-
-High-level full restore flow:
-
-1. Provision or regain access to a VDS with Docker and the repository.
-2. Check out the target git commit from `backup_metadata.json`, or choose a
-   newer compatible commit deliberately.
-3. Recreate production environment files from the password manager or encrypted
-   secret backup. Do not restore plain secrets from Telegram.
-4. Download the selected backup archive from Yandex Disk or copy it from local
-   backups.
-5. Verify archive checksums before extracting.
-6. Restore PostgreSQL from `postgres.dump` into a clean database.
-7. Restore `uploads.tar.gz` into the `uploads_data` volume.
-8. Check `alembic current` against `backup_metadata.json`.
-9. If the application commit expects newer schema, run migrations deliberately
-   after the database restore and record the decision.
-10. Restart Docker Compose services.
-11. Run smoke checks for backend health, public catalog, Mini App, Seller Panel,
-    and critical upload URLs.
-
-PostgreSQL restore principles:
-
-- Restore into a clean database unless a partial restore plan has been approved.
-- Use custom dump restore tooling for `postgres.dump`.
-- Stop or isolate the backend during restore so users cannot write into a
-  partially restored database.
-- Confirm that order, product, user, audit, analytics, coupon usage, and
-  notification tables are present after restore.
-
-Uploads restore principles:
-
-- Restore uploads into the production uploads volume before exposing the app.
-- Preserve relative paths because PostgreSQL rows reference upload paths.
-- If only uploads were lost, restore uploads from the same or nearest backup and
-  compare missing file references against database rows.
-
-Alembic verification:
-
-- Compare restored database revision with `backup_metadata.json`.
-- If revisions differ from the deployed code, decide whether to roll code back
-  to the backup commit or migrate the restored database forward.
-- Do not edit old migrations during restore.
-
-Rollback from failed deploy:
-
-- If a deploy fails before migrations, roll back application images/code and
-  restart services.
-- If a deploy fails after migrations but before writes from the new version,
-  prefer restoring the pre-deploy database backup plus uploads if files changed.
-- If the new version accepted writes, decide whether data loss is acceptable
-  before restoring the pre-deploy backup. Otherwise fix forward or perform a
-  targeted recovery.
-
-## 10. Verification Strategy
-
-Every backup run should verify:
-
-- `checksums.sha256` exists and covers `postgres.dump`, `uploads.tar.gz`,
-  `backup_metadata.json`, and the final archive.
-- The final archive can be listed.
-- `uploads.tar.gz` can be listed.
-- PostgreSQL custom dump can be inspected with `pg_restore --list`.
-- `backup_metadata.json` is valid JSON and contains backup id, git commit,
-  Alembic current revision, and compose checksum.
-- Local backup size is non-zero and within expected bounds.
-- Offsite upload completed when enabled.
-
-Periodic restore drills:
-
-- Run a restore drill at least monthly for MVP, and before major launches.
-- Restore into staging or an isolated temporary environment.
-- Verify `/health`, public product/category/tag endpoints, representative
-  product images, Seller Panel login, and one non-production test order flow.
-- Record drill date, backup id, restore duration, issues found, and fixes.
-
-Alerts:
-
-- Send success notification after local verification and offsite upload both
-  succeed.
-- Send warning if local backup succeeds but Yandex Disk upload fails.
-- Send failure if local backup, checksum generation, PostgreSQL dump, uploads
-  archive, or verification fails.
-- Telegram notification failure must be logged locally but must not mark the
-  backup artifact itself invalid.
-
-## 11. Security Model
-
-Secret handling:
-
-- Do not include `.env.production` in the default archive.
-- If secret backup is required, encrypt it separately and store it separately
-  from normal backup archives.
-- Do not send unencrypted secrets to Telegram.
-- Do not put secret values in `backup_metadata.json`, logs, retention reports,
-  error messages, or chat notifications.
-- Back up a sanitized env key list without values only.
-
-Yandex Disk token:
-
-- Store the token as a server-side secret with the minimum required scope.
-- Restrict file permissions on any token file.
-- Rotate the token if logs, screenshots, shell history, or operators may have
-  exposed it.
-- Never include the token in Telegram messages or backup metadata.
-
-Telegram notifications:
-
-- Include only status, backup id, duration, archive size, and masked destination
-  names.
-- Do not include signed download links unless they are short-lived and still do
-  not expose secrets.
-- Mask chat IDs where possible, for example show only the last 4 digits.
-
-Local file permissions:
-
-- Backup directory should be owned by the deploy/backup user.
-- Use restrictive directory permissions, for example owner-only access where
-  practical.
-- Backup archives should not be world-readable.
-- Keep backups, database dumps, uploaded user files, and secret files out of
-  git.
-
-## 12. Failure Modes
-
-Docker unavailable:
-
-- Backup cannot use Compose containers.
-- Send failure notification if possible and log locally.
-- Operator should inspect Docker daemon status and disk pressure.
-
-PostgreSQL unavailable:
-
-- PostgreSQL dump fails.
-- Do not create a "successful" backup with only uploads unless explicitly
-  tagged as partial.
-- Alert that business data was not protected for this run.
-
-Uploads directory or volume missing:
-
-- Treat as failure unless the environment is explicitly known to have no
-  uploads.
-- Include missing path/volume name in local logs without exposing secrets.
-- Investigate before deploy, because database rows may reference missing files.
-
-Yandex Disk upload fails:
-
-- Keep the verified local backup.
-- Send warning notification.
-- Retry with bounded attempts.
-- Mark backup status as "local-only" until offsite upload succeeds.
-
-Telegram notification fails:
-
-- Keep backup result based on local/offsite verification.
-- Log sanitized notification failure.
-- Do not retry indefinitely.
-
-Backup archive too large:
-
-- Complete local backup if disk allows.
-- Skip Telegram file upload even if enabled.
-- Upload to Yandex Disk as the primary offsite target.
-- Alert with archive size and retention pressure.
-
-Disk full:
-
-- Backup may fail while dumping, archiving, or generating checksums.
-- Do not delete the newest known-good backup blindly.
-- Apply retention cleanup to expired backups first, then retry.
-- Alert immediately because production services may also be at risk.
-
-VDS inaccessible:
-
-- Use the latest verified Yandex Disk backup plus repository and secret source
-  to restore on a new VDS.
-- Local-only backups are unavailable in this scenario.
-- This is the reason Yandex Disk offsite upload is required for production.
-
-Bad backup discovered during restore:
-
-- Stop restore and preserve the bad archive for investigation.
-- Try the previous verified offsite backup.
-- Compare checksums, metadata, and `pg_restore --list` output.
-- Record the incident and increase restore drill frequency until the root cause
-  is resolved.
-
-## 13. Proposed Implementation Phases
-
-Phase 1: manual local backup and restore documentation
-
-- Add a manual backup script design for creating PostgreSQL custom dumps.
-- Add uploads archive creation.
-- Write backup metadata and checksums.
-- Keep local backups in `BACKUP_DIR`.
-- Document manual restore steps and smoke checks.
-
-Phase 2: offsite upload and notifications
-
-- Add Yandex Disk upload.
-- Add Telegram notification for success, warning, and failure.
-- Add retention cleanup for local and Yandex Disk backups.
-- Mark backups as local-only if offsite upload fails.
-
-Phase 3: scheduling and restore drill
-
-- Add daily scheduling through `systemd` timer or cron.
-- Add backup/deploy lock behavior.
-- Perform and document the first restore drill.
-- Add optional encryption for backup archives and required encryption for any
-  secret backup.
-
-Phase 4: monitoring and dashboard if needed
-
-- Add richer monitoring/alerts for missed backups, local-only backups, storage
-  pressure, and restore drill age.
-- Add a backup status dashboard only if operational need justifies it.
-- Consider S3-compatible storage if Yandex Disk lifecycle or reliability is not
-  enough.
-
-## 14. Proposed Environment Variables
-
-Placeholders only. Do not put real values in documentation or git.
+Yandex Disk is the MVP offsite target:
 
 ```text
-BACKUP_DIR=/path/to/local/backups
-BACKUP_RETENTION_LOCAL=7
-
-YANDEX_DISK_BACKUP_ENABLED=false
-YANDEX_DISK_TOKEN=<stored-outside-git>
-YANDEX_DISK_BACKUP_PATH=/TelegramShopPlatform/production
-
-BACKUP_TELEGRAM_NOTIFY_ENABLED=false
-BACKUP_TELEGRAM_CHAT_ID=<masked-or-stored-outside-git>
-BACKUP_TELEGRAM_SEND_FILE=false
-BACKUP_MAX_TELEGRAM_FILE_MB=20
-
-BACKUP_ENCRYPTION_ENABLED=false
-BACKUP_ENCRYPTION_RECIPIENT=<recipient-id-or-public-key>
-BACKUP_ENCRYPTION_PASSPHRASE_FILE=/path/to/protected/passphrase-file
+/TelegramShopPlatform/storage/
 ```
 
-Notes:
+The script uses Yandex OAuth with `YANDEX_CLIENT_ID`,
+`YANDEX_CLIENT_SECRET`, and `YANDEX_REFRESH_TOKEN` from
+`backend/.env.production`. It exchanges the refresh token for a short-lived
+access token, creates the remote directory if needed, uploads the final archive,
+and verifies remote metadata size after upload.
 
-- `YANDEX_DISK_TOKEN` must be treated like a production secret.
-- `BACKUP_TELEGRAM_CHAT_ID` should not be printed in full in logs or
-  notifications.
-- `BACKUP_TELEGRAM_SEND_FILE` should remain `false` unless the archive is small
-  and encrypted.
-- Use either `BACKUP_ENCRYPTION_RECIPIENT` or
-  `BACKUP_ENCRYPTION_PASSPHRASE_FILE`, depending on the encryption approach.
+Access tokens and refresh tokens are never logged, stored in metadata, or sent
+to Telegram.
 
-## 15. Manual Commands Draft
+## Schedule and Retention
 
-Draft command names only. These commands do not exist yet.
+MVP policy:
+
+- Run every 6 hours.
+- Keep backups for 5 days.
+- Keep at most 20 local archives.
+- Keep at most 20 Yandex Disk archives.
+- Never delete the current backup during retention cleanup.
+
+The systemd timer template uses:
+
+```text
+OnUnitActiveSec=6h
+Persistent=true
+```
+
+Retention failures are warnings if dump creation, restore verification, and
+Yandex upload already succeeded.
+
+## Notifications
+
+Bot 2 sends backup status to the existing seller/admin chat using:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_SELLER_CHAT_ID
+```
+
+Notifications include:
+
+- backup id
+- environment
+- status
+- failed step when applicable
+- restore verification status
+- remote path
+- archive size
+- local and remote retention result
+
+Notification text is sanitized. It must not include raw secret values, bot
+tokens, OAuth tokens, database passwords, `.env.production`, private keys,
+signed URLs, or raw exception traces.
+
+## Operational Commands
+
+Validate production configuration:
 
 ```bash
-scripts/backup_prod.py create
-scripts/backup_prod.py verify
-scripts/backup_prod.py upload
-scripts/backup_prod.py list
-scripts/restore_prod.py restore --file ...
+python backend/scripts/backup_production.py validate-config --strict-yandex
 ```
 
-Recommended future behavior:
+Run a full backup:
 
-- `create`: produce local backup directory, dump, uploads archive, metadata,
-  checksums, and final archive.
-- `verify`: validate checksums, archive listings, metadata, and PostgreSQL dump
-  listing.
-- `upload`: send verified archive to Yandex Disk and mark offsite status.
-- `list`: show local/offsite backups, age, size, status, and retention class.
-- `restore`: guide or perform a guarded manual restore from a selected archive.
+```bash
+python backend/scripts/backup_production.py run
+```
 
-## 16. Open Questions
+Run a local verified dry run without Yandex upload:
 
-- Should `.env.production` be backed up encrypted, or stored separately in a
-  password manager only?
-- Is Yandex Disk sufficient for MVP offsite storage, or should
-  S3-compatible storage be used from the start?
-- Is Telegram file upload allowed only for encrypted archives, or should it stay
-  disabled entirely?
-- How much restore downtime is acceptable for production?
-- How often should restore drills be performed after MVP launch?
-- Who receives backup failure notifications?
-- What is the maximum acceptable data loss window: 24 hours, 12 hours, or less?
-- Should manual pre-deploy backups have separate retention from scheduled daily
-  backups?
-- Who is allowed to run restore commands in production?
+```bash
+python backend/scripts/backup_production.py run --skip-remote-upload
+```
+
+List remote archives:
+
+```bash
+python backend/scripts/backup_production.py list-remote
+```
+
+Systemd template files:
+
+```text
+scripts/systemd/telegram-shop-backup.service
+scripts/systemd/telegram-shop-backup.timer
+```
+
+## Restore Strategy
+
+Restores are manual in MVP and should be drilled regularly in staging or an
+isolated VDS.
+
+High-level restore flow:
+
+1. Select a verified archive from Yandex Disk or local backups.
+2. Verify archive readability and checksums.
+3. Recreate production secrets from the secure secret source; they are not in
+   the archive.
+4. Stop or isolate backend writes.
+5. Restore `postgres.dump` into a clean PostgreSQL database.
+6. Restore `uploads.tar.gz` into `uploads_data`.
+7. Compare `alembic current` with `backup_metadata.json`.
+8. Decide whether to run migrations forward for the deployed code.
+9. Restart Compose services.
+10. Run backend, Mini App, and Seller Panel smoke checks.
+
+See `docs/BACKUP_AND_RESTORE.md` for exact commands.
+
+## Failure Modes
+
+- PostgreSQL dump failure: backup fails; do not treat uploads-only artifacts as
+  successful.
+- Upload archive failure: backup fails because database paths may reference
+  files that were not protected.
+- Restore verification failure: backup fails and is not uploaded as successful.
+- Yandex upload failure: backup fails as offsite protection did not complete;
+  the verified local archive remains for operator inspection.
+- Retention cleanup failure after successful upload: backup reports warning.
+- Telegram notification failure: log locally; it does not invalidate the
+  backup artifact.
+
+## Open Follow-Ups
+
+- Add encrypted secret backup or document the external password-manager
+  procedure in more detail.
+- Add monthly restore-drill records once the VDS schedule is active.
+- Consider S3-compatible storage if lifecycle policies or reliability require
+  a second offsite target.
