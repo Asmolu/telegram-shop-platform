@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.pagination import PageMeta
+from app.db.models import CustomerServiceNotificationDeliveryStatus, NotificationChannel
 
 
 class CustomerSubscriptionStartLink(BaseModel):
@@ -50,6 +51,30 @@ class CustomerSubscriptionAdminRead(BaseModel):
 
 class CustomerSubscriptionList(BaseModel):
     items: list[CustomerSubscriptionAdminRead]
+    meta: PageMeta
+
+
+class CustomerServiceNotificationDeliveryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    order_id: int | None
+    subscription_id: int | None
+    event_name: str
+    channel: NotificationChannel
+    status: CustomerServiceNotificationDeliveryStatus
+    telegram_message_id: int | None
+    error_code: str | None
+    error_message: str | None
+    retry_after_seconds: int | None
+    sent_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CustomerServiceNotificationDeliveryList(BaseModel):
+    items: list[CustomerServiceNotificationDeliveryRead]
     meta: PageMeta
 
 

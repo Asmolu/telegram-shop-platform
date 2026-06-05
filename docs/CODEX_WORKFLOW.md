@@ -56,9 +56,10 @@ Before merging Codex-generated changes, check:
   Telegram chat IDs in frontend responses.
 - Mini App customer notification settings must use backend APIs and the
   Telegram WebApp UI boundary only; do not store or forward raw `initData`.
-- Seller Panel customer notification views are registry/listing only for MVP
-  Phase 1. Do not add customer campaigns, mass sending, broadcast deliveries,
-  or campaign UI unless a later sprint explicitly asks for them.
+- Seller Panel customer notification views are registry and service-delivery
+  listing only for MVP Phase 1.5. Do not add customer campaigns, mass sending,
+  broadcast deliveries, scheduling, or campaign UI unless a later sprint
+  explicitly asks for them.
 - Tests or smoke checks were added for important behavior.
 - README/SRS/Sprint Plan were updated if architecture changed.
 

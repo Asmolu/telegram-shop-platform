@@ -65,7 +65,7 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml exe
 ```
 
 Seller Portal email/password auth, seller approval, and Customer Notifications
-MVP Phase 1 require migrations through head `20260604_0016`. Bot 2 is connected
+MVP Phase 1.5 require migrations through head `20260605_0017`. Bot 2 is connected
 through:
 
 ```text
@@ -177,6 +177,7 @@ Error monitoring is prepared through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`
 - Compose is intended for MVP staging or a single-node deployment, not high availability.
 - Public review and seller moderation lists keep their current response shape; review admin pagination is documented as a later compatibility-safe improvement.
 - Redis is a cache and rate-limit accelerator. Public endpoints fall back to PostgreSQL if Redis is unavailable.
-- Customer Notifications MVP Phase 1 stores Bot 1 private-chat subscription and
-  consent state only. It does not include campaigns, mass sending, delivery
-  queues, or customer broadcast UI.
+- Customer Notifications MVP Phase 1.5 sends customer order service
+  notifications through Bot 1 only after order persistence and records service
+  delivery attempts. It does not include campaigns, mass sending, scheduling,
+  delivery queues, or customer broadcast UI.

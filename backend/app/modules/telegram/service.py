@@ -37,6 +37,19 @@ MISSING_USER_MESSAGE = "Не удалось прочитать Telegram акка
 class TelegramDeliveryError(Exception):
     """Raised when Telegram Bot API delivery fails."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: int | str | None = None,
+        status_code: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
 
 class TelegramService:
     """Telegram Bot API integration for seller notifications."""
@@ -66,7 +79,7 @@ class TelegramService:
         message: str,
         *,
         reply_markup: dict[str, object] | None = None,
-    ) -> None:
+    ) -> int | None:
         payload: dict[str, object] = {
             "chat_id": chat_id,
             "text": message,
@@ -76,14 +89,17 @@ class TelegramService:
             payload["reply_markup"] = reply_markup
         body = await self._post("sendMessage", payload)
         if not body.get("ok", False):
-            description = str(body.get("description") or "Telegram API returned an error")
-            raise TelegramDeliveryError(description)
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        message_id = result.get("message_id")
+        return int(message_id) if isinstance(message_id, int) else None
 
     async def get_me(self) -> dict[str, object]:
         body = await self._post("getMe", {})
         if not body.get("ok", False):
-            description = str(body.get("description") or "Telegram API returned an error")
-            raise TelegramDeliveryError(description)
+            raise self._delivery_error_from_body(body)
         result = body.get("result")
         if not isinstance(result, dict):
             raise TelegramDeliveryError("Telegram API returned invalid bot profile")
@@ -107,8 +123,7 @@ class TelegramService:
             payload["text"] = text
         body = await self._post("answerCallbackQuery", payload)
         if not body.get("ok", False):
-            description = str(body.get("description") or "Telegram API returned an error")
-            raise TelegramDeliveryError(description)
+            raise self._delivery_error_from_body(body)
 
     async def set_webhook(
         self,
@@ -121,15 +136,13 @@ class TelegramService:
             payload["secret_token"] = secret_token
         body = await self._post("setWebhook", payload)
         if not body.get("ok", False):
-            description = str(body.get("description") or "Telegram API returned an error")
-            raise TelegramDeliveryError(description)
+            raise self._delivery_error_from_body(body)
         return body
 
     async def get_webhook_info(self) -> dict[str, object]:
         body = await self._post("getWebhookInfo", {})
         if not body.get("ok", False):
-            description = str(body.get("description") or "Telegram API returned an error")
-            raise TelegramDeliveryError(description)
+            raise self._delivery_error_from_body(body)
         result = body.get("result")
         if not isinstance(result, dict):
             raise TelegramDeliveryError("Telegram API returned invalid webhook info")
@@ -137,7 +150,10 @@ class TelegramService:
 
     async def _post(self, method: str, payload: dict[str, object]) -> dict[str, object]:
         if not self.bot_token:
-            raise TelegramDeliveryError("Telegram bot token is not configured")
+            raise TelegramDeliveryError(
+                "Telegram bot token is not configured",
+                error_code="configuration_error",
+            )
 
         url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
 
@@ -145,10 +161,22 @@ class TelegramService:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(url, json=payload)
         except httpx.HTTPError as exc:
-            raise TelegramDeliveryError("Telegram API request failed") from exc
+            raise TelegramDeliveryError(
+                "Telegram API request failed",
+                error_code="request_failed",
+            ) from exc
 
         if response.status_code >= 400:
-            raise TelegramDeliveryError(f"Telegram API returned HTTP {response.status_code}")
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                raise self._delivery_error_from_body(body, status_code=response.status_code)
+            raise TelegramDeliveryError(
+                f"Telegram API returned HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
 
         try:
             body = response.json()
@@ -158,6 +186,28 @@ class TelegramService:
         if not isinstance(body, dict):
             raise TelegramDeliveryError("Telegram API returned invalid JSON")
         return body
+
+    def _delivery_error_from_body(
+        self,
+        body: dict[str, object],
+        *,
+        status_code: int | None = None,
+    ) -> TelegramDeliveryError:
+        description = str(body.get("description") or "Telegram API returned an error")
+        error_code = body.get("error_code")
+        retry_after_seconds = self._retry_after_seconds(body.get("parameters"))
+        return TelegramDeliveryError(
+            description,
+            error_code=error_code if isinstance(error_code, (int, str)) else None,
+            status_code=status_code,
+            retry_after_seconds=retry_after_seconds,
+        )
+
+    def _retry_after_seconds(self, parameters: object) -> int | None:
+        if not isinstance(parameters, dict):
+            return None
+        retry_after = parameters.get("retry_after")
+        return retry_after if isinstance(retry_after, int) else None
 
 
 class SellerBotWebhookService:

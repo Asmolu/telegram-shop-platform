@@ -22,8 +22,11 @@
 ## Implementation Status
 
 MVP Phase 1 is implemented as a customer subscription registry, Bot 1 webhook,
-Mini App Profile settings, and Seller Panel read-only listing. The campaign and
-delivery models in this document remain Phase 2 design notes only.
+Mini App Profile settings, and Seller Panel read-only listing. Phase 1.5 adds
+customer-facing order service notifications through Bot 1, with a minimal
+`CustomerServiceNotificationDelivery` attempt log for order-related service
+messages only. Campaign, broadcast, scheduling, and marketing delivery models in
+this document remain Phase 2 design notes only.
 
 ## Current State
 
@@ -450,6 +453,22 @@ Frontend design scope:
 
 This phase does not send marketing campaigns.
 
+## MVP Phase 1.5
+
+Backend implementation scope:
+
+- Add `CustomerServiceNotificationDelivery` for customer service notification
+  attempts tied to order events.
+- Send order-created and order-status service notifications through Bot 1 only,
+  using `TELEGRAM_CUSTOMER_BOT_TOKEN`.
+- Reuse `CustomerTelegramSubscription` eligibility: linked user, private chat,
+  known chat id, `has_chat=true`, `service_opt_in=true`, and no `blocked_at`.
+- Record skipped, sent, failed, blocked, and rate-limit metadata with sanitized
+  Telegram errors.
+- Keep checkout/status updates successful if Bot 1 delivery fails.
+- Keep marketing opt-in unchanged and do not add campaigns, scheduling, mass
+  sending, seller-editable templates, or campaign UI.
+
 ## MVP Phase 2
 
 Backend design scope:
@@ -458,7 +477,6 @@ Backend design scope:
 - Add campaign CRUD, preview, test send, schedule, process-batch, and delivery report APIs.
 - Add rate-limited Telegram sender for Bot 1 with retry handling.
 - Add audit logs for campaign/template lifecycle.
-- Add service notification integration for customer order events after successful persistence.
 
 Frontend design scope:
 

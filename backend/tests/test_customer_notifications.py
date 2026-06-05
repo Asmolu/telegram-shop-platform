@@ -5,11 +5,18 @@ from fastapi.testclient import TestClient
 
 from app.common.deps import get_current_user
 from app.core.config import settings
-from app.db.models import CustomerTelegramSubscription, User, UserRole
+from app.db.models import (
+    CustomerServiceNotificationDeliveryStatus,
+    CustomerTelegramSubscription,
+    NotificationChannel,
+    User,
+    UserRole,
+)
 from app.main import create_app
 from app.modules.customer_notifications.router import get_customer_notifications_service
 from app.modules.customer_notifications.schemas import (
     CustomerBotWebhookResponse,
+    CustomerServiceNotificationDeliveryList,
     CustomerSubscriptionList,
     CustomerSubscriptionMe,
     CustomerSubscriptionStartLink,
@@ -293,6 +300,32 @@ def test_user_cannot_list_customer_notification_subscriptions() -> None:
     assert response.status_code == 403
 
 
+def test_seller_can_list_customer_service_notification_deliveries() -> None:
+    app = _app_with_current_user(_user(role=UserRole.SELLER))
+    app.dependency_overrides[get_customer_notifications_service] = lambda: FakeApiService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/customer-notifications/service-deliveries")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["event_name"] == "order.created.customer"
+    assert "telegram_chat_id" not in response.json()["items"][0]
+
+
+def test_user_cannot_list_customer_service_notification_deliveries() -> None:
+    app = _app_with_current_user(_user(role=UserRole.USER))
+    app.dependency_overrides[get_customer_notifications_service] = lambda: FakeApiService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/customer-notifications/service-deliveries")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
 def test_unauthenticated_cannot_list_customer_notification_subscriptions() -> None:
     with TestClient(create_app()) as client:
         response = client.get("/api/v1/customer-notifications/subscriptions")
@@ -348,6 +381,29 @@ class FakeApiService:
                     "last_stop_at": None,
                     "last_settings_at": None,
                     "last_delivery_error": None,
+                    "created_at": _now(),
+                    "updated_at": _now(),
+                }
+            ],
+            meta={"limit": 20, "offset": 0, "total": 1},
+        )
+
+    async def list_service_deliveries(self, **_: object) -> CustomerServiceNotificationDeliveryList:
+        return CustomerServiceNotificationDeliveryList(
+            items=[
+                {
+                    "id": 1,
+                    "user_id": 1,
+                    "order_id": 10,
+                    "subscription_id": 5,
+                    "event_name": "order.created.customer",
+                    "channel": NotificationChannel.TELEGRAM,
+                    "status": CustomerServiceNotificationDeliveryStatus.SENT,
+                    "telegram_message_id": 123,
+                    "error_code": None,
+                    "error_message": None,
+                    "retry_after_seconds": None,
+                    "sent_at": _now(),
                     "created_at": _now(),
                     "updated_at": _now(),
                 }

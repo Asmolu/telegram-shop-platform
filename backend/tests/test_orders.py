@@ -28,7 +28,7 @@ from app.main import create_app
 from app.modules.notifications.service import NotificationsEventPublisher, NotificationsService
 from app.modules.orders.router import get_orders_service
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderStatusUpdate
-from app.modules.orders.service import OrdersService
+from app.modules.orders.service import InternalOrderEventPublisher, OrdersService
 from app.modules.promo_codes.service import PromoCodeCalculation
 from app.modules.telegram.service import TelegramDeliveryError
 
@@ -270,6 +270,23 @@ async def test_checkout_from_valid_cart() -> None:
         )
     ]
     assert events.commit_states == [True]
+
+
+@pytest.mark.asyncio
+async def test_checkout_customer_notifications_emit_after_successful_commit() -> None:
+    service, _, session, _ = _orders_service()
+    seller_events = FakeOrderEventPublisher(session)
+    customer_events = FakeOrderEventPublisher(session)
+    service.event_publisher = InternalOrderEventPublisher(
+        session,
+        notifications_publisher=seller_events,
+        customer_notifications_publisher=customer_events,
+    )
+
+    await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert customer_events.events[0][0] == ORDER_CREATED
+    assert customer_events.commit_states == [True]
 
 
 @pytest.mark.asyncio

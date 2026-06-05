@@ -27,6 +27,7 @@ from app.events.payloads import (
 )
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
+from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
 from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
@@ -43,11 +44,22 @@ class OrderEventPublisher(Protocol):
 class InternalOrderEventPublisher:
     """Post-commit notification event publisher."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self.publisher = NotificationsEventPublisher(session)
+    def __init__(
+        self,
+        session: AsyncSession,
+        notifications_publisher: OrderEventPublisher | None = None,
+        customer_notifications_publisher: OrderEventPublisher | None = None,
+    ) -> None:
+        self.notifications_publisher = notifications_publisher or NotificationsEventPublisher(
+            session
+        )
+        self.customer_notifications_publisher = (
+            customer_notifications_publisher or CustomerServiceNotificationEventPublisher(session)
+        )
 
     async def emit(self, name: str, payload: Mapping[str, object]) -> None:
-        await self.publisher.emit(name, payload)
+        await self.notifications_publisher.emit(name, payload)
+        await self.customer_notifications_publisher.emit(name, payload)
 
 
 class OrdersService:

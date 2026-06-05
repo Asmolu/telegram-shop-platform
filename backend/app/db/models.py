@@ -90,6 +90,14 @@ class NotificationStatus(StrEnum):
     FAILED = "failed"
 
 
+class CustomerServiceNotificationDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    SKIPPED = "skipped"
+
+
 class SellerRegistrationStatus(StrEnum):
     PENDING = "PENDING"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
@@ -1011,6 +1019,63 @@ class Notification(Base):
     )
 
     user: Mapped[User | None] = relationship(back_populates="notifications")
+
+
+class CustomerServiceNotificationDelivery(Base):
+    __tablename__ = "customer_service_notification_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    subscription_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customer_telegram_subscriptions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    channel: Mapped[NotificationChannel] = mapped_column(
+        Enum(NotificationChannel, name="notification_channel", values_callable=_enum_values),
+        nullable=False,
+        default=NotificationChannel.TELEGRAM,
+        server_default=NotificationChannel.TELEGRAM.value,
+        index=True,
+    )
+    status: Mapped[CustomerServiceNotificationDeliveryStatus] = mapped_column(
+        Enum(
+            CustomerServiceNotificationDeliveryStatus,
+            name="customer_service_notification_delivery_status",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=CustomerServiceNotificationDeliveryStatus.PENDING,
+        server_default=CustomerServiceNotificationDeliveryStatus.PENDING.value,
+        index=True,
+    )
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_after_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class AnalyticsEvent(Base):

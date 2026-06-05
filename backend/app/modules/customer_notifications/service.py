@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -12,11 +14,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import CustomerTelegramSubscription, User
+from app.db.models import (
+    CustomerServiceNotificationDelivery,
+    CustomerServiceNotificationDeliveryStatus,
+    CustomerTelegramSubscription,
+    NotificationChannel,
+    OrderStatus,
+    User,
+)
+from app.events.names import (
+    ORDER_CANCELLED_CUSTOMER,
+    ORDER_CREATED,
+    ORDER_CREATED_CUSTOMER,
+    ORDER_DELIVERED_CUSTOMER,
+    ORDER_PROCESSING_CUSTOMER,
+    ORDER_SHIPPED_CUSTOMER,
+    ORDER_STATUS_CHANGED,
+    ORDER_STATUS_CHANGED_CUSTOMER,
+)
 from app.modules.audit.service import AuditService
 from app.modules.customer_notifications.repository import CustomerNotificationsRepository
 from app.modules.customer_notifications.schemas import (
     CustomerBotWebhookResponse,
+    CustomerServiceNotificationDeliveryList,
+    CustomerServiceNotificationDeliveryRead,
     CustomerSubscriptionAdminRead,
     CustomerSubscriptionList,
     CustomerSubscriptionMe,
@@ -26,6 +47,8 @@ from app.modules.customer_notifications.schemas import (
 from app.modules.telegram.schemas import TelegramCallbackQuery, TelegramMessage, TelegramUpdate
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.users.repository import UsersRepository
+
+logger = logging.getLogger(__name__)
 
 START_COMMAND_RE = re.compile(
     r"^/start(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<payload>\S+))?$",
@@ -39,6 +62,7 @@ UNKNOWN_CHAT_TYPE = "unknown"
 START_LINK_PAYLOAD = "notify"
 CALLBACK_PREFIX = "customer_notifications"
 ACTION_SUBSCRIPTION_UPDATED = "customer_notifications.subscription_updated"
+TELEGRAM_ERROR_MESSAGE_MAX_LENGTH = 500
 
 WELCOME_MESSAGE = (
     "Уведомления подключены. Мы будем писать сюда о заказах и важных изменениях. "
@@ -48,6 +72,326 @@ STOP_MESSAGE = "Уведомления выключены. Чтобы снова
 CONNECT_PRIVATE_CHAT_MESSAGE = (
     "Уведомления можно подключить только в личном чате с ботом. Откройте бота и отправьте /start."
 )
+ORDER_CREATED_CUSTOMER_MESSAGE = "Заказ создан"
+ORDER_STATUS_CHANGED_CUSTOMER_MESSAGE = "Статус заказа изменён"
+ORDER_PROCESSING_CUSTOMER_MESSAGE = "Заказ принят в обработку"
+ORDER_SHIPPED_CUSTOMER_MESSAGE = "Заказ отправлен"
+ORDER_DELIVERED_CUSTOMER_MESSAGE = "Заказ доставлен"
+ORDER_CANCELLED_CUSTOMER_MESSAGE = "Заказ отменён"
+
+
+class CustomerTelegramSender:
+    """Bot 1 Telegram sender for customer-facing messages."""
+
+    def __init__(self, telegram_service: TelegramService | None = None) -> None:
+        self.telegram_service = telegram_service or TelegramService(
+            bot_token=settings.telegram_customer_bot_token,
+        )
+
+    async def send_message(self, chat_id: int, message: str) -> int | None:
+        return await self.telegram_service.send_message(str(chat_id), message)
+
+
+class CustomerServiceNotificationDeliveryService:
+    """Customer service notification delivery boundary for Bot 1."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        repository: CustomerNotificationsRepository | None = None,
+        sender: CustomerTelegramSender | None = None,
+        now_factory: Any | None = None,
+    ) -> None:
+        self.session = session
+        self.repository = repository or CustomerNotificationsRepository(session)
+        self.sender = sender or CustomerTelegramSender()
+        self.now_factory = now_factory or (lambda: datetime.now(UTC))
+
+    async def handle_order_event(
+        self,
+        name: str,
+        payload: Mapping[str, object],
+    ) -> CustomerServiceNotificationDelivery | None:
+        if name == ORDER_CREATED:
+            return await self.notify_order_created(payload)
+        if name == ORDER_STATUS_CHANGED:
+            return await self.notify_order_status_changed(payload)
+        return None
+
+    async def notify_order_created(
+        self,
+        payload: Mapping[str, object],
+    ) -> CustomerServiceNotificationDelivery | None:
+        user_id = self._payload_int(payload, "user_id")
+        if user_id is None:
+            return None
+        return await self._deliver_service_notification(
+            user_id=user_id,
+            order_id=self._payload_int(payload, "order_id"),
+            event_name=ORDER_CREATED_CUSTOMER,
+            message=self._order_created_message(payload),
+        )
+
+    async def notify_order_status_changed(
+        self,
+        payload: Mapping[str, object],
+    ) -> CustomerServiceNotificationDelivery | None:
+        user_id = self._payload_int(payload, "user_id")
+        if user_id is None:
+            return None
+
+        event_name, message = self._status_event_and_message(payload)
+        return await self._deliver_service_notification(
+            user_id=user_id,
+            order_id=self._payload_int(payload, "order_id"),
+            event_name=event_name,
+            message=message,
+        )
+
+    async def _deliver_service_notification(
+        self,
+        *,
+        user_id: int,
+        order_id: int | None,
+        event_name: str,
+        message: str,
+    ) -> CustomerServiceNotificationDelivery:
+        subscription = await self.repository.get_by_user_id(user_id)
+        delivery = CustomerServiceNotificationDelivery(
+            user_id=user_id,
+            order_id=order_id,
+            subscription_id=subscription.id if subscription is not None else None,
+            event_name=event_name,
+            channel=NotificationChannel.TELEGRAM,
+            status=CustomerServiceNotificationDeliveryStatus.PENDING,
+        )
+
+        skip_reason = self._skip_reason(subscription, user_id=user_id)
+        if skip_reason is not None:
+            error_code, error_message = skip_reason
+            delivery.status = CustomerServiceNotificationDeliveryStatus.SKIPPED
+            delivery.error_code = error_code
+            delivery.error_message = error_message
+            self.repository.add_delivery(delivery)
+            await self._commit("Customer service notification skip recording failed")
+            return delivery
+
+        self.repository.add_delivery(delivery)
+        await self._commit("Customer service notification delivery creation failed")
+
+        assert subscription is not None
+        assert subscription.telegram_chat_id is not None
+        try:
+            telegram_message_id = await self.sender.send_message(
+                subscription.telegram_chat_id,
+                message,
+            )
+        except TelegramDeliveryError as exc:
+            self._mark_delivery_failed(
+                delivery=delivery,
+                subscription=subscription,
+                error=exc,
+            )
+        else:
+            delivery.status = CustomerServiceNotificationDeliveryStatus.SENT
+            delivery.telegram_message_id = telegram_message_id
+            delivery.error_code = None
+            delivery.error_message = None
+            delivery.retry_after_seconds = None
+            delivery.sent_at = self._now()
+            subscription.last_delivery_error = None
+
+        await self._commit("Customer service notification delivery update failed")
+        return delivery
+
+    def _skip_reason(
+        self,
+        subscription: CustomerTelegramSubscription | None,
+        *,
+        user_id: int,
+    ) -> tuple[str, str] | None:
+        if subscription is None:
+            return "subscription_missing", "Customer Bot 1 subscription is missing"
+        if subscription.user_id != user_id:
+            return "subscription_user_mismatch", "Subscription is not linked to order user"
+        if subscription.blocked_at is not None:
+            return "subscription_blocked", "Customer Bot 1 chat is blocked"
+        if not subscription.has_chat:
+            return "chat_unavailable", "Customer Bot 1 private chat is unavailable"
+        if subscription.telegram_chat_id is None:
+            return "chat_missing", "Customer Bot 1 chat id is missing"
+        if subscription.chat_type != PRIVATE_CHAT_TYPE:
+            return "non_private_chat", "Customer Bot 1 chat is not private"
+        if not subscription.service_opt_in:
+            return "service_opt_out", "Customer opted out of service notifications"
+        return None
+
+    def _mark_delivery_failed(
+        self,
+        *,
+        delivery: CustomerServiceNotificationDelivery,
+        subscription: CustomerTelegramSubscription,
+        error: TelegramDeliveryError,
+    ) -> None:
+        now = self._now()
+        error_code = self._delivery_error_code(error)
+        error_message = self._sanitize_error_message(error)
+        delivery.status = (
+            CustomerServiceNotificationDeliveryStatus.BLOCKED
+            if error_code == "blocked"
+            else CustomerServiceNotificationDeliveryStatus.FAILED
+        )
+        delivery.error_code = error_code
+        delivery.error_message = error_message
+        delivery.retry_after_seconds = error.retry_after_seconds
+        delivery.sent_at = None
+        subscription.last_delivery_error = error_message
+
+        if error_code == "blocked":
+            subscription.blocked_at = now
+            subscription.has_chat = False
+
+    def _delivery_error_code(self, error: TelegramDeliveryError) -> str:
+        message = str(error).lower()
+        if (
+            error.status_code == status.HTTP_403_FORBIDDEN
+            or str(error.error_code) == "403"
+            or "forbidden" in message
+            or "blocked" in message
+        ):
+            return "blocked"
+        if (
+            error.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+            or str(error.error_code) == "429"
+            or error.retry_after_seconds is not None
+            or "too many requests" in message
+            or "retry after" in message
+        ):
+            return "rate_limited"
+        if "token is not configured" in message:
+            return "configuration_error"
+        if error.status_code is not None:
+            return f"telegram_http_{error.status_code}"
+        if error.error_code is not None:
+            return self._sanitize_error_code(str(error.error_code))
+        return "telegram_error"
+
+    def _sanitize_error_code(self, error_code: str) -> str:
+        sanitized = re.sub(r"[^a-zA-Z0-9_]+", "_", error_code.strip().lower()).strip("_")
+        return sanitized[:100] or "telegram_error"
+
+    def _sanitize_error_message(self, error: TelegramDeliveryError) -> str:
+        message = str(error) or "Telegram delivery failed"
+        for secret in (
+            settings.telegram_customer_bot_token,
+            settings.telegram_bot_token,
+            settings.telegram_webapp_bot_token,
+            settings.telegram_customer_webhook_secret,
+            settings.telegram_seller_webhook_secret,
+        ):
+            if secret:
+                message = message.replace(secret, "[redacted]")
+        message = " ".join(message.split())
+        if error.retry_after_seconds is not None and "retry_after_seconds" not in message:
+            message = f"{message} retry_after_seconds={error.retry_after_seconds}"
+        return message[:TELEGRAM_ERROR_MESSAGE_MAX_LENGTH]
+
+    def _order_created_message(self, payload: Mapping[str, object]) -> str:
+        order_label = self._order_label(payload)
+        total_amount = self._payload_value(payload, "total_amount", fallback="0.00")
+        return (
+            f"{ORDER_CREATED_CUSTOMER_MESSAGE}\n\n"
+            f"Заказ {order_label} создан. Сумма: {total_amount}."
+        )
+
+    def _status_event_and_message(self, payload: Mapping[str, object]) -> tuple[str, str]:
+        order_label = self._order_label(payload)
+        new_status = self._payload_value(payload, "new_status", fallback="unknown")
+        status_messages: dict[str, tuple[str, str]] = {
+            OrderStatus.PROCESSING.value: (
+                ORDER_PROCESSING_CUSTOMER,
+                f"{ORDER_PROCESSING_CUSTOMER_MESSAGE}\n\nЗаказ {order_label} принят в обработку.",
+            ),
+            OrderStatus.SHIPPED.value: (
+                ORDER_SHIPPED_CUSTOMER,
+                f"{ORDER_SHIPPED_CUSTOMER_MESSAGE}\n\nЗаказ {order_label} отправлен.",
+            ),
+            OrderStatus.DELIVERED.value: (
+                ORDER_DELIVERED_CUSTOMER,
+                f"{ORDER_DELIVERED_CUSTOMER_MESSAGE}\n\nЗаказ {order_label} доставлен.",
+            ),
+            OrderStatus.CANCELLED.value: (
+                ORDER_CANCELLED_CUSTOMER,
+                f"{ORDER_CANCELLED_CUSTOMER_MESSAGE}\n\nЗаказ {order_label} отменён.",
+            ),
+        }
+        mapped = status_messages.get(new_status)
+        if mapped is not None:
+            return mapped
+        return (
+            ORDER_STATUS_CHANGED_CUSTOMER,
+            f"{ORDER_STATUS_CHANGED_CUSTOMER_MESSAGE}\n\n"
+            f"Статус заказа {order_label}: {new_status}.",
+        )
+
+    def _order_label(self, payload: Mapping[str, object]) -> str:
+        order_id = self._payload_value(payload, "order_id", fallback="unknown")
+        return self._payload_value(payload, "order_number", fallback=f"#{order_id}")
+
+    def _payload_value(
+        self,
+        payload: Mapping[str, object],
+        key: str,
+        *,
+        fallback: str,
+    ) -> str:
+        value = payload.get(key)
+        if value is None:
+            return fallback
+        return str(value)
+
+    def _payload_int(self, payload: Mapping[str, object], key: str) -> int | None:
+        value = payload.get(key)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _commit(self, error_message: str) -> None:
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError(error_message, status.HTTP_409_CONFLICT) from exc
+
+    def _now(self) -> datetime:
+        return self.now_factory()
+
+
+class CustomerServiceNotificationEventPublisher:
+    """Post-commit order event bridge for customer Bot 1 service notifications."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        delivery_service: CustomerServiceNotificationDeliveryService | None = None,
+    ) -> None:
+        self.delivery_service = delivery_service or CustomerServiceNotificationDeliveryService(
+            session
+        )
+
+    async def emit(self, name: str, payload: Mapping[str, object]) -> None:
+        try:
+            await self.delivery_service.handle_order_event(name=name, payload=payload)
+        except Exception:
+            logger.warning(
+                "Failed to process customer service notification event %s",
+                name,
+                exc_info=True,
+            )
 
 
 class CustomerNotificationsService:
@@ -140,6 +484,29 @@ class CustomerNotificationsService:
         )
         return CustomerSubscriptionList(
             items=[self._admin_response(item) for item in items],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+
+    async def list_service_deliveries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: CustomerServiceNotificationDeliveryStatus | None = None,
+        event_name: str | None = None,
+        user_id: int | None = None,
+        order_id: int | None = None,
+    ) -> CustomerServiceNotificationDeliveryList:
+        items, total = await self.repository.list_service_deliveries(
+            limit=limit,
+            offset=offset,
+            status=status,
+            event_name=event_name,
+            user_id=user_id,
+            order_id=order_id,
+        )
+        return CustomerServiceNotificationDeliveryList(
+            items=[CustomerServiceNotificationDeliveryRead.model_validate(item) for item in items],
             meta=PageMeta(limit=limit, offset=offset, total=total),
         )
 

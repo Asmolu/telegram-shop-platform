@@ -5,7 +5,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CustomerTelegramSubscription
+from app.db.models import (
+    CustomerServiceNotificationDelivery,
+    CustomerServiceNotificationDeliveryStatus,
+    CustomerTelegramSubscription,
+)
 
 
 class CustomerNotificationsRepository:
@@ -16,6 +20,9 @@ class CustomerNotificationsRepository:
 
     def add(self, subscription: CustomerTelegramSubscription) -> None:
         self.session.add(subscription)
+
+    def add_delivery(self, delivery: CustomerServiceNotificationDelivery) -> None:
+        self.session.add(delivery)
 
     async def get_by_id(self, subscription_id: int) -> CustomerTelegramSubscription | None:
         return await self.session.get(CustomerTelegramSubscription, subscription_id)
@@ -71,6 +78,41 @@ class CustomerNotificationsRepository:
         )
         count_result = await self.session.execute(
             select(func.count(CustomerTelegramSubscription.id)).where(*conditions)
+        )
+        return list(items_result.scalars().all()), count_result.scalar_one()
+
+    async def list_service_deliveries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: CustomerServiceNotificationDeliveryStatus | None = None,
+        event_name: str | None = None,
+        user_id: int | None = None,
+        order_id: int | None = None,
+    ) -> tuple[list[CustomerServiceNotificationDelivery], int]:
+        conditions: list[Any] = []
+        if status is not None:
+            conditions.append(CustomerServiceNotificationDelivery.status == status)
+        if event_name:
+            conditions.append(CustomerServiceNotificationDelivery.event_name == event_name)
+        if user_id is not None:
+            conditions.append(CustomerServiceNotificationDelivery.user_id == user_id)
+        if order_id is not None:
+            conditions.append(CustomerServiceNotificationDelivery.order_id == order_id)
+
+        items_result = await self.session.execute(
+            select(CustomerServiceNotificationDelivery)
+            .where(*conditions)
+            .order_by(
+                CustomerServiceNotificationDelivery.created_at.desc(),
+                CustomerServiceNotificationDelivery.id.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        count_result = await self.session.execute(
+            select(func.count(CustomerServiceNotificationDelivery.id)).where(*conditions)
         )
         return list(items_result.scalars().all()), count_result.scalar_one()
 

@@ -88,8 +88,10 @@ Bot 1 remains separate from Bot 2 and receives webhook updates at
 `POST /api/v1/telegram/customer-bot/webhook`, protected by
 `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` through Telegram's
 `X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_CUSTOMER_BOT_USERNAME`
-enables the Mini App Profile to return a `t.me` start link. Phase 1 only stores
-subscription/consent state and does not send marketing campaigns.
+enables the Mini App Profile to return a `t.me` start link. Customer service
+order notifications are sent through Bot 1 after successful order persistence
+when a linked private chat has service consent. Marketing campaigns, mass
+sending, scheduling, and campaign UI are not part of this phase.
 
 3. Run backend:
 

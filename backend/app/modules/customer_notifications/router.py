@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.common.pagination import PaginationParams
-from app.db.models import User, UserRole
+from app.db.models import CustomerServiceNotificationDeliveryStatus, User, UserRole
 from app.modules.customer_notifications.schemas import (
+    CustomerServiceNotificationDeliveryList,
     CustomerSubscriptionList,
     CustomerSubscriptionMe,
     CustomerSubscriptionStartLink,
@@ -81,4 +82,30 @@ async def list_subscriptions(
         blocked=blocked,
         user_id=user_id,
         telegram_username=telegram_username,
+    )
+
+
+@router.get("/service-deliveries", response_model=CustomerServiceNotificationDeliveryList)
+async def list_service_deliveries(
+    pagination: Annotated[PaginationParams, Depends()],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[
+        CustomerNotificationsService,
+        Depends(get_customer_notifications_service),
+    ],
+    status_filter: Annotated[
+        CustomerServiceNotificationDeliveryStatus | None,
+        Query(alias="status"),
+    ] = None,
+    event_name: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    user_id: Annotated[int | None, Query(ge=1)] = None,
+    order_id: Annotated[int | None, Query(ge=1)] = None,
+) -> CustomerServiceNotificationDeliveryList:
+    return await service.list_service_deliveries(
+        limit=pagination.limit,
+        offset=pagination.offset,
+        status=status_filter,
+        event_name=event_name,
+        user_id=user_id,
+        order_id=order_id,
     )

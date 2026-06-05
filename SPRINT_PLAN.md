@@ -520,6 +520,19 @@ Customers can connect a private Bot 1 chat, manage notification consent, and
 sellers/admins can inspect the subscription registry without exposing raw chat
 IDs or bot secrets.
 
+## Phase 1.5 delivery notes
+
+- Customer-facing service notifications for order events are sent through Bot 1
+  with `TELEGRAM_CUSTOMER_BOT_TOKEN` only after checkout/status transactions
+  commit.
+- `CustomerServiceNotificationDelivery` records service delivery attempts,
+  skipped eligibility states, sanitized Telegram errors, and blocked/rate-limit
+  outcomes.
+- Bot 2 seller registration, seller verification, seller chat operations, and
+  seller notifications remain separate.
+- Marketing campaigns, mass sending, scheduling, `BroadcastCampaign`,
+  `BroadcastDelivery`, campaign APIs, and campaign UI remain out of scope.
+
 ---
 
 # Development Rules

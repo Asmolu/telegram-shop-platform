@@ -166,11 +166,11 @@ python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.r
 python scripts/set_seller_bot_webhook.py info
 ```
 
-## Customer Bot 1 notification registry
+## Customer Bot 1 notification registry and service delivery
 
-Customer notification MVP Phase 1 adds a Bot 1 subscription registry without
-campaign sending. Bot 1 remains separate from Bot 2 seller registration and
-uses:
+Customer notification MVP Phase 1 adds a Bot 1 subscription registry. Phase 1.5
+adds order-related customer service notifications through Bot 1 without campaign
+sending. Bot 1 remains separate from Bot 2 seller registration and uses:
 
 - `POST /api/v1/telegram/customer-bot/webhook`, protected by
   `X-Telegram-Bot-Api-Secret-Token` matching `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`
@@ -179,13 +179,18 @@ uses:
 - `POST /api/v1/customer-notifications/me/start-link`
 - `GET /api/v1/customer-notifications/subscriptions` for SELLER/ADMIN recipient
   status listing
+- `GET /api/v1/customer-notifications/service-deliveries` for SELLER/ADMIN
+  read-only service delivery attempt listing
 
 Bot 1 stores private chat availability in `CustomerTelegramSubscription`.
 `telegram_user_id` and `telegram_chat_id` are stored separately; Mini App auth
 still validates Telegram `initData` without persisting the raw payload. The
 Mini App Profile shows Telegram notification settings, and Seller Panel has a
-Customer Notifications recipient list. Marketing campaigns, campaign delivery
-tables, and mass sends are intentionally out of scope for this phase.
+Customer Notifications recipient list. Order service notifications use
+`TELEGRAM_CUSTOMER_BOT_TOKEN` after successful order persistence and record
+attempts in `CustomerServiceNotificationDelivery`. Marketing campaigns,
+campaign delivery tables, scheduling, and mass sends are intentionally out of
+scope for this phase.
 
 ## Production hardening
 

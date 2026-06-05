@@ -785,3 +785,10 @@ Out of scope for Phase 1:
 - BroadcastCampaign or Delivery persistence.
 - Campaign creation UI.
 - Storing raw Telegram `initData`.
+
+Customer Notifications Phase 1.5 adds customer-facing service notifications for
+order events only. Bot 1 sends these messages with `TELEGRAM_CUSTOMER_BOT_TOKEN`
+after order checkout/status transactions commit, and delivery attempts are
+recorded separately from seller/admin Bot 2 notifications. Marketing campaigns,
+campaign delivery models, campaign UI, scheduling, and mass sending remain out
+of scope.
