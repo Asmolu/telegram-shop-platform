@@ -25,8 +25,8 @@ MVP Phase 1 is implemented as a customer subscription registry, Bot 1 webhook,
 Mini App Profile settings, and Seller Panel read-only listing. Phase 1.5 adds
 customer-facing order service notifications through Bot 1, with a minimal
 `CustomerServiceNotificationDelivery` attempt log for order-related service
-messages only. Campaign, broadcast, scheduling, and marketing delivery models in
-this document remain Phase 2 design notes only.
+messages only. Phase 2 adds controlled Bot 1 templates, campaigns, materialized
+delivery rows, preview/test-send, bounded process-batch delivery, and reports.
 
 ## Current State
 
@@ -120,7 +120,7 @@ Indexes and constraints:
 
 Purpose: reusable message templates for service and marketing sends.
 
-Status: future Phase 2 scope.
+Status: implemented in MVP Phase 2.
 
 Suggested fields:
 
@@ -145,7 +145,7 @@ Suggested fields:
 
 Purpose: seller/admin-created customer campaign, including service or marketing sends.
 
-Status: future Phase 2 scope. Do not add this model or campaign APIs in Phase 1.
+Status: implemented in MVP Phase 2.
 
 Suggested fields:
 
@@ -184,7 +184,7 @@ Recommended audience filters for MVP:
 
 Purpose: one row per campaign recipient and delivery attempt state.
 
-Status: future Phase 2 scope. Do not add this model or delivery queue in Phase 1.
+Status: implemented in MVP Phase 2.
 
 Suggested fields:
 
@@ -471,12 +471,26 @@ Backend implementation scope:
 
 ## MVP Phase 2
 
-Backend design scope:
+Backend implementation scope:
 
 - Add `NotificationTemplate`, `BroadcastCampaign`, and `BroadcastDelivery`.
 - Add campaign CRUD, preview, test send, schedule, process-batch, and delivery report APIs.
 - Add rate-limited Telegram sender for Bot 1 with retry handling.
 - Add audit logs for campaign/template lifecycle.
+
+Implemented MVP details:
+
+- Plain text is the only supported campaign parse mode.
+- Template variables must be listed in `allowed_variables`; campaign rendering
+  uses explicit request-supplied values only and does not interpolate arbitrary
+  database fields.
+- Audience filters supported in the first Phase 2 implementation are `all`,
+  `purchasers`, `product`, `category`, and `promo_code`.
+- Test send targets the current SELLER/ADMIN user's Bot 1 subscription when
+  they have opened Bot 1 with `/start`; it does not reuse Bot 2 seller chat
+  metadata.
+- Recipient exports, arbitrary chat-id sends, non-plain Telegram parse modes,
+  and a separate worker process remain out of scope.
 
 Frontend design scope:
 

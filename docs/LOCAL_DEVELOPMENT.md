@@ -90,8 +90,32 @@ Bot 1 remains separate from Bot 2 and receives webhook updates at
 `X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_CUSTOMER_BOT_USERNAME`
 enables the Mini App Profile to return a `t.me` start link. Customer service
 order notifications are sent through Bot 1 after successful order persistence
-when a linked private chat has service consent. Marketing campaigns, mass
-sending, scheduling, and campaign UI are not part of this phase.
+when a linked private chat has service consent.
+
+Customer campaign Phase 2 also uses Bot 1 through
+`TELEGRAM_CUSTOMER_BOT_TOKEN`. Seller Panel campaign tools never expose bot
+tokens and never use Bot 2 `TELEGRAM_BOT_TOKEN` for customer campaigns.
+Useful local campaign throttles:
+
+```text
+RATE_LIMIT_CUSTOMER_CAMPAIGN_REQUESTS=30
+RATE_LIMIT_CUSTOMER_CAMPAIGN_WINDOW_SECONDS=60
+CUSTOMER_CAMPAIGN_BATCH_SIZE=20
+CUSTOMER_CAMPAIGN_MAX_ATTEMPTS=3
+CUSTOMER_CAMPAIGN_RETRY_BASE_SECONDS=60
+```
+
+Safe local/staging campaign flow:
+
+1. Open Bot 1 from one internal Telegram account and send `/start`.
+2. Confirm that the Seller Panel Customer Notifications recipient registry
+   shows the internal account with a masked chat id.
+3. Create a template or draft campaign.
+4. Run preview and verify the eligible count excludes opted-out or blocked
+   subscriptions.
+5. Send a test message to the current seller/admin Bot 1 subscription.
+6. Start a tiny campaign and call `process-batch` once from Seller Panel or a
+   protected cron request.
 
 3. Run backend:
 

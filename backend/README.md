@@ -153,20 +153,35 @@ In the seller group, use `/sellers` to find `Seller ID for commands`, then use
 `/block_seller <Seller ID>` or `/unblock_seller <Seller ID>`. Do not use the
 Telegram user id or chat id for these commands.
 
-Customer Bot 1 notification subscription MVP is exposed through:
+Customer Bot 1 notifications are exposed through:
 
 - `POST /api/v1/telegram/customer-bot/webhook`
 - `GET /api/v1/customer-notifications/me/subscription`
 - `PATCH /api/v1/customer-notifications/me/subscription`
 - `POST /api/v1/customer-notifications/me/start-link`
 - `GET /api/v1/customer-notifications/subscriptions`
+- `GET /api/v1/customer-notifications/service-deliveries`
+- `GET/POST/PATCH /api/v1/customer-notifications/templates`
+- `GET/POST/PATCH /api/v1/customer-notifications/campaigns`
+- Campaign action endpoints:
+  `/preview`, `/test`, `/schedule`, `/start`, `/pause`, `/cancel`,
+  `/process-batch`, `/delivery-summary`, and `/deliveries`
 
 Set `TELEGRAM_CUSTOMER_BOT_TOKEN`, `TELEGRAM_CUSTOMER_BOT_USERNAME`, and
 `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for Bot 1. The webhook is protected only by
 the Telegram `X-Telegram-Bot-Api-Secret-Token` header and uses the header-only
 path, not a path secret. Bot 1 stores customer private chat state in
-`CustomerTelegramSubscription` and does not implement campaign sending in this
-phase.
+`CustomerTelegramSubscription`. Order service notifications and Phase 2
+customer campaigns use `TELEGRAM_CUSTOMER_BOT_TOKEN` only; Bot 2
+`TELEGRAM_BOT_TOKEN` remains for seller verification, seller chat operations,
+and seller notifications.
+
+Campaign MVP uses `NotificationTemplate`, `BroadcastCampaign`, and
+`BroadcastDelivery`. It supports plain-text Telegram sends, safe audience
+filters, materialized delivery rows, bounded manual/cron `process-batch`
+processing, sanitized errors, and delivery reports. Recipient exports,
+arbitrary database field interpolation, non-plain parse modes, and a separate
+worker process are intentionally out of scope.
 
 Set and verify the production Bot 1 webhook without printing the bot token:
 

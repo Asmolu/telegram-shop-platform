@@ -792,3 +792,20 @@ after order checkout/status transactions commit, and delivery attempts are
 recorded separately from seller/admin Bot 2 notifications. Marketing campaigns,
 campaign delivery models, campaign UI, scheduling, and mass sending remain out
 of scope.
+
+Customer Notifications Phase 2 adds controlled Bot 1 customer campaign
+infrastructure for SELLER/ADMIN users:
+
+- `NotificationTemplate`, `BroadcastCampaign`, and `BroadcastDelivery`
+  persistence with Alembic-managed enums and indexes.
+- Template CRUD with explicit allowed variables and plain-text Telegram message
+  rendering for MVP.
+- Campaign drafts, preview recipient estimates, test sends to the current
+  seller/admin's Bot 1 subscription, schedule/start, pause, cancel, bounded
+  process-batch delivery, and delivery reports.
+- Marketing eligibility always requires Bot 1 private chat, known chat id,
+  `marketing_opt_in=true`, and `blocked_at is null`; service campaigns use
+  `service_opt_in=true` with the same chat/block checks.
+- Batch delivery uses `TELEGRAM_CUSTOMER_BOT_TOKEN` only. Bot 2 remains limited
+  to seller registration, seller verification, seller chat operations, and
+  seller notifications.

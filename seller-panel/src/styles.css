@@ -988,6 +988,69 @@ textarea:focus {
   min-width: 150px;
 }
 
+.customer-notifications-console .success-banner {
+  margin-top: 14px;
+}
+
+.customer-notifications-header {
+  display: grid;
+  gap: 14px;
+}
+
+.customer-notification-tabs {
+  width: 100%;
+}
+
+.customer-notification-tabs button {
+  min-width: 132px;
+}
+
+.customer-campaign-form textarea {
+  min-height: 132px;
+}
+
+.customer-action-grid {
+  max-width: 380px;
+}
+
+.customer-action-grid .button {
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
+.customer-summary-grid {
+  margin-top: 16px;
+}
+
+.campaign-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 14px;
+}
+
+.campaign-preview pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 12px;
+  color: #111827;
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.campaign-preview small {
+  color: #4b5563;
+  line-height: 1.45;
+}
+
 .segmented-field {
   display: flex;
   gap: 12px;

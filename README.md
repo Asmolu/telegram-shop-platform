@@ -166,11 +166,13 @@ python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.r
 python scripts/set_seller_bot_webhook.py info
 ```
 
-## Customer Bot 1 notification registry and service delivery
+## Customer Bot 1 notifications and campaigns
 
 Customer notification MVP Phase 1 adds a Bot 1 subscription registry. Phase 1.5
-adds order-related customer service notifications through Bot 1 without campaign
-sending. Bot 1 remains separate from Bot 2 seller registration and uses:
+adds order-related customer service notifications through Bot 1. Phase 2 adds
+controlled templates, campaigns, materialized delivery rows, bounded batch
+processing, and reports. Bot 1 remains separate from Bot 2 seller registration
+and uses:
 
 - `POST /api/v1/telegram/customer-bot/webhook`, protected by
   `X-Telegram-Bot-Api-Secret-Token` matching `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`
@@ -181,16 +183,27 @@ sending. Bot 1 remains separate from Bot 2 seller registration and uses:
   status listing
 - `GET /api/v1/customer-notifications/service-deliveries` for SELLER/ADMIN
   read-only service delivery attempt listing
+- `GET/POST/PATCH /api/v1/customer-notifications/templates` for SELLER/ADMIN
+  template management
+- `GET/POST/PATCH /api/v1/customer-notifications/campaigns` plus
+  `/preview`, `/test`, `/schedule`, `/start`, `/pause`, `/cancel`,
+  `/process-batch`, `/delivery-summary`, and `/deliveries` for controlled
+  campaign operations and reporting
 
 Bot 1 stores private chat availability in `CustomerTelegramSubscription`.
 `telegram_user_id` and `telegram_chat_id` are stored separately; Mini App auth
 still validates Telegram `initData` without persisting the raw payload. The
 Mini App Profile shows Telegram notification settings, and Seller Panel has a
-Customer Notifications recipient list. Order service notifications use
-`TELEGRAM_CUSTOMER_BOT_TOKEN` after successful order persistence and record
-attempts in `CustomerServiceNotificationDelivery`. Marketing campaigns,
-campaign delivery tables, scheduling, and mass sends are intentionally out of
-scope for this phase.
+Customer Notifications area for recipients, templates, campaigns, and delivery
+reports. Order service notifications and campaign sends use
+`TELEGRAM_CUSTOMER_BOT_TOKEN`; customer campaigns must not use
+`TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBAPP_BOT_TOKEN`.
+
+Phase 2 deliberately keeps recipient exports, arbitrary database field
+interpolation, non-plain Telegram parse modes, and a separate worker process out
+of scope. Staging campaign tests should start with one internal account that has
+opened Bot 1 with `/start`, complete preview and test-send in Seller Panel, then
+start a tiny campaign and run one bounded process batch before production use.
 
 ## Production hardening
 

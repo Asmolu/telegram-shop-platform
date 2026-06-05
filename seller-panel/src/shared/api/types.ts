@@ -350,3 +350,148 @@ export interface CustomerNotificationSubscription {
   created_at: string;
   updated_at: string;
 }
+
+export type NotificationTemplateCategory = 'service' | 'marketing';
+export type BroadcastCampaignType = 'service' | 'marketing';
+export type BroadcastCampaignStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'sending'
+  | 'paused'
+  | 'completed'
+  | 'cancelled'
+  | 'failed';
+export type BroadcastDeliveryStatus =
+  | 'pending'
+  | 'sending'
+  | 'sent'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
+  | 'rate_limited';
+
+export interface NotificationTemplate {
+  id: number;
+  key: string;
+  name: string;
+  category: NotificationTemplateCategory;
+  channel: NotificationChannel;
+  title: string | null;
+  body_template: string;
+  parse_mode: string | null;
+  allowed_variables: string[];
+  is_active: boolean;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationTemplatePayload {
+  key: string;
+  name: string;
+  category: NotificationTemplateCategory;
+  channel?: NotificationChannel;
+  title?: string | null;
+  body_template: string;
+  parse_mode?: string | null;
+  allowed_variables: string[];
+  is_active?: boolean;
+}
+
+export interface BroadcastCampaign {
+  id: number;
+  template_id: number | null;
+  name: string;
+  type: BroadcastCampaignType;
+  status: BroadcastCampaignStatus;
+  audience_filter: Record<string, unknown>;
+  recipient_count_estimate: number;
+  recipient_count_final: number | null;
+  message_title: string | null;
+  message_body: string;
+  parse_mode: string | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_by_user_id: number;
+  approved_by_user_id: number | null;
+  cancelled_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BroadcastCampaignPayload {
+  template_id?: number | null;
+  name: string;
+  type: BroadcastCampaignType;
+  audience_filter: Record<string, unknown>;
+  message_title?: string | null;
+  message_body?: string | null;
+  parse_mode?: string | null;
+  scheduled_at?: string | null;
+  template_variables?: Record<string, unknown>;
+}
+
+export interface BroadcastDeliverySummary {
+  pending: number;
+  sending: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  blocked: number;
+  rate_limited: number;
+  total: number;
+}
+
+export interface BroadcastCampaignDetail {
+  campaign: BroadcastCampaign;
+  delivery_summary: BroadcastDeliverySummary;
+}
+
+export interface BroadcastCampaignPreview {
+  campaign_id: number;
+  recipient_count_estimate: number;
+  rendered_sample: string;
+  eligibility_warnings: string[];
+}
+
+export interface BroadcastCampaignTestResponse {
+  ok: boolean;
+  campaign_id: number;
+  telegram_message_id: number | null;
+  recipient_user_id: number | null;
+  recipient_username: string | null;
+}
+
+export interface BroadcastCampaignProcessBatchResponse {
+  campaign_id: number;
+  processed: number;
+  sent: number;
+  failed: number;
+  blocked: number;
+  rate_limited: number;
+  retried: number;
+  skipped: number;
+  remaining: number;
+  campaign_status: BroadcastCampaignStatus;
+}
+
+export interface BroadcastDelivery {
+  id: number;
+  campaign_id: number;
+  user_id: number | null;
+  subscription_id: number;
+  telegram_chat_id_masked: string;
+  status: BroadcastDeliveryStatus;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  sent_at: string | null;
+  last_attempt_at: string | null;
+  telegram_message_id: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  retry_after_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}

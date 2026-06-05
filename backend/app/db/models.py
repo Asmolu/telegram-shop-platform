@@ -98,6 +98,36 @@ class CustomerServiceNotificationDeliveryStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class NotificationTemplateCategory(StrEnum):
+    SERVICE = "service"
+    MARKETING = "marketing"
+
+
+class BroadcastCampaignType(StrEnum):
+    SERVICE = "service"
+    MARKETING = "marketing"
+
+
+class BroadcastCampaignStatus(StrEnum):
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    SENDING = "sending"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class BroadcastDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"
+    RATE_LIMITED = "rate_limited"
+
+
 class SellerRegistrationStatus(StrEnum):
     PENDING = "PENDING"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
@@ -1076,6 +1106,215 @@ class CustomerServiceNotificationDelivery(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class NotificationTemplate(Base):
+    __tablename__ = "notification_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(150), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[NotificationTemplateCategory] = mapped_column(
+        Enum(
+            NotificationTemplateCategory,
+            name="notification_template_category",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[NotificationChannel] = mapped_column(
+        Enum(NotificationChannel, name="notification_channel", values_callable=_enum_values),
+        nullable=False,
+        default=NotificationChannel.TELEGRAM,
+        server_default=NotificationChannel.TELEGRAM.value,
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body_template: Mapped[str] = mapped_column(Text, nullable=False)
+    parse_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    allowed_variables: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        index=True,
+    )
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class BroadcastCampaign(Base):
+    __tablename__ = "broadcast_campaigns"
+    __table_args__ = (
+        Index("ix_broadcast_campaigns_status_type", "status", "type"),
+        Index("ix_broadcast_campaigns_scheduled_at", "scheduled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("notification_templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    type: Mapped[BroadcastCampaignType] = mapped_column(
+        Enum(BroadcastCampaignType, name="broadcast_campaign_type", values_callable=_enum_values),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[BroadcastCampaignStatus] = mapped_column(
+        Enum(
+            BroadcastCampaignStatus,
+            name="broadcast_campaign_status",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=BroadcastCampaignStatus.DRAFT,
+        server_default=BroadcastCampaignStatus.DRAFT.value,
+        index=True,
+    )
+    audience_filter: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    recipient_count_estimate: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    recipient_count_final: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message_body: Mapped[str] = mapped_column(Text, nullable=False)
+    parse_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    approved_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    template: Mapped[NotificationTemplate | None] = relationship()
+
+
+class BroadcastDelivery(Base):
+    __tablename__ = "broadcast_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id",
+            "subscription_id",
+            name="uq_broadcast_deliveries_campaign_subscription",
+        ),
+        Index("ix_broadcast_deliveries_campaign_status", "campaign_id", "status"),
+        Index("ix_broadcast_deliveries_status_next_attempt_at", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("broadcast_campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("customer_telegram_subscriptions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    telegram_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[BroadcastDeliveryStatus] = mapped_column(
+        Enum(
+            BroadcastDeliveryStatus,
+            name="broadcast_delivery_status",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=BroadcastDeliveryStatus.PENDING,
+        server_default=BroadcastDeliveryStatus.PENDING.value,
+        index=True,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_after_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    campaign: Mapped[BroadcastCampaign] = relationship()
+    subscription: Mapped[CustomerTelegramSubscription] = relationship()
 
 
 class AnalyticsEvent(Base):

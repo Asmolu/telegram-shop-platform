@@ -78,6 +78,7 @@ class TelegramService:
         chat_id: str,
         message: str,
         *,
+        parse_mode: str | None = None,
         reply_markup: dict[str, object] | None = None,
     ) -> int | None:
         payload: dict[str, object] = {
@@ -85,6 +86,8 @@ class TelegramService:
             "text": message,
             "disable_web_page_preview": True,
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         body = await self._post("sendMessage", payload)

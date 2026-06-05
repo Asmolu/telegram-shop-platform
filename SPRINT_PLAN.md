@@ -533,6 +533,22 @@ IDs or bot secrets.
 - Marketing campaigns, mass sending, scheduling, `BroadcastCampaign`,
   `BroadcastDelivery`, campaign APIs, and campaign UI remain out of scope.
 
+## Phase 2 delivery notes
+
+- Added Bot 1 customer campaign infrastructure with `NotificationTemplate`,
+  `BroadcastCampaign`, and `BroadcastDelivery`.
+- Added Seller/Admin APIs for templates, campaign drafts, preview estimates,
+  test sends, schedule/start, pause/cancel, bounded process-batch delivery, and
+  delivery reports.
+- Added Seller Panel Customer Notifications campaign, template, preview/test,
+  detail, delivery report, and recipient registry views.
+- Batch sending uses `TELEGRAM_CUSTOMER_BOT_TOKEN` only and stores sanitized
+  delivery results. Bot 2 seller tooling remains separate.
+- MVP supports safe audience filters for all eligible customers, purchasers,
+  purchased product/category, and promo-code users. Recipient exports,
+  arbitrary database interpolation, non-plain parse modes, and a dedicated
+  background worker remain out of scope.
+
 ---
 
 # Development Rules

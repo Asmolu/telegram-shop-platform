@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     rate_limit_promo_window_seconds: int = 60
     rate_limit_review_requests: int = 10
     rate_limit_review_window_seconds: int = 60
+    rate_limit_customer_campaign_requests: int = 30
+    rate_limit_customer_campaign_window_seconds: int = 60
+
+    customer_campaign_batch_size: int = 20
+    customer_campaign_max_attempts: int = 3
+    customer_campaign_retry_base_seconds: int = 60
 
     @property
     def cors_origins(self) -> list[str]:

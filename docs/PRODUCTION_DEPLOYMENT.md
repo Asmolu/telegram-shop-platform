@@ -32,12 +32,13 @@ Backend:
 - `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook
   `X-Telegram-Bot-Api-Secret-Token` header
 - `TELEGRAM_CUSTOMER_BOT_TOKEN` for Bot 1 customer notification registry
-  webhook setup and future customer-facing notification delivery
+  webhook setup, service notification delivery, and customer campaigns
 - `TELEGRAM_CUSTOMER_BOT_USERNAME` for Mini App customer notification start
   links
 - `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for the protected Bot 1 webhook
   `X-Telegram-Bot-Api-Secret-Token` header
-- cache and rate limit settings from `backend/.env.production.example`
+- cache, rate limit, and customer campaign batch settings from
+  `backend/.env.production.example`
 
 Frontend:
 
@@ -65,7 +66,7 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml exe
 ```
 
 Seller Portal email/password auth, seller approval, and Customer Notifications
-MVP Phase 1.5 require migrations through head `20260605_0017`. Bot 2 is connected
+Phase 2 require migrations through head `20260605_0018`. Bot 2 is connected
 through:
 
 ```text
@@ -117,6 +118,19 @@ The Bot 1 webhook URL should be:
 ```text
 https://api.tsplatform.ru/api/v1/telegram/customer-bot/webhook
 ```
+
+Customer campaign staging flow before production enablement:
+
+1. Use one internal Telegram account and open Bot 1 with `/start`.
+2. In `https://seller.tsplatform.ru`, verify Customer Notifications shows the
+   internal recipient with a masked chat id and the expected opt-in state.
+3. Create a plain-text template or draft campaign.
+4. Run preview and confirm marketing counts exclude non-opted-in recipients.
+5. Send a test message; this uses the current seller/admin Bot 1 subscription,
+   not Bot 2 seller chat metadata.
+6. Start a tiny internal campaign and process one bounded batch.
+7. Confirm delivery report counts and sanitized errors before enabling larger
+   production campaigns.
 
 Seller registration verification:
 
@@ -177,7 +191,7 @@ Error monitoring is prepared through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`
 - Compose is intended for MVP staging or a single-node deployment, not high availability.
 - Public review and seller moderation lists keep their current response shape; review admin pagination is documented as a later compatibility-safe improvement.
 - Redis is a cache and rate-limit accelerator. Public endpoints fall back to PostgreSQL if Redis is unavailable.
-- Customer Notifications MVP Phase 1.5 sends customer order service
-  notifications through Bot 1 only after order persistence and records service
-  delivery attempts. It does not include campaigns, mass sending, scheduling,
-  delivery queues, or customer broadcast UI.
+- Customer Notifications Phase 2 supports controlled Bot 1 campaigns through
+  templates, materialized delivery rows, and bounded process-batch processing.
+  Recipient exports, arbitrary database interpolation, non-plain parse modes,
+  and a separate worker process remain out of scope.

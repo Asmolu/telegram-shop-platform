@@ -99,6 +99,33 @@ def _match_rule(request: Request) -> RateLimitRule | None:
             settings.rate_limit_review_requests,
             settings.rate_limit_review_window_seconds,
         )
+    if path.startswith(f"{api_prefix}/customer-notifications/campaigns/") and method in {
+        "POST",
+        "PATCH",
+    }:
+        return RateLimitRule(
+            "customer-campaigns",
+            settings.rate_limit_customer_campaign_requests,
+            settings.rate_limit_customer_campaign_window_seconds,
+        )
+    if path == f"{api_prefix}/customer-notifications/campaigns" and method == "POST":
+        return RateLimitRule(
+            "customer-campaigns",
+            settings.rate_limit_customer_campaign_requests,
+            settings.rate_limit_customer_campaign_window_seconds,
+        )
+    if path == f"{api_prefix}/customer-notifications/templates" and method == "POST":
+        return RateLimitRule(
+            "customer-campaigns",
+            settings.rate_limit_customer_campaign_requests,
+            settings.rate_limit_customer_campaign_window_seconds,
+        )
+    if path.startswith(f"{api_prefix}/customer-notifications/templates/") and method == "PATCH":
+        return RateLimitRule(
+            "customer-campaigns",
+            settings.rate_limit_customer_campaign_requests,
+            settings.rate_limit_customer_campaign_window_seconds,
+        )
 
     return RateLimitRule(
         "global",

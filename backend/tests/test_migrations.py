@@ -4,10 +4,17 @@ from pathlib import Path
 from app.db.models import (
     Banner,
     BannerTargetType,
+    BroadcastCampaign,
+    BroadcastCampaignStatus,
+    BroadcastCampaignType,
+    BroadcastDelivery,
+    BroadcastDeliveryStatus,
     CustomerTelegramSubscription,
     Notification,
     NotificationChannel,
     NotificationStatus,
+    NotificationTemplate,
+    NotificationTemplateCategory,
     PendingSellerRegistration,
     SellerRegistrationStatus,
 )
@@ -365,3 +372,67 @@ def test_customer_subscription_model_has_unique_user_and_telegram_constraints() 
     assert "uq_customer_telegram_subscriptions_telegram_user_id" in constraint_names
     assert table.c.telegram_user_id.index is True
     assert table.c.telegram_chat_id.index is True
+
+
+def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260605_0018_add_customer_campaign_tables.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_customer_campaign_tables", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.NOTIFICATION_TEMPLATE_CATEGORY_ENUM.enums == ["service", "marketing"]
+    assert migration.BROADCAST_CAMPAIGN_TYPE_ENUM.enums == ["service", "marketing"]
+    assert migration.BROADCAST_CAMPAIGN_STATUS_ENUM.enums == [
+        "draft",
+        "scheduled",
+        "sending",
+        "paused",
+        "completed",
+        "cancelled",
+        "failed",
+    ]
+    assert migration.BROADCAST_DELIVERY_STATUS_ENUM.enums == [
+        "pending",
+        "sending",
+        "sent",
+        "failed",
+        "skipped",
+        "blocked",
+        "rate_limited",
+    ]
+    assert "notification_templates" in content
+    assert "broadcast_campaigns" in content
+    assert "broadcast_deliveries" in content
+    assert "uq_broadcast_deliveries_campaign_subscription" in content
+    assert "ix_broadcast_deliveries_status_next_attempt_at" in content
+
+
+def test_customer_campaign_models_bind_database_values_and_constraints() -> None:
+    template_table = NotificationTemplate.__table__
+    campaign_table = BroadcastCampaign.__table__
+    delivery_table = BroadcastDelivery.__table__
+    delivery_constraints = {constraint.name for constraint in delivery_table.constraints}
+
+    assert template_table.c.category.type.enums == [
+        NotificationTemplateCategory.SERVICE.value,
+        NotificationTemplateCategory.MARKETING.value,
+    ]
+    assert campaign_table.c.type.type.enums == [
+        BroadcastCampaignType.SERVICE.value,
+        BroadcastCampaignType.MARKETING.value,
+    ]
+    assert campaign_table.c.status.type.enums == [
+        status.value for status in BroadcastCampaignStatus
+    ]
+    assert delivery_table.c.status.type.enums == [
+        status.value for status in BroadcastDeliveryStatus
+    ]
+    assert "uq_broadcast_deliveries_campaign_subscription" in delivery_constraints

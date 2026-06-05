@@ -5,8 +5,18 @@ import type {
   Banner,
   BannerImageKind,
   BannerPayload,
+  BroadcastCampaign,
+  BroadcastCampaignDetail,
+  BroadcastCampaignPayload,
+  BroadcastCampaignPreview,
+  BroadcastCampaignProcessBatchResponse,
+  BroadcastCampaignTestResponse,
+  BroadcastDelivery,
+  BroadcastDeliverySummary,
   Category,
   CustomerNotificationSubscription,
+  NotificationTemplate,
+  NotificationTemplatePayload,
   Notification,
   Order,
   OrderStatus,
@@ -308,6 +318,78 @@ export const api = {
     subscriptions: (query: QueryParams = {}) =>
       apiRequest<PageList<CustomerNotificationSubscription>>(
         '/customer-notifications/subscriptions',
+        { query },
+      ),
+    templates: (query: QueryParams = {}) =>
+      apiRequest<PageList<NotificationTemplate>>('/customer-notifications/templates', { query }),
+    createTemplate: (body: NotificationTemplatePayload) =>
+      apiRequest<NotificationTemplate>('/customer-notifications/templates', {
+        method: 'POST',
+        body,
+      }),
+    updateTemplate: (templateId: number, body: Partial<NotificationTemplatePayload>) =>
+      apiRequest<NotificationTemplate>(`/customer-notifications/templates/${templateId}`, {
+        method: 'PATCH',
+        body,
+      }),
+    disableTemplate: (templateId: number) =>
+      apiRequest<NotificationTemplate>(
+        `/customer-notifications/templates/${templateId}/disable`,
+        { method: 'POST' },
+      ),
+    campaigns: (query: QueryParams = {}) =>
+      apiRequest<PageList<BroadcastCampaign>>('/customer-notifications/campaigns', { query }),
+    createCampaign: (body: BroadcastCampaignPayload) =>
+      apiRequest<BroadcastCampaign>('/customer-notifications/campaigns', {
+        method: 'POST',
+        body,
+      }),
+    updateCampaign: (campaignId: number, body: Partial<BroadcastCampaignPayload>) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}`, {
+        method: 'PATCH',
+        body,
+      }),
+    campaignDetail: (campaignId: number) =>
+      apiRequest<BroadcastCampaignDetail>(`/customer-notifications/campaigns/${campaignId}`),
+    previewCampaign: (campaignId: number) =>
+      apiRequest<BroadcastCampaignPreview>(
+        `/customer-notifications/campaigns/${campaignId}/preview`,
+        { method: 'POST' },
+      ),
+    testCampaign: (campaignId: number) =>
+      apiRequest<BroadcastCampaignTestResponse>(
+        `/customer-notifications/campaigns/${campaignId}/test`,
+        { method: 'POST', body: {} },
+      ),
+    startCampaign: (campaignId: number) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}/start`, {
+        method: 'POST',
+      }),
+    scheduleCampaign: (campaignId: number, scheduledAt?: string | null) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}/schedule`, {
+        method: 'POST',
+        body: { scheduled_at: scheduledAt ?? null },
+      }),
+    pauseCampaign: (campaignId: number) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}/pause`, {
+        method: 'POST',
+      }),
+    cancelCampaign: (campaignId: number) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}/cancel`, {
+        method: 'POST',
+      }),
+    processCampaignBatch: (campaignId: number, limit?: number) =>
+      apiRequest<BroadcastCampaignProcessBatchResponse>(
+        `/customer-notifications/campaigns/${campaignId}/process-batch`,
+        { method: 'POST', body: { limit } },
+      ),
+    deliverySummary: (campaignId: number) =>
+      apiRequest<BroadcastDeliverySummary>(
+        `/customer-notifications/campaigns/${campaignId}/delivery-summary`,
+      ),
+    deliveries: (campaignId: number, query: QueryParams = {}) =>
+      apiRequest<PageList<BroadcastDelivery>>(
+        `/customer-notifications/campaigns/${campaignId}/deliveries`,
         { query },
       ),
   },
