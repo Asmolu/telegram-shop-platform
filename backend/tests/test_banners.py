@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.common.deps import get_current_user
 from app.core.errors import AppError
-from app.db.models import Banner, BannerTargetType, User, UserRole
+from app.db.models import Banner, BannerDisplayType, BannerTargetType, User, UserRole
 from app.main import create_app
 from app.modules.banners.router import get_banners_service
 from app.modules.banners.schemas import BannerCreate, BannerUpdate
@@ -60,6 +61,14 @@ class FakeBannersRepository:
         self.banners[banner.id] = banner
 
 
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
 @pytest.mark.asyncio
 async def test_create_and_update_banner() -> None:
     service, repository, session = _banners_service()
@@ -73,6 +82,92 @@ async def test_create_and_update_banner() -> None:
     assert updated.is_active is True
     assert updated.position == 2
     assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_promo_banner_does_not_require_target_or_external_url() -> None:
+    service, repository, _ = _banners_service()
+
+    created = await service.create_banner(
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "target_type": "promo",
+                "target_id": None,
+                "external_url": None,
+            }
+        )
+    )
+
+    assert created.target_type == BannerTargetType.PROMO
+    assert created.target_id is None
+    assert created.external_url is None
+    assert repository.banners[created.id].target_type == BannerTargetType.PROMO
+
+
+def test_external_url_banner_requires_external_url() -> None:
+    with pytest.raises(ValidationError, match="external_url"):
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "target_type": "external_url",
+                "target_id": None,
+                "external_url": None,
+            }
+        )
+
+
+def test_product_banner_requires_target_id() -> None:
+    with pytest.raises(ValidationError, match="target_id"):
+        BannerCreate(**{**_banner_payload(), "target_type": "product", "target_id": None})
+
+
+@pytest.mark.asyncio
+async def test_banner_popup_metadata_persists() -> None:
+    service, repository, _ = _banners_service()
+
+    created = await service.create_banner(
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "display_type": "aggressive_popup",
+            }
+        )
+    )
+
+    assert created.display_type == BannerDisplayType.AGGRESSIVE_POPUP
+    assert repository.banners[created.id].display_type == BannerDisplayType.AGGRESSIVE_POPUP
+
+
+@pytest.mark.asyncio
+async def test_banner_click_tracks_analytics_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, repository, _ = _banners_service(analytics_tracker=tracker)
+    repository.add(
+        _banner(
+            is_active=True,
+            display_type=BannerDisplayType.VERTICAL,
+        )
+    )
+
+    result = await service.track_banner_click(banner_id=1, user_id=42)
+
+    assert result.tracked is True
+    assert tracker.events == [
+        (
+            "banner.clicked",
+            {
+                "user_id": 42,
+                "banner_id": 1,
+                "metadata": {
+                    "banner_id": 1,
+                    "target_type": "product",
+                    "target_id": 1,
+                    "display_type": "vertical",
+                },
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -155,9 +250,12 @@ def test_public_active_banner_list_is_anonymous() -> None:
     assert response.json()["items"][0]["is_active"] is True
 
 
-def _banners_service() -> tuple[BannersService, FakeBannersRepository, DummySession]:
+def _banners_service(
+    *,
+    analytics_tracker: FakeAnalyticsTracker | None = None,
+) -> tuple[BannersService, FakeBannersRepository, DummySession]:
     session = DummySession()
-    service = BannersService(session)
+    service = BannersService(session, analytics_tracker=analytics_tracker)
     repository = FakeBannersRepository()
     service.repository = repository
     return service, repository, session
@@ -169,6 +267,7 @@ def _banner(
     is_active: bool = True,
     target_type: BannerTargetType | None = BannerTargetType.PRODUCT,
     target_id: int | None = 1,
+    display_type: BannerDisplayType = BannerDisplayType.HORIZONTAL,
 ) -> Banner:
     return Banner(
         title=title,
@@ -181,6 +280,7 @@ def _banner(
         target_type=target_type,
         target_id=target_id,
         external_url=None,
+        display_type=display_type,
         position=0,
         is_active=is_active,
         starts_at=None,
@@ -198,6 +298,7 @@ def _banner_payload() -> dict[str, object]:
         "target_type": "product",
         "target_id": 1,
         "external_url": None,
+        "display_type": "horizontal",
         "position": 0,
         "is_active": False,
         "starts_at": None,

@@ -2,7 +2,8 @@ import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
 import { formatPrice } from '../utils/format';
-import { getProductBadge, getProductImageUrl } from '../utils/images';
+import { getProductBadge } from '../utils/images';
+import { ProductImageCarousel } from './ProductImageCarousel';
 
 export function ProductCard({
   product,
@@ -16,7 +17,6 @@ export function ProductCard({
   onAddToCart?: (product: Product) => void | Promise<void>;
 }) {
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
-  const imageUrl = getProductImageUrl(product);
   const badge = getProductBadge(product);
   const sizes = product.variants
     .filter((variant) => variant.is_active && variant.available_quantity > 0)
@@ -41,13 +41,7 @@ export function ProductCard({
   return (
     <article className="product-card">
       <Link className="product-card__media" to={`/product/${product.id}`}>
-        {imageUrl ? (
-          <img src={imageUrl} alt={product.name} loading="lazy" />
-        ) : (
-          <div className="image-fallback">
-            <span>{product.name.slice(0, 1).toUpperCase()}</span>
-          </div>
-        )}
+        <ProductImageCarousel product={product} variant="card" />
         {badge ? <span className={`product-badge product-badge--${badge.toLowerCase()}`}>{badge}</span> : null}
       </Link>
       <button
@@ -77,14 +71,16 @@ export function ProductCard({
         ) : null}
       </Link>
       {onAddToCart ? (
-        <button
-          className="add-cart-button"
-          type="button"
-          disabled={busyAction !== null || !product.is_available}
-          onClick={() => void runAction('cart', onAddToCart)}
-        >
-          {busyAction === 'cart' ? '…' : '+'}
-        </button>
+        <div className="product-card__actions">
+          <button
+            className="add-cart-button"
+            type="button"
+            disabled={busyAction !== null || !product.is_available}
+            onClick={() => void runAction('cart', onAddToCart)}
+          >
+            {busyAction === 'cart' ? '…' : 'В корзину'}
+          </button>
+        </div>
       ) : null}
     </article>
   );

@@ -1,11 +1,13 @@
 import { API_BASE_URL } from '../../shared/api';
 import { clearStoredToken, getTokenStorageScope } from '../../shared/auth/tokenStorage';
+import { useI18n } from '../../shared/i18n';
 
 interface PageProps {
   onAuthExpired: () => void;
 }
 
 export function SettingsPage({ onAuthExpired }: PageProps) {
+  const { t } = useI18n();
   const tokenScope = getTokenStorageScope();
 
   function clearToken() {
@@ -16,35 +18,35 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
   return (
     <div className="page-stack">
       <section className="panel">
-        <h2>API</h2>
+        <h2>{t('settings.api')}</h2>
         <dl className="settings-list">
           <div>
-            <dt>Base URL</dt>
+            <dt>{t('settings.baseUrl')}</dt>
             <dd>
               <code>{API_BASE_URL}</code>
             </dd>
           </div>
           <div>
-            <dt>Contract</dt>
-            <dd>FastAPI OpenAPI under the configured API prefix.</dd>
+            <dt>{t('settings.contract')}</dt>
+            <dd>{t('settings.contractDescription')}</dd>
           </div>
         </dl>
       </section>
 
       <section className="panel">
-        <h2>Authentication</h2>
+        <h2>{t('settings.authentication')}</h2>
         <dl className="settings-list">
           <div>
-            <dt>Mode</dt>
-            <dd>Email/password seller auth with Telegram Bot 2 verification</dd>
+            <dt>{t('settings.mode')}</dt>
+            <dd>{t('settings.authMode')}</dd>
           </div>
           <div>
-            <dt>Token storage</dt>
-            <dd>{tokenScope === 'local' ? 'This browser' : 'This tab'}</dd>
+            <dt>{t('settings.tokenStorage')}</dt>
+            <dd>{tokenScope === 'local' ? t('auth.thisBrowser') : t('auth.thisTab')}</dd>
           </div>
         </dl>
         <button className="button button-secondary" type="button" onClick={clearToken}>
-          Clear token and logout
+          {t('settings.clearToken')}
         </button>
       </section>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 
 export interface ImageCropSpec {
   id: string;
@@ -65,6 +66,7 @@ interface ImageCropEditorProps {
 }
 
 export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEditorProps) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [loadedImage, setLoadedImage] = useState<LoadedImage | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -87,11 +89,11 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
       setOffsetY(0);
       setError(null);
     };
-    image.onerror = () => setError('Could not read selected image.');
+    image.onerror = () => setError(t('crop.readFailed'));
     image.src = objectUrl;
 
     return () => URL.revokeObjectURL(objectUrl);
-  }, [file]);
+  }, [file, t]);
 
   const cropRect = useMemo(() => {
     if (!loadedImage) {
@@ -114,9 +116,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
 
   async function handleApply() {
     if (!loadedImage || !cropRect || isTooSmall) {
-      setError(
-        `Минимальный размер изображения: ${spec.minWidth}x${spec.minHeight}`,
-      );
+      setError(t('crop.minSize', { width: spec.minWidth, height: spec.minHeight }));
       return;
     }
 
@@ -132,7 +132,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
       });
       onApply(croppedFile);
     } catch {
-      setError('Could not crop image.');
+      setError(t('crop.failed'));
     } finally {
       setProcessing(false);
     }
@@ -143,14 +143,19 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
       <div className="crop-modal__surface">
         <div className="section-heading">
           <div>
-            <h2 id="crop-editor-title">{spec.title}</h2>
+            <h2 id="crop-editor-title">{t(`crop.${spec.id}.title`)}</h2>
             <p className="image-hints">
-              Рекомендуемый размер: {spec.outputWidth}x{spec.outputHeight}. Минимальный размер:{' '}
-              {spec.minWidth}x{spec.minHeight}. Соотношение: {spec.aspectLabel}.
+              {t('crop.hint', {
+                width: spec.outputWidth,
+                height: spec.outputHeight,
+                minWidth: spec.minWidth,
+                minHeight: spec.minHeight,
+                aspect: spec.aspectLabel,
+              })}
             </p>
           </div>
           <button className="text-button" type="button" onClick={onCancel}>
-            Cancel
+            {t('crop.cancel')}
           </button>
         </div>
 
@@ -158,20 +163,20 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
           {loadedImage ? (
             <canvas className="crop-preview" ref={canvasRef} />
           ) : (
-            <div className="crop-preview crop-preview-loading">Loading image...</div>
+            <div className="crop-preview crop-preview-loading">{t('crop.loading')}</div>
           )}
         </div>
 
         {loadedImage ? (
           <p className={isTooSmall ? 'form-error' : 'image-hints'}>
-            Source image: {loadedImage.width}x{loadedImage.height}
+            {t('crop.sourceImage', { width: loadedImage.width, height: loadedImage.height })}
           </p>
         ) : null}
         {error ? <div className="form-error">{error}</div> : null}
 
         <div className="crop-controls">
           <label className="field">
-            <span>Zoom</span>
+            <span>{t('crop.zoom')}</span>
             <input
               max="4"
               min="1"
@@ -182,7 +187,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
             />
           </label>
           <label className="field">
-            <span>Horizontal crop</span>
+            <span>{t('crop.horizontal')}</span>
             <input
               max="100"
               min="-100"
@@ -193,7 +198,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
             />
           </label>
           <label className="field">
-            <span>Vertical crop</span>
+            <span>{t('crop.vertical')}</span>
             <input
               max="100"
               min="-100"
@@ -207,7 +212,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
 
         <div className="form-actions">
           <button className="button button-secondary" type="button" onClick={onCancel}>
-            Cancel
+            {t('crop.cancel')}
           </button>
           <button
             className="button button-primary"
@@ -215,7 +220,7 @@ export function ImageCropEditor({ file, spec, onApply, onCancel }: ImageCropEdit
             type="button"
             onClick={() => void handleApply()}
           >
-            {processing ? 'Applying...' : 'Apply crop'}
+            {processing ? t('crop.applying') : t('crop.apply')}
           </button>
         </div>
       </div>

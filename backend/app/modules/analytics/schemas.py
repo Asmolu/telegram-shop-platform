@@ -35,11 +35,27 @@ class TopProductSummary(BaseModel):
     view_count: int
 
 
+class TopPromoCodeSummary(BaseModel):
+    promo_code_id: int
+    promo_code: str | None = None
+    used_count: int
+
+
+class TopBannerSummary(BaseModel):
+    banner_id: int
+    banner_title: str | None = None
+    click_count: int
+
+
 class AnalyticsSummary(BaseModel):
     total_orders: int
     total_revenue: Decimal
     product_views_count: int
     cart_item_added_count: int
     checkout_started_count: int
+    order_created_count: int
     promo_used_count: int
+    banner_clicked_count: int
     top_products: list[TopProductSummary]
+    top_promo_codes: list[TopPromoCodeSummary]
+    top_banners: list[TopBannerSummary]

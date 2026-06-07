@@ -17,6 +17,7 @@ from app.db.models import (
     OrderItem,
     OrderStatus,
     Product,
+    ProductImage,
     ProductStatus,
     ProductVariant,
     PromoCode,
@@ -88,9 +89,11 @@ class FakePromoCodesService:
         *,
         error: AppError | None = None,
         discount_amount: Decimal = Decimal("10.00"),
+        discount_type: DiscountType = DiscountType.FIXED,
     ) -> None:
         self.error = error
         self.discount_amount = discount_amount
+        self.discount_type = discount_type
         self.usages: list[CouponUsage] = []
 
     async def validate_for_checkout(
@@ -110,7 +113,7 @@ class FakePromoCodesService:
         promo_code = PromoCode(
             id=7,
             code=code,
-            discount_type=DiscountType.FIXED,
+            discount_type=self.discount_type,
             discount_value=self.discount_amount,
             is_active=True,
             starts_at=None,
@@ -315,6 +318,44 @@ async def test_checkout_with_valid_promo_code_creates_order_and_coupon_usage() -
     assert session.committed is True
     assert repository.carts[1].items == []
     assert [event[0] for event in events.events] == [ORDER_CREATED, PROMO_USED]
+    assert order.promo_code == "SAVE10"
+    assert order.promo_applied is True
+    assert order.discount == Decimal("20.00")
+    assert order.total == Decimal("99.80")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("discount_type", "discount_amount", "expected_total"),
+    [
+        (DiscountType.PERCENT, Decimal("11.98"), Decimal("107.82")),
+        (DiscountType.FIXED, Decimal("25.00"), Decimal("94.80")),
+    ],
+)
+async def test_checkout_with_valid_promo_discount_types_applies_discount(
+    discount_type: DiscountType,
+    discount_amount: Decimal,
+    expected_total: Decimal,
+) -> None:
+    service, _, _, _ = _orders_service(
+        promo_codes_service=FakePromoCodesService(
+            discount_type=discount_type,
+            discount_amount=discount_amount,
+        ),
+    )
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate(
+            **_checkout_payload_json(),
+            promo_code="save10",
+        ),
+    )
+
+    assert order.subtotal_amount == Decimal("119.80")
+    assert order.discount_amount == discount_amount
+    assert order.total_amount == expected_total
+    assert order.promo_code_code == "SAVE10"
 
 
 @pytest.mark.asyncio
@@ -494,8 +535,36 @@ async def test_order_item_snapshot_is_immutable() -> None:
 
     assert order.items[0].product_name == "Hoodie"
     assert order.items[0].variant_size == "M"
+    assert order.items[0].variant_color == "Black"
     assert order.items[0].variant_sku == "HOODIE-M-BLK"
     assert order.items[0].unit_price == Decimal("59.90")
+
+
+@pytest.mark.asyncio
+async def test_order_response_contains_rich_item_and_total_fields() -> None:
+    promo_codes_service = FakePromoCodesService(discount_amount=Decimal("20.00"))
+    service, _, _, _ = _orders_service(promo_codes_service=promo_codes_service)
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate(
+            **_checkout_payload_json(),
+            promo_code="save10",
+        ),
+    )
+    body = order.model_dump()
+    item = body["items"][0]
+
+    assert body["subtotal"] == Decimal("119.80")
+    assert body["discount"] == Decimal("20.00")
+    assert body["total"] == Decimal("99.80")
+    assert body["promo_code"] == "SAVE10"
+    assert body["promo_applied"] is True
+    assert item["product_title"] == "Hoodie"
+    assert item["variant_color"] == "Black"
+    assert item["item_total"] == Decimal("119.80")
+    assert item["product_thumbnail_path"] == "products/hoodie.webp"
+    assert item["product_thumbnail_url"] == "/uploads/products/hoodie.webp"
 
 
 @pytest.mark.asyncio
@@ -729,6 +798,20 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         base_price=Decimal("59.90"),
         status=status,
         category_id=None,
+        images=[
+            ProductImage(
+                id=1,
+                product_id=1,
+                file_path="products/hoodie.webp",
+                original_filename="hoodie.webp",
+                mime_type="image/webp",
+                size_bytes=12,
+                alt_text="Hoodie",
+                position=0,
+                is_primary=True,
+                created_at=_now(),
+            )
+        ],
         created_at=_now(),
         updated_at=_now(),
     )
@@ -783,10 +866,13 @@ def _order_response(status_value: str = "NEW") -> dict[str, object]:
                 "product_variant_id": 1,
                 "product_name": "Hoodie",
                 "variant_size": "M",
+                "variant_color": "Black",
                 "variant_sku": "HOODIE-M-BLK",
                 "unit_price": "59.90",
                 "quantity": 1,
                 "subtotal": "59.90",
+                "product_thumbnail_path": "products/hoodie.webp",
+                "product_thumbnail_url": "/uploads/products/hoodie.webp",
                 "created_at": now,
             }
         ],

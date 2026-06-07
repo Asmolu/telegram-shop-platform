@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api } from '../../shared/api';
 import type { DiscountType, PromoCode, PromoCodePayload } from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, formatMoney, fromDateTimeInput, toDateTimeInput } from '../../shared/utils/format';
@@ -32,6 +33,7 @@ const initialForm: PromoFormState = {
 };
 
 export function PromoCodesPage({ onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [editingPromo, setEditingPromo] = useState<PromoCode | null>(null);
   const [form, setForm] = useState<PromoFormState>(initialForm);
@@ -94,10 +96,10 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
     try {
       if (editingPromo) {
         await api.promoCodes.update(editingPromo.id, buildPayload());
-        setNotice('Promo code updated.');
+        setNotice(t('promo.updated'));
       } else {
         await api.promoCodes.create(buildPayload());
-        setNotice('Promo code created.');
+        setNotice(t('promo.created'));
       }
       resetForm();
       loadPromoCodes();
@@ -112,14 +114,14 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
     setNotice(null);
     try {
       await api.promoCodes.deactivate(promoCode.id);
-      setNotice(`${promoCode.code} deactivated.`);
+      setNotice(t('promo.deactivated', { code: promoCode.code }));
       loadPromoCodes();
     } catch (requestError) {
       setError(requestError);
     }
   }
 
-  if (loading) return <LoadingState title="Loading promo codes" />;
+  if (loading) return <LoadingState title={t('promo.loading')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadPromoCodes} onAuthExpired={onAuthExpired} />;
   }
@@ -132,22 +134,22 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
           <table>
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Discount</th>
-                <th>Active</th>
-                <th>Starts</th>
-                <th>Ends</th>
-                <th>Usage limit</th>
-                <th>Used count</th>
-                <th>Per user</th>
-                <th>Actions</th>
+                <th>{t('common.code')}</th>
+                <th>{t('promo.discount')}</th>
+                <th>{t('common.active')}</th>
+                <th>{t('promo.starts')}</th>
+                <th>{t('promo.ends')}</th>
+                <th>{t('promo.usageLimit')}</th>
+                <th>{t('promo.usedCount')}</th>
+                <th>{t('promo.perUser')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {promoCodes.length === 0 ? (
                 <tr>
                   <td colSpan={9}>
-                    <div className="empty-table">No promo codes have been created.</div>
+                    <div className="empty-table">{t('promo.empty')}</div>
                   </td>
                 </tr>
               ) : (
@@ -155,23 +157,23 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
                   <tr key={promoCode.id}>
                     <td>
                       <strong>{promoCode.code}</strong>
-                      <small>ID {promoCode.id}</small>
+                      <small>{t('common.id')} {promoCode.id}</small>
                     </td>
                     <td>
-                      {promoCode.discount_type} {formatMoney(promoCode.discount_value)}
+                      {labelForEnum(promoCode.discount_type, t)} {formatMoney(promoCode.discount_value, language)}
                     </td>
                     <td>
                       <StatusBadge status={promoCode.is_active ? 'ACTIVE' : 'INACTIVE'} />
                     </td>
-                    <td>{formatDate(promoCode.starts_at)}</td>
-                    <td>{formatDate(promoCode.ends_at)}</td>
-                    <td>{promoCode.usage_limit ?? 'No limit'}</td>
-                    <td>Not exposed</td>
-                    <td>{promoCode.per_user_limit ?? 'No limit'}</td>
+                    <td>{formatDate(promoCode.starts_at, language)}</td>
+                    <td>{formatDate(promoCode.ends_at, language)}</td>
+                    <td>{promoCode.usage_limit ?? t('common.noLimit')}</td>
+                    <td>{t('common.notExposed')}</td>
+                    <td>{promoCode.per_user_limit ?? t('common.noLimit')}</td>
                     <td>
                       <div className="table-actions">
                         <button className="text-button" type="button" onClick={() => selectPromo(promoCode)}>
-                          Edit
+                          {t('common.edit')}
                         </button>
                         <button
                           className="text-button danger-text"
@@ -179,7 +181,7 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
                           type="button"
                           onClick={() => deactivatePromo(promoCode)}
                         >
-                          Deactivate
+                          {t('common.deactivate')}
                         </button>
                       </div>
                     </td>
@@ -193,23 +195,23 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
 
       <aside className="editor-panel">
         <div className="section-heading">
-          <h2>{editingPromo ? 'Edit promo code' : 'Create promo code'}</h2>
+          <h2>{editingPromo ? t('promo.edit') : t('promo.create')}</h2>
           {editingPromo ? (
             <button className="text-button" type="button" onClick={resetForm}>
-              New
+              {t('common.new')}
             </button>
           ) : null}
         </div>
         <form className="form-stack" onSubmit={handleSubmit}>
           <label className="field">
-            <span>Code</span>
+            <span>{t('common.code')}</span>
             <input
               value={form.code}
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
             />
           </label>
           <label className="field">
-            <span>Discount type</span>
+            <span>{t('promo.discountType')}</span>
             <select
               value={form.discountType}
               onChange={(event) =>
@@ -219,12 +221,12 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
                 }))
               }
             >
-              <option value="PERCENT">Percent</option>
-              <option value="FIXED">Fixed</option>
+              <option value="PERCENT">{labelForEnum('PERCENT', t)}</option>
+              <option value="FIXED">{labelForEnum('FIXED', t)}</option>
             </select>
           </label>
           <label className="field">
-            <span>Discount value</span>
+            <span>{t('promo.discountValue')}</span>
             <input
               min="0"
               step="0.01"
@@ -237,7 +239,7 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
           </label>
           <div className="date-grid">
             <label className="field">
-              <span>Starts at</span>
+              <span>{t('banners.startsAt')}</span>
               <input
                 type="datetime-local"
                 value={form.startsAt}
@@ -247,7 +249,7 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>Ends at</span>
+              <span>{t('banners.endsAt')}</span>
               <input
                 type="datetime-local"
                 value={form.endsAt}
@@ -258,7 +260,7 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
             </label>
           </div>
           <label className="field">
-            <span>Usage limit</span>
+            <span>{t('promo.usageLimit')}</span>
             <input
               min="1"
               type="number"
@@ -269,7 +271,7 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
             />
           </label>
           <label className="field">
-            <span>Per-user limit</span>
+            <span>{t('promo.perUser')}</span>
             <input
               min="1"
               type="number"
@@ -287,10 +289,10 @@ export function PromoCodesPage({ onAuthExpired }: PageProps) {
                 setForm((current) => ({ ...current, isActive: event.target.checked }))
               }
             />
-            Active
+            {t('common.active')}
           </label>
           <button className="button button-primary" disabled={saving} type="submit">
-            {saving ? 'Saving...' : editingPromo ? 'Save promo code' : 'Create promo code'}
+            {saving ? t('common.saving') : editingPromo ? t('promo.save') : t('promo.create')}
           </button>
         </form>
       </aside>

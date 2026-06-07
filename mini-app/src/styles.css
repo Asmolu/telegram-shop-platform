@@ -473,7 +473,7 @@ label {
 .product-card {
   position: relative;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
   min-width: 0;
   overflow: hidden;
   border-radius: 18px;
@@ -491,8 +491,7 @@ label {
 }
 
 .product-card__media img,
-.product-gallery > img,
-.gallery-strip img,
+.product-image-carousel img,
 .cart-item__image img,
 .category-card__media img {
   width: 100%;
@@ -508,7 +507,7 @@ label {
 .image-fallback,
 .category-card__media,
 .cart-item__image,
-.product-gallery > .image-fallback {
+.product-image-carousel .image-fallback {
   display: grid;
   place-items: center;
   background:
@@ -555,7 +554,7 @@ label {
 .product-card__body {
   display: grid;
   gap: 3px;
-  padding: 8px 10px 44px;
+  padding: 8px 10px 6px;
 }
 
 .product-card__price {
@@ -602,19 +601,23 @@ label {
   font-weight: 800;
 }
 
+.product-card__actions {
+  padding: 0 10px 10px;
+}
+
 .add-cart-button {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 38px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 999px;
+  padding: 0 10px;
   background: var(--primary);
   color: var(--primary-contrast);
-  font-size: 24px;
+  font-size: 12px;
+  font-weight: 900;
   line-height: 1;
   box-shadow: 0 10px 20px rgba(124, 58, 237, 0.22);
 }
@@ -832,6 +835,10 @@ label {
   gap: 12px;
 }
 
+.filter-form {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
 .filter-section,
 .detail-card,
 .summary-card,
@@ -896,7 +903,7 @@ label {
 
 .segmented-control button {
   flex: 1 1 calc(50% - 8px);
-  min-width: max-content;
+  min-width: min(100%, 132px);
 }
 
 .sticky-submit-button {
@@ -912,33 +919,92 @@ label {
   box-shadow: 0 14px 30px rgba(124, 58, 237, 0.28);
 }
 
+.product-image-carousel {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--media-bg);
+}
+
+.product-image-carousel--detail {
+  border-radius: 22px;
+}
+
+.product-image-carousel__track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.product-image-carousel__track::-webkit-scrollbar {
+  display: none;
+}
+
+.product-image-carousel__slide {
+  display: grid;
+  flex: 0 0 100%;
+  min-width: 100%;
+  height: 100%;
+  place-items: stretch;
+  scroll-snap-align: center;
+}
+
+.product-image-carousel__slide img,
+.product-image-carousel__slide .image-fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.product-image-carousel__dots {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  display: flex;
+  max-width: calc(100% - 76px);
+  gap: 5px;
+  transform: translateX(-50%);
+}
+
+.product-image-carousel__dots button,
+.product-image-carousel__dots span {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.1);
+}
+
+.product-image-carousel__dots .is-active {
+  width: 16px;
+  background: var(--primary);
+}
+
+.product-image-carousel__counter {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(17, 24, 39, 0.66);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .product-gallery {
   display: grid;
   gap: 8px;
-}
-
-.product-gallery > img,
-.product-gallery > .image-fallback {
-  aspect-ratio: 4 / 5;
-  width: 100%;
-  height: auto;
-  border-radius: 22px;
-  overflow: hidden;
-  background-color: var(--media-bg);
-}
-
-.gallery-strip {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 66px;
-  gap: 8px;
-  overflow-x: auto;
-}
-
-.gallery-strip img {
-  width: 66px;
-  height: 83px;
-  border-radius: 14px;
 }
 
 .price-block {
@@ -1089,7 +1155,7 @@ label {
   max-width: 100%;
   gap: 12px;
   border-top: 1px solid var(--border);
-  padding: 10px calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
+  padding: 10px calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left));
   transform: translateX(-50%);
   background: var(--surface);
   background: color-mix(in srgb, var(--surface) 96%, transparent);
@@ -1105,6 +1171,8 @@ label {
 .detail-cta .primary-button {
   flex: 1 1 170px;
   min-width: 0;
+  min-height: 50px;
+  border-radius: 999px;
 }
 
 .cart-layout,
@@ -1195,8 +1263,50 @@ label {
 .promo-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   gap: 8px;
   min-width: 0;
+}
+
+.promo-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.promo-status span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.promo-status button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: var(--surface);
+  color: inherit;
+  font-weight: 900;
+}
+
+.promo-status--success {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.summary-card + .promo-form,
+.promo-form + .promo-status {
+  margin-top: 10px;
+}
+
+.promo-status + .checkout-form {
+  margin-top: 12px;
 }
 
 .summary-card {
@@ -1413,7 +1523,7 @@ label {
 }
 
 .accordion-item {
-  display: block;
+  display: grid;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -1429,7 +1539,7 @@ label {
   min-height: 52px;
   border: 0;
   border-radius: 0;
-  padding: 0 14px;
+  padding: 12px 14px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -1453,7 +1563,18 @@ label {
   border-top: 1px solid var(--border);
   padding: 12px 14px 14px;
   background: transparent;
+  line-height: 1.45;
   animation: accordion-reveal 150ms ease;
+}
+
+.page--faq {
+  padding-bottom: calc(116px + env(safe-area-inset-bottom));
+}
+
+.faq-contact-button {
+  min-height: 50px;
+  margin-top: 12px;
+  border-radius: 999px;
 }
 
 @keyframes accordion-reveal {

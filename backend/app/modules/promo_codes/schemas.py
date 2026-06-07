@@ -1,7 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.common.pagination import PageMeta
 from app.db.models import DiscountType
@@ -73,7 +81,13 @@ class PromoCodeList(BaseModel):
 
 
 class PromoCodeValidateRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=64)
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: str = Field(
+        min_length=1,
+        max_length=64,
+        validation_alias=AliasChoices("code", "promo_code"),
+    )
 
     @field_validator("code")
     @classmethod
@@ -88,3 +102,26 @@ class PromoCodeValidationRead(BaseModel):
     subtotal_amount: Decimal
     discount_amount: Decimal
     total_amount: Decimal
+    is_valid: bool = True
+    is_applied: bool = True
+    message: str = "Promo code applied"
+
+    @computed_field
+    @property
+    def promo_code(self) -> str:
+        return self.code
+
+    @computed_field
+    @property
+    def subtotal(self) -> Decimal:
+        return self.subtotal_amount
+
+    @computed_field
+    @property
+    def discount(self) -> Decimal:
+        return self.discount_amount
+
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        return self.total_amount

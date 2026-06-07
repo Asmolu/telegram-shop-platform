@@ -19,8 +19,30 @@ export function normalizeAssetUrl(url?: string | null) {
 }
 
 export function getProductImageUrl(product: Product) {
-  const primary = product.images.find((image) => image.is_primary) ?? product.images[0];
-  return normalizeAssetUrl(primary?.url ?? primary?.file_path);
+  return getProductImageItems(product)[0]?.url ?? null;
+}
+
+export function getProductImageItems(product: Product) {
+  return [...product.images]
+    .sort((left, right) => {
+      if (left.is_primary !== right.is_primary) {
+        return left.is_primary ? -1 : 1;
+      }
+
+      return left.position - right.position || left.id - right.id;
+    })
+    .map((image) => {
+      const url = normalizeAssetUrl(image.url || image.file_path);
+
+      return url
+        ? {
+            id: String(image.id),
+            url,
+            alt: image.alt_text ?? product.name,
+          }
+        : null;
+    })
+    .filter((image): image is { id: string; url: string; alt: string } => image !== null);
 }
 
 export function getProductBadge(product: Product) {

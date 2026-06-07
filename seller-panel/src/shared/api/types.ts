@@ -4,6 +4,7 @@ export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANC
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
+export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
 export type BannerImageKind = 'native_banner' | 'aggressive_banner';
 
 export type ApiDecimal = string | number;
@@ -67,12 +68,23 @@ export interface Category {
   updated_at: string;
 }
 
+export interface CategoryPayload {
+  name: string;
+  slug: string;
+  description?: string | null;
+}
+
 export interface Tag {
   id: number;
   name: string;
   slug: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TagPayload {
+  name: string;
+  slug: string;
 }
 
 export interface ProductImage {
@@ -176,11 +188,16 @@ export interface OrderItem {
   product_id: number;
   product_variant_id: number;
   product_name: string;
+  product_title?: string;
   variant_size: string;
+  variant_color?: string | null;
   variant_sku: string;
   unit_price: ApiDecimal;
   quantity: number;
   subtotal: ApiDecimal;
+  item_total?: ApiDecimal;
+  product_thumbnail_path?: string | null;
+  product_thumbnail_url?: string | null;
   created_at: string;
 }
 
@@ -212,6 +229,7 @@ export interface Banner {
   target_type: BannerTargetType | null;
   target_id: number | null;
   external_url: string | null;
+  display_type: BannerDisplayType;
   position: number;
   is_active: boolean;
   starts_at: string | null;
@@ -227,6 +245,7 @@ export interface BannerPayload {
   target_type: BannerTargetType;
   target_id?: number | null;
   external_url?: string | null;
+  display_type?: BannerDisplayType;
   position: number;
   is_active: boolean;
   starts_at?: string | null;
@@ -278,11 +297,23 @@ export interface AnalyticsSummary {
   product_views_count: number;
   cart_item_added_count: number;
   checkout_started_count: number;
+  order_created_count?: number;
   promo_used_count: number;
+  banner_clicked_count?: number;
   top_products: Array<{
     product_id: number;
     product_name: string | null;
     view_count: number;
+  }>;
+  top_promo_codes?: Array<{
+    promo_code_id: number;
+    promo_code: string | null;
+    used_count: number;
+  }>;
+  top_banners?: Array<{
+    banner_id: number;
+    banner_title: string | null;
+    click_count: number;
   }>;
 }
 

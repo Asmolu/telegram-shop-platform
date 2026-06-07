@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ApiError, api } from '../../shared/api';
 import type { Notification, SellerBotStatus } from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { formatDate } from '../../shared/utils/format';
 
@@ -9,9 +10,10 @@ interface PageProps {
 }
 
 export function SellerBotPage({ onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [status, setStatus] = useState<SellerBotStatus | null>(null);
   const [messages, setMessages] = useState<Notification[]>([]);
-  const [testMessage, setTestMessage] = useState('Seller bot test message');
+  const [testMessage, setTestMessage] = useState(() => t('sellerBot.defaultTest'));
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingAction, setSavingAction] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
   ) {
     const cleanMessage = message.trim();
     if (!cleanMessage) {
-      setActionError('Введите сообщение перед отправкой.');
+      setActionError(t('sellerBot.enterMessage'));
       return;
     }
 
@@ -68,19 +70,22 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
     try {
       const response = await request(cleanMessage);
       setSuccess(
-        `Уведомление ${response.notification_id} сохранено со статусом ${response.status}.`,
+        t('sellerBot.saved', {
+          id: response.notification_id,
+          status: labelForEnum(response.status, t),
+        }),
       );
       const messageList = await api.sellerBot.messages({ limit: 20, offset: 0 });
       setMessages(messageList.items);
     } catch (requestError) {
       logBotError(requestError);
-      setActionError('Не удалось отправить сообщение. Проверьте настройки Telegram-бота.');
+      setActionError(t('sellerBot.sendFailed'));
     } finally {
       setSavingAction(null);
     }
   }
 
-  if (loading) return <LoadingState title="Loading seller bot" />;
+  if (loading) return <LoadingState title={t('sellerBot.loading')} />;
   if (loadError) {
     if (isAuthError(loadError)) {
       return <ErrorState error={loadError} onRetry={loadBotData} onAuthExpired={onAuthExpired} />;
@@ -102,38 +107,42 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
         <article className="panel">
           <div className="section-heading">
             <div>
-              <h2>Bot status</h2>
-              <p>Bot 2 is checked through the backend only.</p>
+              <h2>{t('sellerBot.status')}</h2>
+              <p>{t('sellerBot.statusHelp')}</p>
             </div>
             <span className={`status-badge ${status?.ok ? 'status-success' : 'status-danger'}`}>
-              {status?.ok ? 'READY' : 'CHECK'}
+              {status?.ok ? t('sellerBot.ready') : t('sellerBot.check')}
             </span>
           </div>
           <dl className="settings-list">
             <div>
-              <dt>Token</dt>
-              <dd>{status?.configured ? 'Configured' : 'Missing'}</dd>
+              <dt>{t('sellerBot.token')}</dt>
+              <dd>{status?.configured ? t('sellerBot.configured') : t('sellerBot.missing')}</dd>
             </div>
             <div>
-              <dt>Seller chat</dt>
-              <dd>{status?.seller_chat_configured ? 'Configured' : 'Missing'}</dd>
+              <dt>{t('sellerBot.sellerChat')}</dt>
+              <dd>
+                {status?.seller_chat_configured
+                  ? t('sellerBot.configured')
+                  : t('sellerBot.missing')}
+              </dd>
             </div>
             <div>
-              <dt>Bot username</dt>
+              <dt>{t('sellerBot.botUsername')}</dt>
               <dd>{String(status?.bot?.username ?? '-')}</dd>
             </div>
             <div>
-              <dt>Last check</dt>
-              <dd>{status?.error ?? 'Telegram getMe succeeded'}</dd>
+              <dt>{t('sellerBot.lastCheck')}</dt>
+              <dd>{status?.error ?? t('sellerBot.getMeOk')}</dd>
             </div>
           </dl>
         </article>
 
         <article className="panel">
-          <h2>Send to seller notification chat</h2>
+          <h2>{t('sellerBot.sendToChat')}</h2>
           <form className="form-stack" onSubmit={sendTest}>
             <label className="field">
-              <span>Test message</span>
+              <span>{t('sellerBot.testMessage')}</span>
               <textarea
                 value={testMessage}
                 onChange={(event) => setTestMessage(event.target.value)}
@@ -144,7 +153,7 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
               disabled={savingAction === 'test'}
               type="submit"
             >
-              {savingAction === 'test' ? 'Sending...' : 'Send test message'}
+              {savingAction === 'test' ? t('auth.sending') : t('sellerBot.sendTest')}
             </button>
           </form>
         </article>
@@ -153,15 +162,15 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <h2>Broadcast to seller notification chat</h2>
-            <p>This MVP targets the configured seller chat, not all Mini App users.</p>
+            <h2>{t('sellerBot.broadcastTitle')}</h2>
+            <p>{t('sellerBot.broadcastHelp')}</p>
           </div>
         </div>
         <form className="form-stack" onSubmit={sendBroadcast}>
           <label className="field">
-            <span>Message</span>
+            <span>{t('sellerBot.message')}</span>
             <textarea
-              placeholder="Write the seller-chat broadcast message"
+              placeholder={t('sellerBot.messagePlaceholder')}
               value={broadcastMessage}
               onChange={(event) => setBroadcastMessage(event.target.value)}
             />
@@ -171,33 +180,33 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
             disabled={savingAction === 'broadcast'}
             type="submit"
           >
-            {savingAction === 'broadcast' ? 'Sending...' : 'Send broadcast'}
+            {savingAction === 'broadcast' ? t('auth.sending') : t('sellerBot.sendBroadcast')}
           </button>
         </form>
       </section>
 
       <section className="table-panel">
         <div className="section-heading table-heading">
-          <h2>Recent bot messages</h2>
+          <h2>{t('sellerBot.recentMessages')}</h2>
           <button className="button button-secondary" type="button" onClick={loadBotData}>
-            Refresh
+            {t('common.refresh')}
           </button>
         </div>
         <table>
           <thead>
             <tr>
-              <th>Message</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Sent</th>
-              <th>Created</th>
+              <th>{t('sellerBot.message')}</th>
+              <th>{t('sellerBot.type')}</th>
+              <th>{t('common.status')}</th>
+              <th>{t('sellerBot.sent')}</th>
+              <th>{t('common.created')}</th>
             </tr>
           </thead>
           <tbody>
             {messages.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  <div className="empty-table">No Telegram bot messages yet.</div>
+                  <div className="empty-table">{t('sellerBot.noMessages')}</div>
                 </td>
               </tr>
             ) : (
@@ -211,11 +220,11 @@ export function SellerBotPage({ onAuthExpired }: PageProps) {
                   <td>{message.type}</td>
                   <td>
                     <span className={`status-badge ${statusClass(message.status)}`}>
-                      {message.status.toUpperCase()}
+                      {labelForEnum(message.status, t)}
                     </span>
                   </td>
-                  <td>{message.sent_at ? formatDate(message.sent_at) : '-'}</td>
-                  <td>{formatDate(message.created_at)}</td>
+                  <td>{message.sent_at ? formatDate(message.sent_at, language) : '-'}</td>
+                  <td>{formatDate(message.created_at, language)}</td>
                 </tr>
               ))
             )}
@@ -233,14 +242,16 @@ function statusClass(status: Notification['status']): string {
 }
 
 function SellerBotLoadError({ onRetry }: { onRetry: () => void }) {
+  const { t } = useI18n();
+
   return (
     <div className="state-panel state-panel-error" role="alert">
       <div>
-        <h3>Не удалось загрузить данные бота</h3>
-        <p>Проверьте настройки Telegram-бота</p>
+        <h3>{t('sellerBot.loadFailed')}</h3>
+        <p>{t('sellerBot.checkSettings')}</p>
       </div>
       <button className="button button-primary" type="button" onClick={onRetry}>
-        Повторить
+        {t('common.retry')}
       </button>
     </div>
   );

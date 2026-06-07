@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
 import type { Category, Product, ProductStatus, Tag } from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, formatMoney } from '../../shared/utils/format';
@@ -25,6 +26,7 @@ const emptyFilters: ProductFilters = {
 };
 
 export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -72,7 +74,7 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
     setNotice(null);
     try {
       await api.products.updateStatus(productId, status);
-      setNotice('Product status updated.');
+      setNotice(t('products.statusUpdated'));
       loadProducts();
     } catch (requestError) {
       setError(requestError);
@@ -83,14 +85,14 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
     setNotice(null);
     try {
       await api.products.archive(productId);
-      setNotice('Product archived.');
+      setNotice(t('products.archived'));
       loadProducts();
     } catch (requestError) {
       setError(requestError);
     }
   }
 
-  if (loading) return <LoadingState title="Loading products" />;
+  if (loading) return <LoadingState title={t('products.loading')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadProducts} onAuthExpired={onAuthExpired} />;
   }
@@ -100,17 +102,17 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
       <div className="page-toolbar">
         <form className="filters-row" onSubmit={applyFilters}>
           <label>
-            <span>Search</span>
+            <span>{t('common.search')}</span>
             <input
               value={draftFilters.search}
               onChange={(event) =>
                 setDraftFilters((current) => ({ ...current, search: event.target.value }))
               }
-              placeholder="Name or slug"
+              placeholder={t('products.searchPlaceholder')}
             />
           </label>
           <label>
-            <span>Status</span>
+            <span>{t('common.status')}</span>
             <select
               value={draftFilters.status}
               onChange={(event) =>
@@ -120,22 +122,22 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                 }))
               }
             >
-              <option value="">All statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="ACTIVE">Active</option>
-              <option value="OUT_OF_STOCK">Out of stock</option>
-              <option value="ARCHIVED">Archived</option>
+              <option value="">{t('common.allStatuses')}</option>
+              <option value="DRAFT">{labelForEnum('DRAFT', t)}</option>
+              <option value="ACTIVE">{labelForEnum('ACTIVE', t)}</option>
+              <option value="OUT_OF_STOCK">{labelForEnum('OUT_OF_STOCK', t)}</option>
+              <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
             </select>
           </label>
           <label>
-            <span>Category</span>
+            <span>{t('common.category')}</span>
             <select
               value={draftFilters.categoryId}
               onChange={(event) =>
                 setDraftFilters((current) => ({ ...current, categoryId: event.target.value }))
               }
             >
-              <option value="">All categories</option>
+              <option value="">{t('products.allCategories')}</option>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -144,14 +146,14 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
             </select>
           </label>
           <label>
-            <span>Tag</span>
+            <span>{t('common.tag')}</span>
             <select
               value={draftFilters.tagId}
               onChange={(event) =>
                 setDraftFilters((current) => ({ ...current, tagId: event.target.value }))
               }
             >
-              <option value="">All tags</option>
+              <option value="">{t('products.allTags')}</option>
               {tags.map((tag) => (
                 <option key={tag.id} value={tag.id}>
                   {tag.name}
@@ -160,11 +162,11 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
             </select>
           </label>
           <button className="button button-secondary" type="submit">
-            Apply
+            {t('common.apply')}
           </button>
         </form>
         <button className="button button-primary" type="button" onClick={() => onNavigate('/products/new')}>
-          Add Product
+          {t('products.addProduct')}
         </button>
       </div>
 
@@ -174,22 +176,22 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
         <table>
           <thead>
             <tr>
-              <th>Image</th>
-              <th>Product name</th>
-              <th>Category</th>
-              <th>Price</th>
-              <th>Variants / stock</th>
-              <th>Status</th>
-              <th>Tags</th>
-              <th>Updated</th>
-              <th>Actions</th>
+              <th>{t('common.image')}</th>
+              <th>{t('products.productName')}</th>
+              <th>{t('common.category')}</th>
+              <th>{t('products.price')}</th>
+              <th>{t('products.variantsStock')}</th>
+              <th>{t('common.status')}</th>
+              <th>{t('products.tags')}</th>
+              <th>{t('common.updated')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {products.length === 0 ? (
               <tr>
                 <td colSpan={9}>
-                  <div className="empty-table">No products match the current filters.</div>
+                  <div className="empty-table">{t('products.empty')}</div>
                 </td>
               </tr>
             ) : (
@@ -210,18 +212,18 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                           alt={image.alt_text ?? product.name}
                         />
                       ) : (
-                        <div className="table-image table-image-empty">No image</div>
+                        <div className="table-image table-image-empty">{t('products.noImage')}</div>
                       )}
                     </td>
                     <td>
                       <strong>{product.name}</strong>
                       <small>{product.slug}</small>
                     </td>
-                    <td>{product.category?.name ?? 'Unassigned'}</td>
-                    <td>{formatMoney(product.base_price)}</td>
+                    <td>{product.category?.name ?? t('products.unassigned')}</td>
+                    <td>{formatMoney(product.base_price, language)}</td>
                     <td>
                       <strong>{product.variants.length}</strong>
-                      <small>{totalStock} available</small>
+                      <small>{t('products.available', { count: totalStock })}</small>
                     </td>
                     <td>
                       <StatusBadge status={product.status} />
@@ -230,10 +232,10 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                       <div className="tag-list">
                         {product.tags.length > 0
                           ? product.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)
-                          : 'No tags'}
+                          : t('products.noTags')}
                       </div>
                     </td>
-                    <td>{formatDate(product.updated_at)}</td>
+                    <td>{formatDate(product.updated_at, language)}</td>
                     <td>
                       <div className="table-actions">
                         <button
@@ -241,26 +243,26 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                           type="button"
                           onClick={() => onNavigate(`/products/${product.id}/edit`)}
                         >
-                          Edit
+                          {t('common.edit')}
                         </button>
                         <select
-                          aria-label={`Change status for ${product.name}`}
+                          aria-label={t('products.changeStatus', { name: product.name })}
                           value={product.status}
                           onChange={(event) =>
                             updateStatus(product.id, event.target.value as ProductStatus)
                           }
                         >
-                          <option value="DRAFT">Draft</option>
-                          <option value="ACTIVE">Active</option>
-                          <option value="OUT_OF_STOCK">Out of stock</option>
-                          <option value="ARCHIVED">Archived</option>
+                          <option value="DRAFT">{labelForEnum('DRAFT', t)}</option>
+                          <option value="ACTIVE">{labelForEnum('ACTIVE', t)}</option>
+                          <option value="OUT_OF_STOCK">{labelForEnum('OUT_OF_STOCK', t)}</option>
+                          <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
                         </select>
                         <button
                           className="text-button danger-text"
                           type="button"
                           onClick={() => archiveProduct(product.id)}
                         >
-                          Archive
+                          {t('common.archive')}
                         </button>
                       </div>
                     </td>

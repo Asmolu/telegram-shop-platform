@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { ApiError, api } from '../../shared/api';
 import type { SellerRegistrationStartResponse } from '../../shared/api';
 import { setStoredToken, type TokenStorageScope } from '../../shared/auth/tokenStorage';
+import { languageToLocale, useI18n } from '../../shared/i18n';
 import { DevTokenLoginPage } from './DevTokenLoginPage';
 
 interface SellerAuthPageProps {
@@ -15,6 +16,7 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TELEGRAM_RE = /^@?[A-Za-z0-9_]{5,32}$/;
 
 export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps) {
+  const { language, t } = useI18n();
   const [activeTab, setActiveTab] = useState<AuthTab>('login');
   const [storageScope, setStorageScope] = useState<TokenStorageScope>('session');
   const [loginEmail, setLoginEmail] = useState('');
@@ -53,7 +55,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       setStoredToken(response.access_token, storageScope);
       onTokenSaved();
     } catch (requestError) {
-      setError(formatApiError(requestError, 'Could not sign in.'));
+      setError(formatApiError(requestError, t('auth.loginFailed')));
     } finally {
       setLoadingAction(null);
     }
@@ -78,11 +80,9 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       });
       setRegistration(response);
       setVerificationCode('');
-      setSuccess(
-        'Registration started. Open Bot 2 and send the start command. The code is sent after seller group approval.',
-      );
+      setSuccess(t('auth.registrationStarted'));
     } catch (requestError) {
-      setError(formatApiError(requestError, 'Could not start registration.'));
+      setError(formatApiError(requestError, t('auth.registrationFailed')));
     } finally {
       setLoadingAction(null);
     }
@@ -95,7 +95,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
     setSuccess(null);
 
     if (!/^\d{4,12}$/.test(verificationCode.trim())) {
-      setError('Enter the numeric verification code from Telegram.');
+      setError(t('auth.codeInvalid'));
       return;
     }
 
@@ -108,7 +108,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
       setStoredToken(response.access_token, storageScope);
       onTokenSaved();
     } catch (requestError) {
-      setError(formatApiError(requestError, 'Could not confirm registration.'));
+      setError(formatApiError(requestError, t('auth.confirmFailed')));
     } finally {
       setLoadingAction(null);
     }
@@ -127,19 +127,19 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
         ...registration,
         expires_at: registration.expires_at,
       });
-      setSuccess(`Code resent. It expires at ${formatDateTime(response.verification_expires_at)}.`);
+      setSuccess(t('auth.codeResent', { expiresAt: formatDateTime(response.verification_expires_at, language) }));
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.message.includes('not linked')) {
         setError(
-          `Open Bot 2 and send ${registration.start_command} first. Then use resend if the code does not arrive.`,
+          t('auth.botNotLinked', { command: registration.start_command }),
         );
       } else if (
         requestError instanceof ApiError &&
         requestError.message.includes('awaiting approval')
       ) {
-        setError('Seller group approval is still pending. The code can be resent after approval.');
+        setError(t('auth.awaitingApproval'));
       } else {
-        setError(formatApiError(requestError, 'Could not resend the code.'));
+        setError(formatApiError(requestError, t('auth.resendFailed')));
       }
     } finally {
       setLoadingAction(null);
@@ -147,20 +147,20 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
   }
 
   function validateLogin(): string | null {
-    if (!EMAIL_RE.test(loginEmail.trim())) return 'Enter a valid email address.';
-    if (!loginPassword) return 'Enter your password.';
+    if (!EMAIL_RE.test(loginEmail.trim())) return t('auth.invalidEmail');
+    if (!loginPassword) return t('auth.enterPassword');
     return null;
   }
 
   function validateRegistration(): string | null {
-    if (!EMAIL_RE.test(registerEmail.trim())) return 'Enter a valid email address.';
-    if (registerPassword.length < 8) return 'Password must be at least 8 characters.';
+    if (!EMAIL_RE.test(registerEmail.trim())) return t('auth.invalidEmail');
+    if (registerPassword.length < 8) return t('auth.passwordMin');
     if (!/[A-Za-z]/.test(registerPassword) || !/\d/.test(registerPassword)) {
-      return 'Password must contain at least one letter and one digit.';
+      return t('auth.passwordComplexity');
     }
-    if (registerPassword !== confirmPassword) return 'Passwords do not match.';
+    if (registerPassword !== confirmPassword) return t('auth.passwordMismatch');
     if (!TELEGRAM_RE.test(telegramUsername.trim())) {
-      return 'Enter a Telegram username like @sellername.';
+      return t('auth.invalidTelegram');
     }
     return null;
   }
@@ -168,22 +168,22 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
   return (
     <main className="login-page seller-auth-page">
       <section className="login-card seller-auth-card">
-        <p className="eyebrow">Seller Portal</p>
-        <h1>Sign in</h1>
+        <p className="eyebrow">{t('app.brand')}</p>
+        <h1>{t('auth.signInTitle')}</h1>
         <div className="tabs auth-tabs" role="tablist" aria-label="Seller auth">
           <button
             className={activeTab === 'login' ? 'tab-active' : ''}
             type="button"
             onClick={() => setActiveTab('login')}
           >
-            Login
+            {t('auth.loginTab')}
           </button>
           <button
             className={activeTab === 'register' ? 'tab-active' : ''}
             type="button"
             onClick={() => setActiveTab('register')}
           >
-            Registration
+            {t('auth.registerTab')}
           </button>
         </div>
 
@@ -194,7 +194,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
         {activeTab === 'login' ? (
           <form className="form-stack" onSubmit={handleLogin}>
             <label className="field">
-              <span>Email</span>
+              <span>{t('auth.email')}</span>
               <input
                 autoComplete="email"
                 inputMode="email"
@@ -204,7 +204,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
               />
             </label>
             <label className="field">
-              <span>Password</span>
+              <span>{t('auth.password')}</span>
               <input
                 autoComplete="current-password"
                 type="password"
@@ -218,14 +218,14 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
               disabled={loadingAction === 'login'}
               type="submit"
             >
-              {loadingAction === 'login' ? 'Signing in...' : 'Sign in'}
+              {loadingAction === 'login' ? t('auth.signingIn') : t('auth.signIn')}
             </button>
           </form>
         ) : (
           <div className="auth-registration-grid">
             <form className="form-stack" onSubmit={handleStartRegistration}>
               <label className="field">
-                <span>Email</span>
+                  <span>{t('auth.email')}</span>
                 <input
                   autoComplete="email"
                   inputMode="email"
@@ -235,7 +235,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                 />
               </label>
               <label className="field">
-                <span>Password</span>
+                  <span>{t('auth.password')}</span>
                 <input
                   autoComplete="new-password"
                   type="password"
@@ -244,7 +244,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                 />
               </label>
               <label className="field">
-                <span>Confirm password</span>
+                  <span>{t('auth.confirmPassword')}</span>
                 <input
                   autoComplete="new-password"
                   type="password"
@@ -253,7 +253,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                 />
               </label>
               <label className="field">
-                <span>Telegram username</span>
+                  <span>{t('auth.telegramUsername')}</span>
                 <input
                   autoComplete="off"
                   placeholder="@sellername"
@@ -267,14 +267,14 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                 disabled={loadingAction === 'start-registration'}
                 type="submit"
               >
-                {loadingAction === 'start-registration' ? 'Starting...' : 'Start registration'}
+                {loadingAction === 'start-registration' ? t('auth.starting') : t('auth.startRegistration')}
               </button>
             </form>
 
             {registration ? (
               <form className="telegram-confirm-panel" onSubmit={handleConfirmRegistration}>
                 <div>
-                  <span>Bot 2 start command</span>
+                  <span>{t('auth.botStartCommand')}</span>
                   <code>{registration.start_command}</code>
                 </div>
                 {registration.bot_start_link ? (
@@ -284,16 +284,16 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                     rel="noreferrer"
                     target="_blank"
                   >
-                    Open Bot 2
+                    {t('auth.openBot2')}
                   </a>
                 ) : null}
                 <p className="muted-text">
-                  Send this command to Bot 2. Seller group approval expires in 2 minutes; after
-                  approval the bot sends a verification code. Registration expires at{' '}
-                  {formatDateTime(registration.expires_at)}.
+                  {t('auth.registrationHelp', {
+                    expiresAt: formatDateTime(registration.expires_at, language),
+                  })}
                 </p>
                 <label className="field">
-                  <span>Confirmation code</span>
+                  <span>{t('auth.confirmationCode')}</span>
                   <input
                     inputMode="numeric"
                     value={verificationCode}
@@ -306,7 +306,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                     disabled={loadingAction === 'confirm-registration'}
                     type="submit"
                   >
-                    {loadingAction === 'confirm-registration' ? 'Confirming...' : 'Confirm'}
+                    {loadingAction === 'confirm-registration' ? t('auth.confirming') : t('common.confirm')}
                   </button>
                   <button
                     className="button button-secondary"
@@ -314,7 +314,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
                     type="button"
                     onClick={handleResendCode}
                   >
-                    {loadingAction === 'resend-code' ? 'Sending...' : 'Resend code'}
+                    {loadingAction === 'resend-code' ? t('auth.sending') : t('auth.resendCode')}
                   </button>
                 </div>
               </form>
@@ -324,7 +324,7 @@ export function SellerAuthPage({ authError, onTokenSaved }: SellerAuthPageProps)
 
         {import.meta.env.DEV ? (
           <button className="text-button dev-token-link" type="button" onClick={() => setShowDevTokenLogin(true)}>
-            Use development JWT fallback
+            {t('auth.devFallback')}
           </button>
         ) : null}
       </section>
@@ -339,9 +339,11 @@ function StorageScopeControls({
   value: TokenStorageScope;
   onChange: (scope: TokenStorageScope) => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <fieldset className="segmented-field">
-      <legend>Storage</legend>
+      <legend>{t('auth.storage')}</legend>
       <label>
         <input
           checked={value === 'session'}
@@ -349,7 +351,7 @@ function StorageScopeControls({
           type="radio"
           onChange={() => onChange('session')}
         />
-        This tab
+        {t('auth.thisTab')}
       </label>
       <label>
         <input
@@ -358,7 +360,7 @@ function StorageScopeControls({
           type="radio"
           onChange={() => onChange('local')}
         />
-        This browser
+        {t('auth.thisBrowser')}
       </label>
     </fieldset>
   );
@@ -371,8 +373,8 @@ function formatApiError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+function formatDateTime(value: string, language: 'ru' | 'en'): string {
+  return new Intl.DateTimeFormat(languageToLocale(language), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value));

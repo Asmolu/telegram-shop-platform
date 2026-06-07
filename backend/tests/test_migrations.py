@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.db.models import (
     Banner,
+    BannerDisplayType,
     BannerTargetType,
     BroadcastCampaign,
     BroadcastCampaignStatus,
@@ -335,6 +336,12 @@ def test_model_enums_bind_database_values_not_member_names() -> None:
         BannerTargetType.PROMO.value,
         BannerTargetType.EXTERNAL_URL.value,
     ]
+    assert Banner.__table__.c.display_type.type.enums == [
+        BannerDisplayType.HORIZONTAL.value,
+        BannerDisplayType.VERTICAL.value,
+        BannerDisplayType.POPUP.value,
+        BannerDisplayType.AGGRESSIVE_POPUP.value,
+    ]
     assert Notification.__table__.c.channel.type.enums == [
         NotificationChannel.TELEGRAM.value,
         NotificationChannel.INTERNAL.value,
@@ -436,3 +443,32 @@ def test_customer_campaign_models_bind_database_values_and_constraints() -> None
         status.value for status in BroadcastDeliveryStatus
     ]
     assert "uq_broadcast_deliveries_campaign_subscription" in delivery_constraints
+
+
+def test_order_item_color_and_banner_display_type_migration() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260607_0019_add_order_item_color_and_banner_display_type.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "add_order_item_color_and_banner_display_type",
+        migration_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.BANNER_DISPLAY_TYPE_ENUM.name == "banner_display_type"
+    assert migration.BANNER_DISPLAY_TYPE_ENUM.enums == [
+        "horizontal",
+        "vertical",
+        "popup",
+        "aggressive_popup",
+    ]
+    assert "variant_color" in content
+    assert "display_type" in content
+    assert "ix_banners_display_type" in content

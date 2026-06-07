@@ -79,6 +79,13 @@ class BannerTargetType(StrEnum):
     EXTERNAL_URL = "external_url"
 
 
+class BannerDisplayType(StrEnum):
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+    POPUP = "popup"
+    AGGRESSIVE_POPUP = "aggressive_popup"
+
+
 class NotificationChannel(StrEnum):
     TELEGRAM = "telegram"
     INTERNAL = "internal"
@@ -731,6 +738,7 @@ class OrderItem(Base):
     )
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     variant_size: Mapped[str] = mapped_column(String(64), nullable=False)
+    variant_color: Mapped[str | None] = mapped_column(String(64), nullable=True)
     variant_sku: Mapped[str] = mapped_column(String(100), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -798,6 +806,13 @@ class Banner(Base):
     )
     target_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     external_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    display_type: Mapped[BannerDisplayType] = mapped_column(
+        Enum(BannerDisplayType, name="banner_display_type", values_callable=_enum_values),
+        nullable=False,
+        default=BannerDisplayType.HORIZONTAL,
+        server_default=BannerDisplayType.HORIZONTAL.value,
+        index=True,
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(
         Boolean,

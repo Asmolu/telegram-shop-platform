@@ -18,7 +18,7 @@ export function FaqPage() {
   const botUrl = getTelegramBotUrl();
 
   return (
-    <div className="page">
+    <div className="page page--faq">
       <TopBar title="FAQ" onBack={() => navigate('/main')} />
       <div className="accordion-list">
         {faqItems.map(([question, answer], index) => (
@@ -32,7 +32,7 @@ export function FaqPage() {
         ))}
       </div>
       {botUrl ? (
-        <a className="primary-button full-width" href={botUrl}>
+        <a className="primary-button full-width faq-contact-button" href={botUrl}>
           Связаться с продавцом
         </a>
       ) : null}

@@ -1,4 +1,5 @@
 import type { OrderStatus, ProductStatus, ReviewStatus } from '../api';
+import { labelForEnum, useI18n } from '../i18n';
 
 type StatusValue = ProductStatus | OrderStatus | ReviewStatus | 'ACTIVE' | 'INACTIVE';
 
@@ -18,8 +19,9 @@ const toneByStatus: Record<string, string> = {
   INACTIVE: 'neutral',
 };
 
-export function StatusBadge({ status }: { status: StatusValue }) {
+export function StatusBadge({ status, label }: { status: StatusValue; label?: string }) {
+  const { t } = useI18n();
   const tone = toneByStatus[status] ?? 'neutral';
 
-  return <span className={`status-badge status-${tone}`}>{status.replace(/_/g, ' ')}</span>;
+  return <span className={`status-badge status-${tone}`}>{label ?? labelForEnum(status, t)}</span>;
 }

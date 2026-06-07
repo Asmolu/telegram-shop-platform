@@ -1,21 +1,28 @@
 import type { ApiDecimal } from '../api';
+import { languageToLocale, type Language } from '../i18n';
 
-export function formatMoney(value: ApiDecimal | null | undefined): string {
+export function formatMoney(
+  value: ApiDecimal | null | undefined,
+  language: Language = getRuntimeLanguage(),
+): string {
   const amount = Number(value ?? 0);
 
   if (!Number.isFinite(amount)) {
     return '0.00';
   }
 
-  return amount.toLocaleString('en-US', {
+  return amount.toLocaleString(languageToLocale(language), {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
 
-export function formatDate(value: string | null | undefined): string {
+export function formatDate(
+  value: string | null | undefined,
+  language: Language = getRuntimeLanguage(),
+): string {
   if (!value) {
-    return 'Not set';
+    return language === 'ru' ? 'Не задано' : 'Not set';
   }
 
   const date = new Date(value);
@@ -23,7 +30,7 @@ export function formatDate(value: string | null | undefined): string {
     return value;
   }
 
-  return date.toLocaleString();
+  return date.toLocaleString(languageToLocale(language));
 }
 
 export function toDateTimeInput(value: string | null | undefined): string {
@@ -58,4 +65,8 @@ export function slugify(value: string): string {
 
 export function compactText(value: string | null | undefined, fallback = 'Not provided'): string {
   return value && value.trim().length > 0 ? value : fallback;
+}
+
+function getRuntimeLanguage(): Language {
+  return document.documentElement.lang === 'en' ? 'en' : 'ru';
 }

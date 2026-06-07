@@ -20,6 +20,7 @@ import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
 import { getProductImageUrl } from '../shared/utils/images';
+import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 
 type CartTab = 'favorites' | 'cart' | 'orders';
 
@@ -92,8 +93,14 @@ export function CartPage() {
   async function changeQuantity(itemId: number, quantity: number) {
     if (quantity < 1) return;
     try {
+      const appliedPromoCode = promoValidation?.code;
       const nextCart = await updateCartItem(itemId, quantity);
       setCart(nextCart);
+      if (appliedPromoCode && nextCart.items.length > 0) {
+        await refreshPromoValidation(appliedPromoCode);
+      } else if (nextCart.items.length === 0) {
+        clearPromo();
+      }
       window.dispatchEvent(new Event('miniapp:cart-updated'));
     } catch (actionError) {
       setNotice(toApiErrorMessage(actionError));
@@ -102,8 +109,14 @@ export function CartPage() {
 
   async function removeItem(itemId: number) {
     try {
+      const appliedPromoCode = promoValidation?.code;
       const nextCart = await removeCartItem(itemId);
       setCart(nextCart);
+      if (appliedPromoCode && nextCart.items.length > 0) {
+        await refreshPromoValidation(appliedPromoCode);
+      } else if (nextCart.items.length === 0) {
+        clearPromo();
+      }
       window.dispatchEvent(new Event('miniapp:cart-updated'));
     } catch (actionError) {
       setNotice(toApiErrorMessage(actionError));
@@ -123,13 +136,51 @@ export function CartPage() {
   async function applyPromo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPromoValidation(null);
+    const code = normalizePromoCode(promoCode);
+    if (!code) {
+      return;
+    }
+
     try {
-      const result = await validatePromoCode(promoCode);
+      const result = await validatePromoCode(code);
       setPromoValidation(result);
+      setPromoCode(result.code);
       setNotice('Промокод применен.');
     } catch (promoError) {
-      setNotice(toApiErrorMessage(promoError));
+      setNotice(getPromoErrorMessage(promoError));
     }
+  }
+
+  async function refreshPromoValidation(code: string) {
+    try {
+      const result = await validatePromoCode(code);
+      setPromoValidation(result);
+      setPromoCode(result.code);
+    } catch (promoError) {
+      setPromoValidation(null);
+      setNotice(getPromoErrorMessage(promoError));
+    }
+  }
+
+  function updatePromoCode(value: string) {
+    setPromoCode(value);
+    if (!value.trim() || normalizePromoCode(value) !== promoValidation?.code) {
+      setPromoValidation(null);
+      setNotice(null);
+    }
+  }
+
+  function clearPromo() {
+    setPromoCode('');
+    setPromoValidation(null);
+    setNotice(null);
+  }
+
+  function checkoutWithPromo() {
+    const checkoutPath = promoValidation?.code
+      ? `/checkout?promo_code=${encodeURIComponent(promoValidation.code)}`
+      : '/checkout';
+    navigate(withReturnTo(checkoutPath, returnToParam));
   }
 
   if (!isAuthenticated) {
@@ -176,8 +227,9 @@ export function CartPage() {
           promoCode={promoCode}
           promoValidation={promoValidation}
           onApplyPromo={applyPromo}
-          onCheckout={() => navigate(withReturnTo('/checkout', returnToParam))}
-          onPromoCodeChange={setPromoCode}
+          onCheckout={checkoutWithPromo}
+          onClearPromo={clearPromo}
+          onPromoCodeChange={updatePromoCode}
           onQuantityChange={changeQuantity}
           onGoShop={() => navigate(returnTo)}
           onRemove={removeItem}
@@ -243,6 +295,7 @@ function CartItemsTab({
   promoValidation,
   onApplyPromo,
   onCheckout,
+  onClearPromo,
   onPromoCodeChange,
   onQuantityChange,
   onGoShop,
@@ -254,6 +307,7 @@ function CartItemsTab({
   promoValidation: PromoValidation | null;
   onApplyPromo: (event: React.FormEvent<HTMLFormElement>) => void;
   onCheckout: () => void;
+  onClearPromo: () => void;
   onPromoCodeChange: (value: string) => void;
   onQuantityChange: (itemId: number, quantity: number) => Promise<void>;
   onGoShop: () => void;
@@ -303,6 +357,12 @@ function CartItemsTab({
           Применить
         </button>
       </form>
+      {promoValidation ? (
+        <div className="promo-status promo-status--success">
+          <span>{promoValidation.code}: −{formatPrice(promoValidation.discount_amount)}</span>
+          <button type="button" onClick={onClearPromo}>Убрать</button>
+        </div>
+      ) : null}
 
       <section className="summary-card">
         <div><span>Товары</span><strong>{formatPrice(cart.total)}</strong></div>

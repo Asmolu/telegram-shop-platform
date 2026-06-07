@@ -13,6 +13,7 @@ import type {
   NotificationTemplateCategory,
   PageMeta,
 } from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { formatDate } from '../../shared/utils/format';
 
@@ -39,6 +40,7 @@ const emptySummary: BroadcastDeliverySummary = {
 };
 
 export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [view, setView] = useState<ViewKey>('campaigns');
   const [campaigns, setCampaigns] = useState<BroadcastCampaign[]>([]);
   const [campaignMeta, setCampaignMeta] = useState<PageMeta | undefined>();
@@ -227,7 +229,11 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       setSelectedCampaign(saved);
       setPreview(null);
       setTestCompleteCampaignId(null);
-      setActionMessage(campaignForm.id ? 'Campaign updated.' : 'Draft campaign created.');
+      setActionMessage(
+        campaignForm.id
+          ? t('customerNotifications.campaignUpdated')
+          : t('customerNotifications.campaignCreated'),
+      );
       resetCampaignForm();
       loadCampaigns();
     });
@@ -253,7 +259,11 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       const saved = templateForm.id
         ? await api.customerNotifications.updateTemplate(Number(templateForm.id), body)
         : await api.customerNotifications.createTemplate(body);
-      setActionMessage(templateForm.id ? 'Template updated.' : 'Template created.');
+      setActionMessage(
+        templateForm.id
+          ? t('customerNotifications.templateUpdated')
+          : t('customerNotifications.templateCreated'),
+      );
       setTemplateForm({
         id: '',
         key: '',
@@ -280,7 +290,9 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       setPreview(response);
       setSelectedCampaign(campaign);
       setView('reports');
-      setActionMessage(`Preview count: ${response.recipient_count_estimate}`);
+      setActionMessage(
+        t('customerNotifications.previewCount', { count: response.recipient_count_estimate }),
+      );
       loadCampaigns();
     });
   }
@@ -290,7 +302,11 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       const response = await api.customerNotifications.testCampaign(campaign.id);
       setTestCompleteCampaignId(campaign.id);
       setSelectedCampaign(campaign);
-      setActionMessage(`Test sent. Telegram message ${response.telegram_message_id ?? 'saved'}.`);
+      setActionMessage(
+        t('customerNotifications.testSent', {
+          message: response.telegram_message_id ?? t('customerNotifications.saved'),
+        }),
+      );
     });
   }
 
@@ -303,7 +319,11 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           )
         : await api.customerNotifications.startCampaign(campaign.id);
       setSelectedCampaign(started);
-      setActionMessage(started.status === 'scheduled' ? 'Campaign scheduled.' : 'Campaign started.');
+      setActionMessage(
+        started.status === 'scheduled'
+          ? t('customerNotifications.campaignScheduled')
+          : t('customerNotifications.campaignStarted'),
+      );
       loadCampaigns();
       loadDeliveryData(started.id);
     });
@@ -313,7 +333,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const paused = await api.customerNotifications.pauseCampaign(campaign.id);
       setSelectedCampaign(paused);
-      setActionMessage('Campaign paused.');
+      setActionMessage(t('customerNotifications.campaignPaused'));
       loadCampaigns();
     });
   }
@@ -322,7 +342,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const cancelled = await api.customerNotifications.cancelCampaign(campaign.id);
       setSelectedCampaign(cancelled);
-      setActionMessage('Campaign cancelled.');
+      setActionMessage(t('customerNotifications.campaignCancelled'));
       loadCampaigns();
       loadDeliveryData(cancelled.id);
     });
@@ -332,7 +352,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const response = await api.customerNotifications.processCampaignBatch(campaign.id, 20);
       setActionMessage(
-        `Processed ${response.processed}: sent ${response.sent}, failed ${response.failed}, remaining ${response.remaining}.`,
+        t('customerNotifications.processed', {
+          processed: response.processed,
+          sent: response.sent,
+          failed: response.failed,
+          remaining: response.remaining,
+        }),
       );
       loadCampaigns();
       loadDeliveryData(campaign.id);
@@ -423,7 +448,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     loadDeliveryData(campaign.id);
   }
 
-  if (loading) return <LoadingState title="Loading customer notifications" />;
+  if (loading) return <LoadingState title={t('customerNotifications.loading')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadInitial} onAuthExpired={onAuthExpired} />;
   }
@@ -433,10 +458,10 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       <section className="panel customer-notifications-header">
         <div className="section-heading">
           <div>
-            <h2>Customer Notifications</h2>
-            <p>Bot 1 campaigns, templates, delivery reporting, and recipient consent registry.</p>
+            <h2>{t('customerNotifications.title')}</h2>
+            <p>{t('customerNotifications.description')}</p>
           </div>
-          <span className="status-badge status-info">Bot 1 customer messaging</span>
+          <span className="status-badge status-info">{t('customerNotifications.badge')}</span>
         </div>
         <div className="tabs customer-notification-tabs">
           {(['campaigns', 'templates', 'reports', 'recipients'] as ViewKey[]).map((item) => (
@@ -446,7 +471,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               type="button"
               onClick={() => setView(item)}
             >
-              {viewLabel(item)}
+              {viewLabel(item, t)}
             </button>
           ))}
         </div>
@@ -470,18 +495,22 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>{campaignForm.id ? 'Edit campaign' : 'Create campaign'}</h2>
-              <p>Marketing counts always exclude non-opted-in recipients.</p>
+              <h2>
+                {campaignForm.id
+                  ? t('customerNotifications.editCampaign')
+                  : t('customerNotifications.createCampaign')}
+              </h2>
+              <p>{t('customerNotifications.marketingHint')}</p>
             </div>
             {campaignForm.id ? (
               <button className="button button-secondary" type="button" onClick={resetCampaignForm}>
-                New draft
+                {t('customerNotifications.newDraft')}
               </button>
             ) : null}
           </div>
           <form className="form-grid customer-campaign-form" onSubmit={handleCampaignSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>{t('common.name')}</span>
               <input
                 required
                 value={campaignForm.name}
@@ -489,7 +518,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>Type</span>
+              <span>{t('customerNotifications.type')}</span>
               <select
                 value={campaignForm.type}
                 onChange={(event) =>
@@ -499,12 +528,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   })
                 }
               >
-                <option value="marketing">Marketing</option>
-                <option value="service">Service</option>
+                <option value="marketing">{labelForEnum('marketing', t)}</option>
+                <option value="service">{labelForEnum('service', t)}</option>
               </select>
             </label>
             <label className="field">
-              <span>Template</span>
+              <span>{t('customerNotifications.template')}</span>
               <select
                 value={campaignForm.templateId}
                 onChange={(event) => {
@@ -518,7 +547,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   });
                 }}
               >
-                <option value="">No template</option>
+                <option value="">{t('customerNotifications.noTemplate')}</option>
                 {templates
                   .filter((template) => template.is_active)
                   .map((template) => (
@@ -529,7 +558,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               </select>
             </label>
             <label className="field">
-              <span>Audience</span>
+              <span>{t('customerNotifications.audience')}</span>
               <select
                 value={campaignForm.audienceScope}
                 onChange={(event) =>
@@ -539,16 +568,16 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   })
                 }
               >
-                <option value="all">All eligible customers</option>
-                <option value="purchasers">Customers with orders</option>
-                <option value="product">Purchased product</option>
-                <option value="category">Purchased category</option>
-                <option value="promo_code">Used promo code</option>
+                <option value="all">{t('customerNotifications.allEligible')}</option>
+                <option value="purchasers">{t('customerNotifications.purchasers')}</option>
+                <option value="product">{t('customerNotifications.purchasedProduct')}</option>
+                <option value="category">{t('customerNotifications.purchasedCategory')}</option>
+                <option value="promo_code">{t('customerNotifications.usedPromo')}</option>
               </select>
             </label>
             {campaignForm.audienceScope === 'product' ? (
               <label className="field">
-                <span>Product ID</span>
+                <span>{t('customerNotifications.productId')}</span>
                 <input
                   min="1"
                   required
@@ -562,7 +591,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             ) : null}
             {campaignForm.audienceScope === 'category' ? (
               <label className="field">
-                <span>Category ID</span>
+                <span>{t('customerNotifications.categoryId')}</span>
                 <input
                   min="1"
                   required
@@ -576,7 +605,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             ) : null}
             {campaignForm.audienceScope === 'promo_code' ? (
               <label className="field">
-                <span>Promo code ID</span>
+                <span>{t('customerNotifications.promoCodeId')}</span>
                 <input
                   min="1"
                   required
@@ -589,7 +618,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               </label>
             ) : null}
             <label className="field">
-              <span>Schedule</span>
+              <span>{t('customerNotifications.schedule')}</span>
               <input
                 type="datetime-local"
                 value={campaignForm.scheduledAt}
@@ -599,7 +628,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field field-wide">
-              <span>Title</span>
+              <span>{t('common.title')}</span>
               <input
                 value={campaignForm.messageTitle}
                 onChange={(event) =>
@@ -608,7 +637,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field field-wide">
-              <span>Message</span>
+              <span>{t('customerNotifications.message')}</span>
               <textarea
                 required={!campaignForm.templateId}
                 value={campaignForm.messageBody}
@@ -619,7 +648,9 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             </label>
             <div className="form-actions field-wide">
               <button className="button button-primary" disabled={actionBusy} type="submit">
-                {campaignForm.id ? 'Save campaign' : 'Create draft'}
+                {campaignForm.id
+                  ? t('customerNotifications.saveCampaign')
+                  : t('customerNotifications.createDraft')}
               </button>
             </div>
           </form>
@@ -628,26 +659,26 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="table-panel">
           <div className="section-heading table-heading">
             <div>
-              <h2>Campaigns</h2>
-              <p>{total} campaigns</p>
+              <h2>{t('customerNotifications.campaigns')}</h2>
+              <p>{t('customerNotifications.campaignCount', { count: total })}</p>
             </div>
             <div className="inline-actions">
               <select
                 value={campaignTypeFilter}
                 onChange={(event) => setCampaignTypeFilter(event.target.value as BroadcastCampaignType | 'all')}
               >
-                <option value="all">All types</option>
-                <option value="marketing">Marketing</option>
-                <option value="service">Service</option>
+                <option value="all">{t('common.allTypes')}</option>
+                <option value="marketing">{labelForEnum('marketing', t)}</option>
+                <option value="service">{labelForEnum('service', t)}</option>
               </select>
               <select
                 value={campaignStatus}
                 onChange={(event) => setCampaignStatus(event.target.value as BroadcastCampaignStatus | 'all')}
               >
-                <option value="all">All statuses</option>
+                <option value="all">{t('common.allStatuses')}</option>
                 {campaignStatuses().map((status) => (
                   <option key={status} value={status}>
-                    {status}
+                    {labelForEnum(status, t)}
                   </option>
                 ))}
               </select>
@@ -657,7 +688,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                 type="button"
                 onClick={() => setCampaignOffset(Math.max(0, campaignOffset - PAGE_LIMIT))}
               >
-                Previous
+                {t('common.previous')}
               </button>
               <button
                 className="button button-secondary"
@@ -665,26 +696,26 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                 type="button"
                 onClick={() => setCampaignOffset(campaignOffset + PAGE_LIMIT)}
               >
-                Next
+                {t('common.next')}
               </button>
             </div>
           </div>
           <table>
             <thead>
               <tr>
-                <th>Campaign</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Recipients</th>
-                <th>Schedule</th>
-                <th>Actions</th>
+                <th>{t('customerNotifications.campaign')}</th>
+                <th>{t('customerNotifications.type')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('customerNotifications.recipientsColumn')}</th>
+                <th>{t('customerNotifications.schedule')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {campaigns.length === 0 ? (
                 <tr>
                   <td colSpan={6}>
-                    <div className="empty-table">No campaigns.</div>
+                    <div className="empty-table">{t('customerNotifications.noCampaigns')}</div>
                   </td>
                 </tr>
               ) : (
@@ -692,34 +723,39 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   <tr key={campaign.id}>
                     <td>
                       <strong>{campaign.name}</strong>
-                      <small>Campaign {campaign.id}</small>
+                      <small>
+                        {t('customerNotifications.campaign')} {campaign.id}
+                      </small>
                     </td>
                     <td>
                       <StatusBadge
                         className={campaign.type === 'marketing' ? 'status-info' : 'status-success'}
-                        label={campaign.type}
+                        label={labelForEnum(campaign.type, t)}
                       />
                     </td>
                     <td>
-                      <StatusBadge className={campaignStatusClass(campaign.status)} label={campaign.status} />
+                      <StatusBadge
+                        className={campaignStatusClass(campaign.status)}
+                        label={labelForEnum(campaign.status, t)}
+                      />
                     </td>
                     <td>
                       <strong>{campaign.recipient_count_final ?? campaign.recipient_count_estimate}</strong>
-                      <small>eligible/materialized</small>
+                      <small>{t('customerNotifications.eligibleMaterialized')}</small>
                     </td>
                     <td>
-                      <small>{formatOptionalDate(campaign.scheduled_at)}</small>
+                      <small>{formatOptionalDate(campaign.scheduled_at, language)}</small>
                     </td>
                     <td>
                       <div className="table-actions customer-action-grid">
                         <button className="button button-secondary" type="button" onClick={() => editCampaign(campaign)}>
-                          Edit
+                          {t('common.edit')}
                         </button>
                         <button className="button button-secondary" type="button" onClick={() => previewCampaign(campaign)}>
-                          Preview
+                          {t('customerNotifications.preview')}
                         </button>
                         <button className="button button-secondary" type="button" onClick={() => testCampaign(campaign)}>
-                          Test
+                          {t('customerNotifications.test')}
                         </button>
                         <button
                           className="button button-primary"
@@ -727,22 +763,22 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                           type="button"
                           onClick={() => startCampaign(campaign)}
                         >
-                          Start
+                          {t('customerNotifications.start')}
                         </button>
                         <button className="button button-secondary" type="button" onClick={() => processBatch(campaign)}>
-                          Batch
+                          {t('customerNotifications.batch')}
                         </button>
                         <button className="text-button" type="button" onClick={() => selectCampaign(campaign)}>
-                          Report
+                          {t('customerNotifications.report')}
                         </button>
                         {campaign.status === 'sending' || campaign.status === 'scheduled' ? (
                           <button className="text-button" type="button" onClick={() => pauseCampaign(campaign)}>
-                            Pause
+                            {t('customerNotifications.pause')}
                           </button>
                         ) : null}
                         {!['completed', 'cancelled'].includes(campaign.status) ? (
                           <button className="text-button danger-text" type="button" onClick={() => cancelCampaign(campaign)}>
-                            Cancel
+                            {t('common.cancel')}
                           </button>
                         ) : null}
                       </div>
@@ -763,13 +799,17 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>{templateForm.id ? 'Edit template' : 'Create template'}</h2>
-              <p>Plain Telegram text with explicit variables only.</p>
+              <h2>
+                {templateForm.id
+                  ? t('customerNotifications.editTemplate')
+                  : t('customerNotifications.createTemplate')}
+              </h2>
+              <p>{t('customerNotifications.templateHint')}</p>
             </div>
           </div>
           <form className="form-grid" onSubmit={handleTemplateSubmit}>
             <label className="field">
-              <span>Key</span>
+              <span>{t('customerNotifications.key')}</span>
               <input
                 required
                 value={templateForm.key}
@@ -777,7 +817,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>Name</span>
+              <span>{t('common.name')}</span>
               <input
                 required
                 value={templateForm.name}
@@ -785,7 +825,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>Category</span>
+              <span>{t('common.category')}</span>
               <select
                 value={templateForm.category}
                 onChange={(event) =>
@@ -795,12 +835,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   })
                 }
               >
-                <option value="marketing">Marketing</option>
-                <option value="service">Service</option>
+                <option value="marketing">{labelForEnum('marketing', t)}</option>
+                <option value="service">{labelForEnum('service', t)}</option>
               </select>
             </label>
             <label className="field">
-              <span>Variables</span>
+              <span>{t('customerNotifications.variables')}</span>
               <input
                 placeholder="first_name, promo_code"
                 value={templateForm.allowedVariables}
@@ -810,14 +850,14 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field field-wide">
-              <span>Title</span>
+              <span>{t('common.title')}</span>
               <input
                 value={templateForm.title}
                 onChange={(event) => setTemplateForm({ ...templateForm, title: event.target.value })}
               />
             </label>
             <label className="field field-wide">
-              <span>Body template</span>
+              <span>{t('customerNotifications.bodyTemplate')}</span>
               <textarea
                 required
                 value={templateForm.bodyTemplate}
@@ -834,11 +874,13 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   setTemplateForm({ ...templateForm, isActive: event.target.checked })
                 }
               />
-              Active
+              {t('common.active')}
             </label>
             <div className="form-actions field-wide">
               <button className="button button-primary" disabled={actionBusy} type="submit">
-                {templateForm.id ? 'Save template' : 'Create template'}
+                {templateForm.id
+                  ? t('customerNotifications.saveTemplate')
+                  : t('customerNotifications.createTemplate')}
               </button>
             </div>
           </form>
@@ -847,28 +889,32 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="table-panel">
           <div className="section-heading table-heading">
             <div>
-              <h2>Templates</h2>
-              <p>{templateMeta?.total ?? templates.length} templates</p>
+              <h2>{t('customerNotifications.templates')}</h2>
+              <p>
+                {t('customerNotifications.templateCount', {
+                  count: templateMeta?.total ?? templates.length,
+                })}
+              </p>
             </div>
             <button className="button button-secondary" type="button" onClick={loadTemplates}>
-              Refresh
+              {t('common.refresh')}
             </button>
           </div>
           <table>
             <thead>
               <tr>
-                <th>Template</th>
-                <th>Category</th>
-                <th>Variables</th>
-                <th>Active</th>
-                <th>Actions</th>
+                <th>{t('customerNotifications.template')}</th>
+                <th>{t('common.category')}</th>
+                <th>{t('customerNotifications.variables')}</th>
+                <th>{t('common.active')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {templates.length === 0 ? (
                 <tr>
                   <td colSpan={5}>
-                    <div className="empty-table">No templates.</div>
+                    <div className="empty-table">{t('customerNotifications.noTemplates')}</div>
                   </td>
                 </tr>
               ) : (
@@ -881,7 +927,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                     <td>
                       <StatusBadge
                         className={template.category === 'marketing' ? 'status-info' : 'status-success'}
-                        label={template.category}
+                        label={labelForEnum(template.category, t)}
                       />
                     </td>
                     <td>
@@ -890,13 +936,13 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                     <td>
                       <StatusBadge
                         className={template.is_active ? 'status-success' : 'status-neutral'}
-                        label={template.is_active ? 'Active' : 'Disabled'}
+                        label={template.is_active ? t('common.active') : t('common.disabled')}
                       />
                     </td>
                     <td>
                       <div className="table-actions">
                         <button className="button button-secondary" type="button" onClick={() => editTemplate(template)}>
-                          Edit
+                          {t('common.edit')}
                         </button>
                         {template.is_active ? (
                           <button
@@ -905,12 +951,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                             onClick={() =>
                               runAction(async () => {
                                 await api.customerNotifications.disableTemplate(template.id);
-                                setActionMessage('Template disabled.');
+                                setActionMessage(t('customerNotifications.templateDisabled'));
                                 loadTemplates();
                               })
                             }
                           >
-                            Disable
+                            {t('customerNotifications.disable')}
                           </button>
                         ) : null}
                       </div>
@@ -932,24 +978,32 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>Campaign detail</h2>
-              <p>{campaign ? campaign.name : 'Select a campaign from the list.'}</p>
+              <h2>{t('customerNotifications.campaignDetail')}</h2>
+              <p>{campaign ? campaign.name : t('customerNotifications.selectCampaign')}</p>
             </div>
-            {campaign ? <StatusBadge className={campaignStatusClass(campaign.status)} label={campaign.status} /> : null}
+            {campaign ? (
+              <StatusBadge
+                className={campaignStatusClass(campaign.status)}
+                label={labelForEnum(campaign.status, t)}
+              />
+            ) : null}
           </div>
           {campaign ? (
             <>
               <div className="kpi-grid customer-summary-grid">
-                <Kpi label="Pending" value={selectedSummary.pending} />
-                <Kpi label="Sent" value={selectedSummary.sent} />
-                <Kpi label="Failed" value={selectedSummary.failed} />
-                <Kpi label="Blocked" value={selectedSummary.blocked} />
-                <Kpi label="Skipped" value={selectedSummary.skipped} />
-                <Kpi label="Rate limited" value={selectedSummary.rate_limited} />
+                <Kpi label={t('customerNotifications.pending')} value={selectedSummary.pending} />
+                <Kpi label={t('customerNotifications.sent')} value={selectedSummary.sent} />
+                <Kpi label={t('customerNotifications.failed')} value={selectedSummary.failed} />
+                <Kpi label={t('customerNotifications.blocked')} value={selectedSummary.blocked} />
+                <Kpi label={t('customerNotifications.skipped')} value={selectedSummary.skipped} />
+                <Kpi
+                  label={t('customerNotifications.rateLimited')}
+                  value={selectedSummary.rate_limited}
+                />
               </div>
               {preview && preview.campaign_id === campaign.id ? (
                 <div className="campaign-preview">
-                  <strong>Preview sample</strong>
+                  <strong>{t('customerNotifications.previewSample')}</strong>
                   <pre>{preview.rendered_sample}</pre>
                   <small>{preview.eligibility_warnings.join(' ')}</small>
                 </div>
@@ -961,24 +1015,24 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="table-panel">
           <div className="section-heading table-heading">
             <div>
-              <h2>Delivery report</h2>
-              <p>{deliveryMeta?.total ?? 0} rows</p>
+              <h2>{t('customerNotifications.deliveryReport')}</h2>
+              <p>{t('customerNotifications.rows', { count: deliveryMeta?.total ?? 0 })}</p>
             </div>
             <div className="inline-actions">
               <select
                 value={deliveryStatus}
                 onChange={(event) => setDeliveryStatus(event.target.value as BroadcastDeliveryStatus | 'all')}
               >
-                <option value="all">All statuses</option>
+                <option value="all">{t('common.allStatuses')}</option>
                 {deliveryStatuses().map((status) => (
                   <option key={status} value={status}>
-                    {status}
+                    {labelForEnum(status, t)}
                   </option>
                 ))}
               </select>
               {campaign ? (
                 <button className="button button-secondary" type="button" onClick={() => loadDeliveryData(campaign.id)}>
-                  Refresh
+                  {t('common.refresh')}
                 </button>
               ) : null}
             </div>
@@ -986,45 +1040,66 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           <table>
             <thead>
               <tr>
-                <th>Recipient</th>
-                <th>Status</th>
-                <th>Attempts</th>
-                <th>Telegram</th>
-                <th>Error</th>
-                <th>Updated</th>
+                <th>{t('customerNotifications.recipient')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('customerNotifications.attempts')}</th>
+                <th>{t('customerNotifications.telegram')}</th>
+                <th>{t('common.error')}</th>
+                <th>{t('common.updated')}</th>
               </tr>
             </thead>
             <tbody>
               {!campaign || deliveries.length === 0 ? (
                 <tr>
                   <td colSpan={6}>
-                    <div className="empty-table">No delivery rows.</div>
+                    <div className="empty-table">{t('customerNotifications.noDeliveryRows')}</div>
                   </td>
                 </tr>
               ) : (
                 deliveries.map((delivery) => (
                   <tr key={delivery.id}>
                     <td>
-                      <strong>{delivery.user_id ? `User ${delivery.user_id}` : 'Unknown user'}</strong>
-                      <small>Subscription {delivery.subscription_id}</small>
+                      <strong>
+                        {delivery.user_id
+                          ? `${t('common.user')} ${delivery.user_id}`
+                          : t('customerNotifications.unknownUser')}
+                      </strong>
+                      <small>
+                        {t('customerNotifications.subscription', {
+                          id: delivery.subscription_id,
+                        })}
+                      </small>
                     </td>
                     <td>
-                      <StatusBadge className={deliveryStatusClass(delivery.status)} label={delivery.status} />
+                      <StatusBadge
+                        className={deliveryStatusClass(delivery.status)}
+                        label={labelForEnum(delivery.status, t)}
+                      />
                     </td>
                     <td>
                       <strong>{delivery.attempt_count}</strong>
-                      <small>Next: {formatOptionalDate(delivery.next_attempt_at)}</small>
+                      <small>
+                        {t('customerNotifications.nextAttempt', {
+                          date: formatOptionalDate(delivery.next_attempt_at, language),
+                        })}
+                      </small>
                     </td>
                     <td>
                       <small>{delivery.telegram_chat_id_masked}</small>
-                      <small>Message {delivery.telegram_message_id ?? '-'}</small>
+                      <small>
+                        {t('customerNotifications.messageId', {
+                          id: delivery.telegram_message_id ?? '-',
+                        })}
+                      </small>
                     </td>
                     <td>
                       <small>{delivery.error_code ?? '-'}</small>
                       <small>{delivery.error_message ?? ''}</small>
                     </td>
                     <td>
-                      <small>{formatOptionalDate(delivery.last_attempt_at ?? delivery.updated_at)}</small>
+                      <small>
+                        {formatOptionalDate(delivery.last_attempt_at ?? delivery.updated_at, language)}
+                      </small>
                     </td>
                   </tr>
                 ))
@@ -1046,38 +1121,40 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>Recipients</h2>
-              <p>Bot 1 chat and consent registry.</p>
+              <h2>{t('customerNotifications.recipientsTitle')}</h2>
+              <p>{t('customerNotifications.recipientsHint')}</p>
             </div>
-            <span className="status-badge status-info">{total} total</span>
+            <span className="status-badge status-info">
+              {t('customerNotifications.totalCount', { count: total })}
+            </span>
           </div>
 
           <form className="filters-row customer-notification-filters" onSubmit={handleRecipientFiltersSubmit}>
             <FilterSelect
-              label="Has chat"
+              label={t('customerNotifications.hasChat')}
               value={recipientFilters.hasChat}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, hasChat: value })}
             />
             <FilterSelect
-              label="Service"
+              label={t('customerNotifications.service')}
               value={recipientFilters.serviceOptIn}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, serviceOptIn: value })}
             />
             <FilterSelect
-              label="Marketing"
+              label={t('customerNotifications.marketing')}
               value={recipientFilters.marketingOptIn}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, marketingOptIn: value })}
             />
             <FilterSelect
-              label="Blocked"
+              label={t('customerNotifications.blockedFilter')}
               value={recipientFilters.blocked}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, blocked: value })}
             />
             <label>
-              <span>User ID</span>
+              <span>{t('orders.userId')}</span>
               <input
                 min="1"
-                placeholder="Any"
+                placeholder={t('common.any')}
                 type="number"
                 value={recipientFilters.userId}
                 onChange={(event) =>
@@ -1086,7 +1163,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label>
-              <span>Telegram username</span>
+              <span>{t('customerNotifications.telegramUsername')}</span>
               <input
                 placeholder="@username"
                 value={recipientFilters.telegramUsername}
@@ -1099,14 +1176,14 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <button className="button button-primary" type="submit">
-              Apply
+              {t('common.apply')}
             </button>
           </form>
         </section>
 
         <section className="table-panel">
           <div className="section-heading table-heading">
-            <h2>Recipient registry</h2>
+            <h2>{t('customerNotifications.registry')}</h2>
             <div className="inline-actions">
               <button
                 className="button button-secondary"
@@ -1114,7 +1191,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                 type="button"
                 onClick={() => setSubscriptionOffset(Math.max(0, subscriptionOffset - PAGE_LIMIT))}
               >
-                Previous
+                {t('common.previous')}
               </button>
               <button
                 className="button button-secondary"
@@ -1122,73 +1199,111 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                 type="button"
                 onClick={() => setSubscriptionOffset(subscriptionOffset + PAGE_LIMIT)}
               >
-                Next
+                {t('common.next')}
               </button>
               <button className="button button-secondary" type="button" onClick={loadSubscriptions}>
-                Refresh
+                {t('common.refresh')}
               </button>
             </div>
           </div>
           <table>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Telegram</th>
-                <th>Chat</th>
-                <th>Service</th>
-                <th>Marketing</th>
-                <th>Blocked</th>
-                <th>Last activity</th>
+                <th>{t('common.user')}</th>
+                <th>{t('customerNotifications.telegram')}</th>
+                <th>{t('customerNotifications.chat')}</th>
+                <th>{t('customerNotifications.service')}</th>
+                <th>{t('customerNotifications.marketing')}</th>
+                <th>{t('customerNotifications.blockedFilter')}</th>
+                <th>{t('customerNotifications.lastActivity')}</th>
               </tr>
             </thead>
             <tbody>
               {subscriptions.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
-                    <div className="empty-table">No customer recipients match these filters.</div>
+                    <div className="empty-table">{t('customerNotifications.noRecipients')}</div>
                   </td>
                 </tr>
               ) : (
                 subscriptions.map((subscription) => (
                   <tr key={subscription.id}>
                     <td>
-                      <strong>{subscription.user_id ? `User ${subscription.user_id}` : 'Unlinked'}</strong>
-                      <small>Subscription {subscription.id}</small>
+                      <strong>
+                        {subscription.user_id
+                          ? `${t('common.user')} ${subscription.user_id}`
+                          : t('common.notLinked')}
+                      </strong>
+                      <small>{t('customerNotifications.subscription', { id: subscription.id })}</small>
                     </td>
                     <td>
                       <strong>{formatTelegramName(subscription)}</strong>
-                      <small>Telegram user {subscription.telegram_user_id}</small>
+                      <small>
+                        {t('customerNotifications.telegramUser', {
+                          id: subscription.telegram_user_id,
+                        })}
+                      </small>
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.has_chat ? 'status-success' : 'status-neutral'}
-                        label={subscription.has_chat ? 'Connected' : 'Missing'}
+                        label={
+                          subscription.has_chat
+                            ? t('customerNotifications.connected')
+                            : t('customerNotifications.missing')
+                        }
                       />
                       <small>{subscription.telegram_chat_id_masked ?? '-'}</small>
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.service_opt_in ? 'status-success' : 'status-warning'}
-                        label={subscription.service_opt_in ? 'On' : 'Off'}
+                        label={
+                          subscription.service_opt_in
+                            ? t('customerNotifications.on')
+                            : t('customerNotifications.off')
+                        }
                       />
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.marketing_opt_in ? 'status-info' : 'status-neutral'}
-                        label={subscription.marketing_opt_in ? 'On' : 'Off'}
+                        label={
+                          subscription.marketing_opt_in
+                            ? t('customerNotifications.on')
+                            : t('customerNotifications.off')
+                        }
                       />
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.blocked_at ? 'status-danger' : 'status-success'}
-                        label={subscription.blocked_at ? 'Blocked' : 'OK'}
+                        label={
+                          subscription.blocked_at
+                            ? t('customerNotifications.blocked')
+                            : t('customerNotifications.ok')
+                        }
                       />
-                      {subscription.blocked_at ? <small>{formatDate(subscription.blocked_at)}</small> : null}
+                      {subscription.blocked_at ? (
+                        <small>{formatDate(subscription.blocked_at, language)}</small>
+                      ) : null}
                     </td>
                     <td>
-                      <small>Start: {formatOptionalDate(subscription.last_start_at)}</small>
-                      <small>Stop: {formatOptionalDate(subscription.last_stop_at)}</small>
-                      <small>Settings: {formatOptionalDate(subscription.last_settings_at)}</small>
+                      <small>
+                        {t('customerNotifications.startAt', {
+                          date: formatOptionalDate(subscription.last_start_at, language),
+                        })}
+                      </small>
+                      <small>
+                        {t('customerNotifications.stopAt', {
+                          date: formatOptionalDate(subscription.last_stop_at, language),
+                        })}
+                      </small>
+                      <small>
+                        {t('customerNotifications.settingsAt', {
+                          date: formatOptionalDate(subscription.last_settings_at, language),
+                        })}
+                      </small>
                     </td>
                   </tr>
                 ))
@@ -1222,16 +1337,16 @@ function formatTelegramName(subscription: CustomerNotificationSubscription): str
   return [subscription.telegram_first_name, subscription.telegram_last_name].filter(Boolean).join(' ') || '-';
 }
 
-function formatOptionalDate(value: string | null): string {
-  return value ? formatDate(value) : '-';
+function formatOptionalDate(value: string | null, language: 'ru' | 'en'): string {
+  return value ? formatDate(value, language) : '-';
 }
 
-function viewLabel(view: ViewKey): string {
+function viewLabel(view: ViewKey, t: ReturnType<typeof useI18n>['t']): string {
   const labels: Record<ViewKey, string> = {
-    campaigns: 'Campaigns',
-    templates: 'Templates',
-    reports: 'Reports',
-    recipients: 'Recipients',
+    campaigns: t('customerNotifications.campaigns'),
+    templates: t('customerNotifications.templates'),
+    reports: t('customerNotifications.reports'),
+    recipients: t('customerNotifications.recipients'),
   };
   return labels[view];
 }
@@ -1289,13 +1404,15 @@ function FilterSelect({
   value: BooleanFilter;
   onChange: (value: BooleanFilter) => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <label>
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value as BooleanFilter)}>
-        <option value="all">All</option>
-        <option value="true">Yes</option>
-        <option value="false">No</option>
+        <option value="all">{t('common.all')}</option>
+        <option value="true">{t('common.yes')}</option>
+        <option value="false">{t('common.no')}</option>
       </select>
     </label>
   );

@@ -20,7 +20,11 @@ from app.db.models import (
 )
 from app.main import create_app
 from app.modules.promo_codes.router import get_promo_codes_service
-from app.modules.promo_codes.schemas import PromoCodeCreate, PromoCodeUpdate
+from app.modules.promo_codes.schemas import (
+    PromoCodeCreate,
+    PromoCodeUpdate,
+    PromoCodeValidateRequest,
+)
 from app.modules.promo_codes.service import PromoCodesService
 
 
@@ -274,6 +278,51 @@ async def test_validate_promo_code_against_current_cart() -> None:
     assert result.subtotal_amount == Decimal("119.80")
     assert result.discount_amount == Decimal("11.98")
     assert result.total_amount == Decimal("107.82")
+    assert result.is_valid is True
+    assert result.is_applied is True
+    assert result.promo_code == "SAVE10"
+    assert result.discount == Decimal("11.98")
+    assert result.total == Decimal("107.82")
+
+
+def test_validate_request_accepts_checkout_promo_code_field_name() -> None:
+    payload = PromoCodeValidateRequest.model_validate({"promo_code": "save10"})
+
+    assert payload.code == "SAVE10"
+
+
+def test_promo_validation_response_shape_is_frontend_friendly() -> None:
+    app = create_app()
+
+    class FakePromoCodesService:
+        async def validate_current_cart(self, **_: object) -> dict[str, object]:
+            return {
+                "code": "SAVE10",
+                "discount_type": "PERCENT",
+                "discount_value": "10.00",
+                "subtotal_amount": "119.80",
+                "discount_amount": "11.98",
+                "total_amount": "107.82",
+            }
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    app.dependency_overrides[get_promo_codes_service] = lambda: FakePromoCodesService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/promo-codes/validate", json={"code": "save10"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == "SAVE10"
+    assert body["promo_code"] == "SAVE10"
+    assert body["is_valid"] is True
+    assert body["is_applied"] is True
+    assert body["discount_amount"] == "11.98"
+    assert body["discount"] == "11.98"
+    assert body["total_amount"] == "107.82"
+    assert body["total"] == "107.82"
 
 
 def test_promo_validation_requires_authentication() -> None:

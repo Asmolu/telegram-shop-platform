@@ -1,9 +1,10 @@
 import type React from 'react';
 import type { User } from '../api';
+import { useI18n } from '../i18n';
 
 export interface NavItem {
   path: string;
-  label: string;
+  labelKey: string;
 }
 
 interface AppShellProps {
@@ -25,9 +26,12 @@ export function AppShell({
   onNavigate,
   onLogout,
 }: AppShellProps) {
+  const { language, setLanguage, t } = useI18n();
   const displayName = user
-    ? [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || `User ${user.id}`
-    : 'Token user';
+    ? [user.first_name, user.last_name].filter(Boolean).join(' ') ||
+      user.username ||
+      `${t('common.user')} ${user.id}`
+    : t('app.tokenUser');
 
   return (
     <div className="portal-layout">
@@ -35,11 +39,11 @@ export function AppShell({
         <div className="brand-block">
           <div className="brand-mark">TS</div>
           <div>
-            <strong>Seller Portal</strong>
-            <span>Telegram Shop</span>
+            <strong>{t('app.brand')}</strong>
+            <span>{t('app.product')}</span>
           </div>
         </div>
-        <nav className="sidebar-nav" aria-label="Seller navigation">
+        <nav className="sidebar-nav" aria-label={t('app.navigation')}>
           {navItems.map((item) => {
             const active =
               currentPath === item.path ||
@@ -52,28 +56,46 @@ export function AppShell({
                 type="button"
                 onClick={() => onNavigate(item.path)}
               >
-                {item.label}
+                {t(item.labelKey)}
               </button>
             );
           })}
         </nav>
         <div className="sidebar-account">
           <span>{displayName}</span>
-          <small>{user?.role ?? 'JWT active'}</small>
+          <small>{user?.role ?? t('app.jwtActive')}</small>
           <button className="text-button" type="button" onClick={onLogout}>
-            Logout
+            {t('app.logout')}
           </button>
         </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Seller Panel</p>
+            <p className="eyebrow">{t('app.eyebrow')}</p>
             <h1>{title}</h1>
           </div>
-          <div className="topbar-profile">
-            <span>{displayName}</span>
-            <strong>{user?.role ?? 'TOKEN'}</strong>
+          <div className="topbar-actions">
+            <div className="language-switcher" aria-label={t('app.language')}>
+              <button
+                className={language === 'ru' ? 'language-active' : ''}
+                type="button"
+                onClick={() => setLanguage('ru')}
+              >
+                {t('app.language.ru')}
+              </button>
+              <button
+                className={language === 'en' ? 'language-active' : ''}
+                type="button"
+                onClick={() => setLanguage('en')}
+              >
+                {t('app.language.en')}
+              </button>
+            </div>
+            <div className="topbar-profile">
+              <span>{displayName}</span>
+              <strong>{user?.role ?? 'TOKEN'}</strong>
+            </div>
           </div>
         </header>
         <main className="content-area">{children}</main>

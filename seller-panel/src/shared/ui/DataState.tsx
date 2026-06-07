@@ -1,4 +1,5 @@
 import { ApiError } from '../api';
+import { useI18n } from '../i18n';
 
 interface DataStateProps {
   title: string;
@@ -8,12 +9,14 @@ interface DataStateProps {
 }
 
 export function LoadingState({ title = 'Loading data' }: Partial<DataStateProps>) {
+  const { t } = useI18n();
+
   return (
     <div className="state-panel" role="status">
       <span className="spinner" />
       <div>
-        <h3>{title}</h3>
-        <p>Waiting for the backend response.</p>
+        <h3>{title === 'Loading data' ? t('common.loadingData') : title}</h3>
+        <p>{t('common.waitingBackend')}</p>
       </div>
     </div>
   );
@@ -44,11 +47,12 @@ export function ErrorState({
   onRetry?: () => void;
   onAuthExpired?: () => void;
 }) {
+  const { t } = useI18n();
   const isApiError = error instanceof ApiError;
   const isAuthError = isApiError && (error.status === 401 || error.status === 403);
-  const title = isAuthError ? 'Access denied' : 'Request failed';
+  const title = isAuthError ? t('common.accessDenied') : t('common.requestFailed');
   const message =
-    error instanceof Error ? error.message : 'The backend returned an unexpected error.';
+    error instanceof Error ? error.message : t('common.unexpectedBackendError');
 
   return (
     <div className="state-panel state-panel-error" role="alert">
@@ -59,12 +63,12 @@ export function ErrorState({
       <div className="inline-actions">
         {isAuthError && onAuthExpired ? (
           <button className="button button-secondary" type="button" onClick={onAuthExpired}>
-            Go to token screen
+            {t('common.goToTokenScreen')}
           </button>
         ) : null}
         {onRetry ? (
           <button className="button button-primary" type="button" onClick={onRetry}>
-            Retry
+            {t('common.retry')}
           </button>
         ) : null}
       </div>

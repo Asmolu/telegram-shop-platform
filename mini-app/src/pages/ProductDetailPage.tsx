@@ -16,9 +16,8 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductImageCarousel, TopBar } from '../shared/ui';
 import { formatDate, formatPrice } from '../shared/utils/format';
-import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
@@ -173,8 +172,6 @@ export function ProductDetailPage() {
     );
   }
 
-  const gallery = product.images.length > 0 ? product.images : [];
-  const primaryImage = getProductImageUrl(product);
   const activeVariants = product.variants.filter((variant) => variant.is_active);
 
   return (
@@ -199,15 +196,7 @@ export function ProductDetailPage() {
       ) : null}
 
       <section className="product-gallery">
-        {primaryImage ? <img src={primaryImage} alt={product.name} /> : <div className="image-fallback"><span>{product.name[0]}</span></div>}
-        {gallery.length > 1 ? (
-          <div className="gallery-strip">
-            {gallery.map((image) => {
-              const imageUrl = normalizeAssetUrl(image.url || image.file_path);
-              return imageUrl ? <img src={imageUrl} alt={image.alt_text ?? product.name} key={image.id} /> : null;
-            })}
-          </div>
-        ) : null}
+        <ProductImageCarousel product={product} variant="detail" />
       </section>
 
       <section className="detail-card">

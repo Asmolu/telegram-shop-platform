@@ -1,6 +1,13 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
-import type { Banner, BannerImageKind, BannerPayload, BannerTargetType } from '../../shared/api';
+import type {
+  Banner,
+  BannerDisplayType,
+  BannerImageKind,
+  BannerPayload,
+  BannerTargetType,
+} from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import {
   AGGRESSIVE_BANNER_CROP_SPEC,
@@ -22,6 +29,7 @@ interface BannerFormState {
   targetType: BannerTargetType;
   targetId: string;
   externalUrl: string;
+  displayType: BannerDisplayType;
   position: string;
   isActive: boolean;
   startsAt: string;
@@ -35,6 +43,7 @@ const initialForm: BannerFormState = {
   targetType: 'product',
   targetId: '',
   externalUrl: '',
+  displayType: 'horizontal',
   position: '0',
   isActive: false,
   startsAt: '',
@@ -42,6 +51,7 @@ const initialForm: BannerFormState = {
 };
 
 export function BannersPage({ onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [banners, setBanners] = useState<Banner[]>([]);
   const [editingBanner, setEditingBanner] = useState<Banner | null>(null);
   const [form, setForm] = useState<BannerFormState>(initialForm);
@@ -76,6 +86,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
       targetType: banner.target_type ?? 'product',
       targetId: banner.target_id ? String(banner.target_id) : '',
       externalUrl: banner.external_url ?? '',
+      displayType: banner.display_type ?? 'horizontal',
       position: String(banner.position),
       isActive: banner.is_active,
       startsAt: toDateTimeInput(banner.starts_at),
@@ -120,18 +131,23 @@ export function BannersPage({ onAuthExpired }: PageProps) {
         const uploaded = await api.banners.uploadImage(
           imageFile,
           form.title,
-          getBannerImageKind(form.targetType),
+          getBannerImageKind(form.targetType, form.displayType),
         );
         imagePath = uploaded.file_path;
       }
 
       if (!imagePath) {
-        setFormError('Banner image is required.');
+        setFormError(t('banners.imageRequired'));
         return;
       }
 
-      if (form.targetType !== 'external_url' && !form.targetId.trim()) {
-        setFormError('Target ID is required for product, category, and promo banners.');
+      if (form.targetType === 'external_url' && !form.externalUrl.trim()) {
+        setFormError(t('banners.externalRequired'));
+        return;
+      }
+
+      if ((form.targetType === 'product' || form.targetType === 'category') && !form.targetId.trim()) {
+        setFormError(t('banners.targetRequired'));
         return;
       }
 
@@ -140,8 +156,10 @@ export function BannersPage({ onAuthExpired }: PageProps) {
         subtitle: form.subtitle.trim() || null,
         image_path: imagePath,
         target_type: form.targetType,
-        target_id: form.targetType === 'external_url' ? null : Number(form.targetId),
+        target_id:
+          form.targetType === 'external_url' || !form.targetId.trim() ? null : Number(form.targetId),
         external_url: form.targetType === 'external_url' ? form.externalUrl.trim() || null : null,
+        display_type: form.displayType,
         position: Number(form.position || 0),
         is_active: form.isActive,
         starts_at: fromDateTimeInput(form.startsAt),
@@ -150,10 +168,10 @@ export function BannersPage({ onAuthExpired }: PageProps) {
 
       if (editingBanner) {
         await api.banners.update(editingBanner.id, payload);
-        setNotice('Banner updated.');
+        setNotice(t('banners.updated'));
       } else {
         await api.banners.create(payload);
-        setNotice('Banner created.');
+        setNotice(t('banners.created'));
       }
 
       resetForm();
@@ -176,11 +194,11 @@ export function BannersPage({ onAuthExpired }: PageProps) {
     }
   }
 
-  if (loading) return <LoadingState title="Loading banners" />;
+  if (loading) return <LoadingState title={t('banners.loading')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadBanners} onAuthExpired={onAuthExpired} />;
   }
-  const bannerCropSpec = getBannerCropSpec(form.targetType);
+  const bannerCropSpec = getBannerCropSpec(form.targetType, form.displayType);
 
   return (
     <div className="split-view">
@@ -190,20 +208,21 @@ export function BannersPage({ onAuthExpired }: PageProps) {
           <table>
             <thead>
               <tr>
-                <th>Preview</th>
-                <th>Title</th>
-                <th>Target</th>
-                <th>Position</th>
-                <th>Status</th>
-                <th>Dates</th>
-                <th>Actions</th>
+                <th>{t('banners.preview')}</th>
+                <th>{t('common.title')}</th>
+                <th>{t('banners.target')}</th>
+                <th>{t('banners.displayType')}</th>
+                <th>{t('banners.position')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('banners.dates')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {banners.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
-                    <div className="empty-table">No banners have been created.</div>
+                  <td colSpan={8}>
+                    <div className="empty-table">{t('banners.empty')}</div>
                   </td>
                 </tr>
               ) : (
@@ -218,31 +237,32 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                     </td>
                     <td>
                       <strong>{banner.title}</strong>
-                      <small>{banner.subtitle ?? 'No subtitle'}</small>
+                      <small>{banner.subtitle ?? t('banners.noSubtitle')}</small>
                     </td>
                     <td>
-                      <span>{banner.target_type ?? 'None'}</span>
+                      <span>{labelForEnum(banner.target_type, t)}</span>
                       <small>
                         {banner.target_type === 'external_url'
                           ? banner.external_url
-                          : banner.target_id ?? 'No target'}
+                          : banner.target_id ?? t('banners.noTarget')}
                       </small>
                     </td>
+                    <td>{labelForEnum(banner.display_type, t)}</td>
                     <td>{banner.position}</td>
                     <td>
                       <StatusBadge status={banner.is_active ? 'ACTIVE' : 'INACTIVE'} />
                     </td>
                     <td>
-                      <small>{formatDate(banner.starts_at)}</small>
-                      <small>{formatDate(banner.ends_at)}</small>
+                      <small>{formatDate(banner.starts_at, language)}</small>
+                      <small>{formatDate(banner.ends_at, language)}</small>
                     </td>
                     <td>
                       <div className="table-actions">
                         <button className="text-button" type="button" onClick={() => selectBanner(banner)}>
-                          Edit
+                          {t('common.edit')}
                         </button>
                         <button className="text-button" type="button" onClick={() => toggleBanner(banner)}>
-                          {banner.is_active ? 'Deactivate' : 'Activate'}
+                          {banner.is_active ? t('common.deactivate') : t('common.activate')}
                         </button>
                       </div>
                     </td>
@@ -256,24 +276,24 @@ export function BannersPage({ onAuthExpired }: PageProps) {
 
       <aside className="editor-panel">
         <div className="section-heading">
-          <h2>{editingBanner ? 'Edit banner' : 'Create banner'}</h2>
+          <h2>{editingBanner ? t('banners.edit') : t('banners.create')}</h2>
           {editingBanner ? (
             <button className="text-button" type="button" onClick={resetForm}>
-              New
+              {t('common.new')}
             </button>
           ) : null}
         </div>
         {formError ? <div className="form-error">{formError}</div> : null}
         <form className="form-stack" onSubmit={handleSubmit}>
           <label className="field">
-            <span>Title</span>
+            <span>{t('common.title')}</span>
             <input
               value={form.title}
               onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
             />
           </label>
           <label className="field">
-            <span>Subtitle</span>
+            <span>{t('common.subtitle')}</span>
             <input
               value={form.subtitle}
               onChange={(event) =>
@@ -282,7 +302,18 @@ export function BannersPage({ onAuthExpired }: PageProps) {
             />
           </label>
           <label className="field">
-            <span>Image file</span>
+            <span>{t('banners.imageFile')}</span>
+            <p className="image-hints image-hints-current">
+              {t('banners.cropHint', {
+                width: bannerCropSpec.outputWidth,
+                height: bannerCropSpec.outputHeight,
+                minWidth: bannerCropSpec.minWidth,
+                minHeight: bannerCropSpec.minHeight,
+              })}
+            </p>
+            {form.displayType === 'aggressive_popup' ? (
+              <p className="image-hints">{t('banners.aggressiveHint')}</p>
+            ) : null}
             <p className="image-hints">
               Рекомендуемый размер: {bannerCropSpec.outputWidth}x{bannerCropSpec.outputHeight}.
               Минимальный размер: {bannerCropSpec.minWidth}x{bannerCropSpec.minHeight}.
@@ -298,23 +329,23 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                   type="button"
                   onClick={() => setImageFile(null)}
                 >
-                  Remove
+                  {t('common.remove')}
                 </button>
               </span>
             </div>
           ) : null}
           <label className="field">
-            <span>Image path</span>
+            <span>{t('banners.imagePath')}</span>
             <input
               value={form.imagePath}
               onChange={(event) =>
                 setForm((current) => ({ ...current, imagePath: event.target.value }))
               }
-              placeholder="Filled after upload or paste existing path"
+              placeholder={t('banners.imagePathPlaceholder')}
             />
           </label>
           <label className="field">
-            <span>Target type</span>
+            <span>{t('banners.targetType')}</span>
             <select
               value={form.targetType}
               onChange={(event) =>
@@ -324,14 +355,14 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                 }))
               }
             >
-              <option value="product">Product</option>
-              <option value="category">Category</option>
-              <option value="promo">Promo</option>
-              <option value="external_url">External URL</option>
+              <option value="product">{labelForEnum('product', t)}</option>
+              <option value="category">{labelForEnum('category', t)}</option>
+              <option value="promo">{labelForEnum('promo', t)}</option>
+              <option value="external_url">{labelForEnum('external_url', t)}</option>
             </select>
           </label>
           <label className="field">
-            <span>Target ID</span>
+            <span>{t('banners.targetId')}</span>
             <input
               type="number"
               value={form.targetId}
@@ -339,18 +370,40 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                 setForm((current) => ({ ...current, targetId: event.target.value }))
               }
             />
+            {form.targetType === 'promo' ? (
+              <small className="field-hint">{t('banners.targetIdHint')}</small>
+            ) : null}
           </label>
+          {form.targetType === 'external_url' ? (
+            <label className="field">
+              <span>{t('common.externalUrl')}</span>
+              <input
+                value={form.externalUrl}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, externalUrl: event.target.value }))
+                }
+              />
+            </label>
+          ) : null}
           <label className="field">
-            <span>External URL</span>
-            <input
-              value={form.externalUrl}
+            <span>{t('banners.displayType')}</span>
+            <select
+              value={form.displayType}
               onChange={(event) =>
-                setForm((current) => ({ ...current, externalUrl: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  displayType: event.target.value as BannerDisplayType,
+                }))
               }
-            />
+            >
+              <option value="horizontal">{labelForEnum('horizontal', t)}</option>
+              <option value="vertical">{labelForEnum('vertical', t)}</option>
+              <option value="popup">{labelForEnum('popup', t)}</option>
+              <option value="aggressive_popup">{labelForEnum('aggressive_popup', t)}</option>
+            </select>
           </label>
           <label className="field">
-            <span>Position</span>
+            <span>{t('banners.position')}</span>
             <input
               min="0"
               type="number"
@@ -362,7 +415,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
           </label>
           <div className="date-grid">
             <label className="field">
-              <span>Starts at</span>
+              <span>{t('banners.startsAt')}</span>
               <input
                 type="datetime-local"
                 value={form.startsAt}
@@ -372,7 +425,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>Ends at</span>
+              <span>{t('banners.endsAt')}</span>
               <input
                 type="datetime-local"
                 value={form.endsAt}
@@ -390,16 +443,16 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                 setForm((current) => ({ ...current, isActive: event.target.checked }))
               }
             />
-            Active
+            {t('common.active')}
           </label>
           {form.title || form.subtitle ? (
             <div className="banner-preview">
-              <strong>{form.title || 'Banner title'}</strong>
-              <span>{form.subtitle || 'Optional subtitle'}</span>
+              <strong>{form.title || t('banners.titlePlaceholder')}</strong>
+              <span>{form.subtitle || t('banners.subtitlePlaceholder')}</span>
             </div>
           ) : null}
           <button className="button button-primary" disabled={saving} type="submit">
-            {saving ? 'Saving...' : editingBanner ? 'Save banner' : 'Create banner'}
+            {saving ? t('common.saving') : editingBanner ? t('banners.save') : t('banners.createButton')}
           </button>
         </form>
       </aside>
@@ -415,10 +468,20 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   );
 }
 
-function getBannerCropSpec(targetType: BannerTargetType): ImageCropSpec {
-  return targetType === 'promo' ? AGGRESSIVE_BANNER_CROP_SPEC : NATIVE_BANNER_CROP_SPEC;
+function getBannerCropSpec(
+  targetType: BannerTargetType,
+  displayType: BannerDisplayType,
+): ImageCropSpec {
+  return targetType === 'promo' || displayType === 'aggressive_popup'
+    ? AGGRESSIVE_BANNER_CROP_SPEC
+    : NATIVE_BANNER_CROP_SPEC;
 }
 
-function getBannerImageKind(targetType: BannerTargetType): BannerImageKind {
-  return targetType === 'promo' ? 'aggressive_banner' : 'native_banner';
+function getBannerImageKind(
+  targetType: BannerTargetType,
+  displayType: BannerDisplayType,
+): BannerImageKind {
+  return targetType === 'promo' || displayType === 'aggressive_popup'
+    ? 'aggressive_banner'
+    : 'native_banner';
 }

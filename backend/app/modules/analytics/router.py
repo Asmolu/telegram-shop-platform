@@ -28,6 +28,8 @@ async def list_analytics_events(
     user_id: int | None = None,
     product_id: int | None = None,
     order_id: int | None = None,
+    promo_code_id: int | None = None,
+    banner_id: int | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
 ) -> AnalyticsEventList:
@@ -38,6 +40,8 @@ async def list_analytics_events(
         user_id=user_id,
         product_id=product_id,
         order_id=order_id,
+        promo_code_id=promo_code_id,
+        banner_id=banner_id,
         created_from=created_from,
         created_to=created_to,
     )

@@ -7,6 +7,7 @@ import type {
   ProductVariantPayload,
   Tag,
 } from '../../shared/api';
+import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { ImageCropEditor, PRODUCT_IMAGE_CROP_SPEC } from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
@@ -64,6 +65,7 @@ function createVariantRow(): VariantRow {
 }
 
 export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [form, setForm] = useState<ProductFormState>(initialForm);
   const [variants, setVariants] = useState<VariantRow[]>([createVariantRow()]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -187,7 +189,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     setSuccess(null);
 
     if (!form.name.trim() || !form.slug.trim() || !form.basePrice.trim()) {
-      setFormError('Name, slug, and base price are required.');
+      setFormError(t('productEditor.required'));
       setSaving(false);
       return;
     }
@@ -212,7 +214,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       await persistVariants(savedProduct.id);
 
       setCreatedProductId(savedProduct.id);
-      setSuccess(`Product ${savedProduct.name} saved.`);
+      setSuccess(t('productEditor.saved', { name: savedProduct.name }));
       setImageFiles([]);
 
       if (mode === 'edit') {
@@ -246,7 +248,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       }
 
       if (!row.size.trim() || !row.sku.trim()) {
-        throw new Error('Each variant needs at least size and SKU.');
+        throw new Error(t('productEditor.variantRequired'));
       }
 
       const payload: ProductVariantPayload = {
@@ -266,7 +268,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     }
   }
 
-  if (loading) return <LoadingState title="Loading product form" />;
+  if (loading) return <LoadingState title={t('productEditor.loading')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadFormData} onAuthExpired={onAuthExpired} />;
   }
@@ -286,7 +288,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               type="button"
               onClick={() => onNavigate(`/products/${createdProductId}/edit`)}
             >
-              Open edit page
+              {t('productEditor.openEdit')}
             </button>
           ) : null}
         </div>
@@ -295,12 +297,12 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       <div className="form-layout">
         <section className="panel">
           <div className="section-heading">
-            <h2>Basic information</h2>
+            <h2>{t('productEditor.basicInfo')}</h2>
             {product ? <StatusBadge status={product.status} /> : null}
           </div>
           <div className="form-grid">
             <label className="field">
-              <span>Name</span>
+              <span>{t('common.name')}</span>
               <input
                 value={form.name}
                 onChange={(event) => {
@@ -312,11 +314,11 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               />
             </label>
             <label className="field">
-              <span>Slug</span>
+              <span>{t('productEditor.slug')}</span>
               <input value={form.slug} onChange={(event) => updateField('slug', event.target.value)} />
             </label>
             <label className="field">
-              <span>Base price</span>
+              <span>{t('productEditor.basePrice')}</span>
               <input
                 min="0"
                 step="0.01"
@@ -326,19 +328,19 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               />
             </label>
             <label className="field">
-              <span>Status</span>
+              <span>{t('common.status')}</span>
               <select
                 value={form.status}
                 onChange={(event) => updateField('status', event.target.value as ProductStatus)}
               >
-                <option value="DRAFT">Draft</option>
-                <option value="ACTIVE">Active</option>
-                <option value="OUT_OF_STOCK">Out of stock</option>
-                <option value="ARCHIVED">Archived</option>
+                <option value="DRAFT">{labelForEnum('DRAFT', t)}</option>
+                <option value="ACTIVE">{labelForEnum('ACTIVE', t)}</option>
+                <option value="OUT_OF_STOCK">{labelForEnum('OUT_OF_STOCK', t)}</option>
+                <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
               </select>
             </label>
             <label className="field field-wide">
-              <span>Description</span>
+              <span>{t('common.description')}</span>
               <textarea
                 rows={5}
                 value={form.description}
@@ -349,7 +351,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         </section>
 
         <aside className="panel compact-panel">
-          <h2>Current state</h2>
+          <h2>{t('productEditor.currentState')}</h2>
           {product ? (
             <dl className="details-list">
               <div>
@@ -357,34 +359,34 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 <dd>{product.id}</dd>
               </div>
               <div>
-                <dt>Created</dt>
-                <dd>{formatDate(product.created_at)}</dd>
+                <dt>{t('common.created')}</dt>
+                <dd>{formatDate(product.created_at, language)}</dd>
               </div>
               <div>
-                <dt>Updated</dt>
-                <dd>{formatDate(product.updated_at)}</dd>
+                <dt>{t('common.updated')}</dt>
+                <dd>{formatDate(product.updated_at, language)}</dd>
               </div>
               <div>
-                <dt>Price</dt>
-                <dd>{formatMoney(product.base_price)}</dd>
+                <dt>{t('products.price')}</dt>
+                <dd>{formatMoney(product.base_price, language)}</dd>
               </div>
             </dl>
           ) : (
-            <p className="muted-text">A new product will be created as a draft unless published.</p>
+            <p className="muted-text">{t('productEditor.newDraftHint')}</p>
           )}
         </aside>
       </div>
 
       <section className="panel">
-        <h2>Category and tags</h2>
+        <h2>{t('productEditor.categoryTags')}</h2>
         <div className="form-grid">
           <label className="field">
-            <span>Category</span>
+            <span>{t('common.category')}</span>
             <select
               value={form.categoryId}
               onChange={(event) => updateField('categoryId', event.target.value)}
             >
-              <option value="">Unassigned</option>
+              <option value="">{t('products.unassigned')}</option>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -393,7 +395,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             </select>
           </label>
           <div className="field field-wide">
-            <span>Tags</span>
+            <span>{t('products.tags')}</span>
             <div className="checkbox-grid">
               {tags.map((tag) => (
                 <label key={tag.id}>
@@ -405,14 +407,16 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                   {tag.name}
                 </label>
               ))}
-              {tags.length === 0 ? <span className="muted-text">No tags available.</span> : null}
+              {tags.length === 0 ? (
+                <span className="muted-text">{t('productEditor.noTagsAvailable')}</span>
+              ) : null}
             </div>
           </div>
         </div>
       </section>
 
       <section className="panel">
-        <h2>Images</h2>
+        <h2>{t('productEditor.images')}</h2>
         {product && product.images.length > 0 ? (
           <div className="image-strip">
             {product.images.map((image) => (
@@ -424,10 +428,18 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             ))}
           </div>
         ) : (
-          <p className="muted-text">No product images uploaded yet.</p>
+          <p className="muted-text">{t('productEditor.noImages')}</p>
         )}
         <label className="field">
-          <span>Upload images</span>
+          <span>{t('productEditor.uploadImages')}</span>
+          <p className="image-hints image-hints-current">
+            {t('productEditor.imageHint', {
+              width: PRODUCT_IMAGE_CROP_SPEC.outputWidth,
+              height: PRODUCT_IMAGE_CROP_SPEC.outputHeight,
+              minWidth: PRODUCT_IMAGE_CROP_SPEC.minWidth,
+              minHeight: PRODUCT_IMAGE_CROP_SPEC.minHeight,
+            })}
+          </p>
           <p className="image-hints">
             Рекомендуемый размер: {PRODUCT_IMAGE_CROP_SPEC.outputWidth}x
             {PRODUCT_IMAGE_CROP_SPEC.outputHeight}. Минимальный размер:{' '}
@@ -445,7 +457,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                   type="button"
                   onClick={() => removePreparedImage(index)}
                 >
-                  Remove
+                  {t('common.remove')}
                 </button>
               </span>
             ))}
@@ -455,37 +467,37 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
       <section className="panel">
         <div className="section-heading">
-          <h2>Variants and stock</h2>
+          <h2>{t('productEditor.variantsStock')}</h2>
           <button className="button button-secondary" type="button" onClick={() => setVariants((current) => [...current, createVariantRow()])}>
-            Add variant
+            {t('productEditor.addVariant')}
           </button>
         </div>
         <div className="variant-grid">
           {visibleVariants.map((variant) => (
             <div className="variant-row" key={variant.localId}>
               <label>
-                <span>Size</span>
+                <span>{t('productEditor.size')}</span>
                 <input
                   value={variant.size}
                   onChange={(event) => updateVariant(variant.localId, { size: event.target.value })}
                 />
               </label>
               <label>
-                <span>Color</span>
+                <span>{t('productEditor.color')}</span>
                 <input
                   value={variant.color}
                   onChange={(event) => updateVariant(variant.localId, { color: event.target.value })}
                 />
               </label>
               <label>
-                <span>SKU</span>
+                <span>{t('productEditor.sku')}</span>
                 <input
                   value={variant.sku}
                   onChange={(event) => updateVariant(variant.localId, { sku: event.target.value })}
                 />
               </label>
               <label>
-                <span>Stock</span>
+                <span>{t('productEditor.stock')}</span>
                 <input
                   min="0"
                   type="number"
@@ -496,7 +508,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 />
               </label>
               <label>
-                <span>Reserved</span>
+                <span>{t('productEditor.reserved')}</span>
                 <input
                   min="0"
                   type="number"
@@ -514,14 +526,14 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                     updateVariant(variant.localId, { isActive: event.target.checked })
                   }
                 />
-                Active
+                {t('common.active')}
               </label>
               <button
                 className="text-button danger-text"
                 type="button"
                 onClick={() => removeVariant(variant)}
               >
-                Remove
+                {t('common.remove')}
               </button>
             </div>
           ))}
@@ -530,10 +542,14 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
       <div className="form-actions">
         <button className="button button-secondary" type="button" onClick={() => onNavigate('/products')}>
-          Back to products
+          {t('productEditor.backToProducts')}
         </button>
         <button className="button button-primary" disabled={saving} type="submit">
-          {saving ? 'Saving...' : mode === 'create' ? 'Create product' : 'Save changes'}
+          {saving
+            ? t('common.saving')
+            : mode === 'create'
+              ? t('productEditor.createProduct')
+              : t('productEditor.saveChanges')}
         </button>
       </div>
       {activeCropFile ? (

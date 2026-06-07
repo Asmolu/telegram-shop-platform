@@ -14,6 +14,7 @@ import type {
   BroadcastDelivery,
   BroadcastDeliverySummary,
   Category,
+  CategoryPayload,
   CustomerNotificationSubscription,
   NotificationTemplate,
   NotificationTemplatePayload,
@@ -36,16 +37,16 @@ import type {
   SellerRegistrationResendCodeResponse,
   SellerRegistrationStartResponse,
   Tag,
+  TagPayload,
   TokenResponse,
   UploadedBannerImage,
   UploadedProductImage,
   User,
 } from './types';
 
-export const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(
-  /\/+$/,
-  '',
-);
+export const API_BASE_URL = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1'
+).replace(/\/+$/, '');
 
 export function resolveMediaUrl(url: string | null | undefined): string {
   if (!url) {
@@ -56,7 +57,7 @@ export function resolveMediaUrl(url: string | null | undefined): string {
     return url;
   }
 
-  const origin = new URL(API_BASE_URL).origin;
+  const origin = new URL(API_BASE_URL || '/', window.location.origin).origin;
   return `${origin}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
@@ -83,7 +84,10 @@ export class ApiError extends Error {
 }
 
 function buildUrl(path: string, query?: QueryParams): string {
-  const url = new URL(`${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`);
+  const url = new URL(
+    `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`,
+    window.location.origin,
+  );
 
   Object.entries(query ?? {}).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') {
@@ -197,9 +201,19 @@ export const api = {
   },
   categories: {
     list: () => apiRequest<Category[]>('/categories'),
+    create: (body: CategoryPayload) =>
+      apiRequest<Category>('/categories', { method: 'POST', body }),
+    update: (categoryId: number, body: Partial<CategoryPayload>) =>
+      apiRequest<Category>(`/categories/${categoryId}`, { method: 'PATCH', body }),
+    delete: (categoryId: number) =>
+      apiRequest<void>(`/categories/${categoryId}`, { method: 'DELETE' }),
   },
   tags: {
     list: () => apiRequest<Tag[]>('/tags'),
+    create: (body: TagPayload) => apiRequest<Tag>('/tags', { method: 'POST', body }),
+    update: (tagId: number, body: Partial<TagPayload>) =>
+      apiRequest<Tag>(`/tags/${tagId}`, { method: 'PATCH', body }),
+    delete: (tagId: number) => apiRequest<void>(`/tags/${tagId}`, { method: 'DELETE' }),
   },
   products: {
     listAdmin: (query: QueryParams = {}) =>

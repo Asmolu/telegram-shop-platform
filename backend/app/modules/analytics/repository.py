@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AnalyticsEvent, Order, Product
+from app.db.models import AnalyticsEvent, Banner, Order, Product, PromoCode
 
 
 class AnalyticsRepository:
@@ -28,6 +28,8 @@ class AnalyticsRepository:
         user_id: int | None = None,
         product_id: int | None = None,
         order_id: int | None = None,
+        promo_code_id: int | None = None,
+        banner_id: int | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ) -> tuple[list[AnalyticsEvent], int]:
@@ -36,6 +38,8 @@ class AnalyticsRepository:
             user_id=user_id,
             product_id=product_id,
             order_id=order_id,
+            promo_code_id=promo_code_id,
+            banner_id=banner_id,
             created_from=created_from,
             created_to=created_to,
         )
@@ -65,6 +69,8 @@ class AnalyticsRepository:
                     user_id=None,
                     product_id=None,
                     order_id=None,
+                    promo_code_id=None,
+                    banner_id=None,
                     created_from=created_from,
                     created_to=created_to,
                 )
@@ -128,6 +134,66 @@ class AnalyticsRepository:
             if row.product_id is not None
         ]
 
+    async def top_promo_codes_by_usage(
+        self,
+        *,
+        limit: int,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> list[tuple[int, str | None, int]]:
+        used_count = func.count(AnalyticsEvent.id).label("used_count")
+        result = await self.session.execute(
+            select(AnalyticsEvent.promo_code_id, PromoCode.code, used_count)
+            .join(PromoCode, PromoCode.id == AnalyticsEvent.promo_code_id, isouter=True)
+            .where(
+                AnalyticsEvent.event_name == "promo.used",
+                AnalyticsEvent.promo_code_id.is_not(None),
+                *self._created_at_filters(
+                    AnalyticsEvent.created_at,
+                    created_from=created_from,
+                    created_to=created_to,
+                ),
+            )
+            .group_by(AnalyticsEvent.promo_code_id, PromoCode.code)
+            .order_by(used_count.desc(), AnalyticsEvent.promo_code_id.asc())
+            .limit(limit)
+        )
+        return [
+            (int(row.promo_code_id), row.code, int(row.used_count))
+            for row in result.all()
+            if row.promo_code_id is not None
+        ]
+
+    async def top_banners_by_clicks(
+        self,
+        *,
+        limit: int,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> list[tuple[int, str | None, int]]:
+        click_count = func.count(AnalyticsEvent.id).label("click_count")
+        result = await self.session.execute(
+            select(AnalyticsEvent.banner_id, Banner.title, click_count)
+            .join(Banner, Banner.id == AnalyticsEvent.banner_id, isouter=True)
+            .where(
+                AnalyticsEvent.event_name == "banner.clicked",
+                AnalyticsEvent.banner_id.is_not(None),
+                *self._created_at_filters(
+                    AnalyticsEvent.created_at,
+                    created_from=created_from,
+                    created_to=created_to,
+                ),
+            )
+            .group_by(AnalyticsEvent.banner_id, Banner.title)
+            .order_by(click_count.desc(), AnalyticsEvent.banner_id.asc())
+            .limit(limit)
+        )
+        return [
+            (int(row.banner_id), row.title, int(row.click_count))
+            for row in result.all()
+            if row.banner_id is not None
+        ]
+
     def _event_filters(
         self,
         *,
@@ -135,6 +201,8 @@ class AnalyticsRepository:
         user_id: int | None,
         product_id: int | None,
         order_id: int | None,
+        promo_code_id: int | None,
+        banner_id: int | None,
         created_from: datetime | None,
         created_to: datetime | None,
     ) -> list[Any]:
@@ -147,6 +215,10 @@ class AnalyticsRepository:
             conditions.append(AnalyticsEvent.product_id == product_id)
         if order_id is not None:
             conditions.append(AnalyticsEvent.order_id == order_id)
+        if promo_code_id is not None:
+            conditions.append(AnalyticsEvent.promo_code_id == promo_code_id)
+        if banner_id is not None:
+            conditions.append(AnalyticsEvent.banner_id == banner_id)
         conditions.extend(
             self._created_at_filters(
                 AnalyticsEvent.created_at,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from './shared/api';
 import type { User } from './shared/api';
 import { clearStoredToken, getStoredToken } from './shared/auth/tokenStorage';
+import { useI18n } from './shared/i18n';
 import { AppShell, type NavItem } from './shared/ui/AppShell';
 import { LoadingState } from './shared/ui/DataState';
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -9,6 +10,7 @@ import { SellerAuthPage } from './pages/Login/SellerAuthPage';
 import { OrdersPage } from './pages/Orders/OrdersPage';
 import { ProductsPage } from './pages/Products/ProductsPage';
 import { ProductEditorPage } from './pages/ProductEditor/ProductEditorPage';
+import { TaxonomyPage } from './pages/Taxonomy/TaxonomyPage';
 import { BannersPage } from './pages/Banners/BannersPage';
 import { PromoCodesPage } from './pages/PromoCodes/PromoCodesPage';
 import { ReviewsPage } from './pages/Reviews/ReviewsPage';
@@ -18,17 +20,18 @@ import { CustomerNotificationsPage } from './pages/CustomerNotifications/Custome
 import { SettingsPage } from './pages/Settings/SettingsPage';
 
 const navItems: NavItem[] = [
-  { path: '/dashboard', label: 'Dashboard' },
-  { path: '/orders', label: 'Orders' },
-  { path: '/products', label: 'Products' },
-  { path: '/products/new', label: 'Add Product' },
-  { path: '/banners', label: 'Banners' },
-  { path: '/promo-codes', label: 'Promo Codes' },
-  { path: '/reviews', label: 'Reviews' },
-  { path: '/statistics', label: 'Statistics' },
-  { path: '/customer-notifications', label: 'Customer Notifications' },
-  { path: '/seller-bot', label: 'Seller Bot' },
-  { path: '/settings', label: 'Settings' },
+  { path: '/dashboard', labelKey: 'nav.dashboard' },
+  { path: '/orders', labelKey: 'nav.orders' },
+  { path: '/products', labelKey: 'nav.products' },
+  { path: '/products/new', labelKey: 'nav.addProduct' },
+  { path: '/taxonomy', labelKey: 'nav.categoriesTags' },
+  { path: '/banners', labelKey: 'nav.banners' },
+  { path: '/promo-codes', labelKey: 'nav.promoCodes' },
+  { path: '/reviews', labelKey: 'nav.reviews' },
+  { path: '/statistics', labelKey: 'nav.statistics' },
+  { path: '/customer-notifications', labelKey: 'nav.customerNotifications' },
+  { path: '/seller-bot', labelKey: 'nav.sellerBot' },
+  { path: '/settings', labelKey: 'nav.settings' },
 ];
 
 function normalizePath(pathname: string): string {
@@ -39,29 +42,31 @@ function normalizePath(pathname: string): string {
   return pathname;
 }
 
-function getPageTitle(path: string): string {
-  if (path.startsWith('/orders')) return 'Orders';
-  if (path === '/products/new') return 'Add Product';
-  if (path.startsWith('/products/') && path.endsWith('/edit')) return 'Edit Product';
-  if (path.startsWith('/products')) return 'Products';
-  if (path.startsWith('/banners')) return 'Banners';
-  if (path.startsWith('/promo-codes')) return 'Promo Codes';
-  if (path.startsWith('/reviews')) return 'Reviews';
-  if (path.startsWith('/statistics')) return 'Statistics';
-  if (path.startsWith('/customer-notifications')) return 'Customer Notifications';
-  if (path.startsWith('/seller-bot')) return 'Seller Bot';
-  if (path.startsWith('/settings')) return 'Settings';
-  return 'Dashboard';
+function getPageTitleKey(path: string): string {
+  if (path.startsWith('/orders')) return 'nav.orders';
+  if (path === '/products/new') return 'nav.addProduct';
+  if (path.startsWith('/products/') && path.endsWith('/edit')) return 'nav.editProduct';
+  if (path.startsWith('/products')) return 'nav.products';
+  if (path.startsWith('/taxonomy')) return 'nav.categoriesTags';
+  if (path.startsWith('/banners')) return 'nav.banners';
+  if (path.startsWith('/promo-codes')) return 'nav.promoCodes';
+  if (path.startsWith('/reviews')) return 'nav.reviews';
+  if (path.startsWith('/statistics')) return 'nav.statistics';
+  if (path.startsWith('/customer-notifications')) return 'nav.customerNotifications';
+  if (path.startsWith('/seller-bot')) return 'nav.sellerBot';
+  if (path.startsWith('/settings')) return 'nav.settings';
+  return 'nav.dashboard';
 }
 
 export function App() {
+  const { t } = useI18n();
   const [path, setPath] = useState(() => normalizePath(window.location.pathname));
   const [token, setToken] = useState(() => getStoredToken());
   const [user, setUser] = useState<User | null>(null);
   const [checkingUser, setCheckingUser] = useState(Boolean(token));
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const title = useMemo(() => getPageTitle(path), [path]);
+  const title = useMemo(() => t(getPageTitleKey(path)), [path, t]);
 
   useEffect(() => {
     const onPopState = () => setPath(normalizePath(window.location.pathname));
@@ -96,7 +101,7 @@ export function App() {
           navigate('/login');
           return;
         }
-        setAuthError(error instanceof Error ? error.message : 'Could not verify the token.');
+        setAuthError(error instanceof Error ? error.message : t('app.tokenVerifyFailed'));
       })
       .finally(() => {
         if (!cancelled) {
@@ -107,7 +112,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, t]);
 
   function navigate(nextPath: string) {
     const normalized = normalizePath(nextPath);
@@ -134,7 +139,7 @@ export function App() {
   if (checkingUser) {
     return (
       <div className="auth-loading">
-        <LoadingState title="Checking seller token" />
+        <LoadingState title={t('app.checkingToken')} />
       </div>
     );
   }
@@ -166,6 +171,7 @@ function renderPage(
   if (path === '/orders') return <OrdersPage {...sharedPageProps} />;
   if (path === '/products') return <ProductsPage {...sharedPageProps} />;
   if (path === '/products/new') return <ProductEditorPage mode="create" {...sharedPageProps} />;
+  if (path === '/taxonomy') return <TaxonomyPage {...sharedPageProps} />;
 
   const productEditMatch = path.match(/^\/products\/(\d+)\/edit$/);
   if (productEditMatch) {

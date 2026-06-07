@@ -3,6 +3,7 @@ import { api } from '../../shared/api';
 import type { AnalyticsSummary, Order, Product, PromoCode, Review } from '../../shared/api';
 import { formatMoney } from '../../shared/utils/format';
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/DataState';
+import { useI18n } from '../../shared/i18n';
 
 interface DashboardData {
   products: Product[];
@@ -18,6 +19,7 @@ interface PageProps {
 }
 
 export function DashboardPage({ onNavigate, onAuthExpired }: PageProps) {
+  const { language, t } = useI18n();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -50,11 +52,18 @@ export function DashboardPage({ onNavigate, onAuthExpired }: PageProps) {
     loadDashboard();
   }, []);
 
-  if (loading) return <LoadingState title="Loading dashboard" />;
+  if (loading) return <LoadingState title={t('nav.dashboard')} />;
   if (error) {
     return <ErrorState error={error} onRetry={loadDashboard} onAuthExpired={onAuthExpired} />;
   }
-  if (!data) return <EmptyState title="No dashboard data" description="The API returned no data." />;
+  if (!data) {
+    return (
+      <EmptyState
+        title={t('dashboard.noData')}
+        description={t('dashboard.noDataDescription')}
+      />
+    );
+  }
 
   const activeProducts = data.products.filter((product) => product.status === 'ACTIVE').length;
   const outOfStockProducts = data.products.filter(
@@ -66,47 +75,52 @@ export function DashboardPage({ onNavigate, onAuthExpired }: PageProps) {
   return (
     <div className="page-stack">
       <section className="kpi-grid">
-        <KpiCard label="Active products" value={activeProducts} />
-        <KpiCard label="Out of stock" value={outOfStockProducts} tone="warning" />
-        <KpiCard label="New orders" value={newOrders} tone="info" />
-        <KpiCard label="Active promo codes" value={activePromoCodes} />
-        <KpiCard label="Pending reviews" value={data.pendingReviews.length} tone="warning" />
+        <KpiCard label={t('dashboard.activeProducts')} value={activeProducts} />
+        <KpiCard label={t('dashboard.outOfStock')} value={outOfStockProducts} tone="warning" />
+        <KpiCard label={t('dashboard.newOrders')} value={newOrders} tone="info" />
+        <KpiCard label={t('dashboard.activePromoCodes')} value={activePromoCodes} />
+        <KpiCard label={t('dashboard.pendingReviews')} value={data.pendingReviews.length} tone="warning" />
         <KpiCard
-          label="Revenue tracked"
-          value={formatMoney(data.analytics?.total_revenue ?? 0)}
+          label={t('dashboard.revenueTracked')}
+          value={formatMoney(data.analytics?.total_revenue ?? 0, language)}
           tone="strong"
         />
       </section>
 
       <section className="widget-grid">
         <DashboardLink
-          title="Products"
-          description="Manage catalog, stock, variants, status, and images."
+          title={t('nav.products')}
+          description={t('dashboard.productsDescription')}
           onClick={() => onNavigate('/products')}
         />
         <DashboardLink
-          title="Orders"
-          description="Review new orders and update fulfillment statuses."
+          title={t('nav.orders')}
+          description={t('dashboard.ordersDescription')}
           onClick={() => onNavigate('/orders')}
         />
         <DashboardLink
-          title="Banners"
-          description="Configure Mini App banner placements and destinations."
+          title={t('nav.categoriesTags')}
+          description={t('dashboard.taxonomyDescription')}
+          onClick={() => onNavigate('/taxonomy')}
+        />
+        <DashboardLink
+          title={t('nav.banners')}
+          description={t('dashboard.bannersDescription')}
           onClick={() => onNavigate('/banners')}
         />
         <DashboardLink
-          title="Promo Codes"
-          description="Create, edit, and deactivate discount codes."
+          title={t('nav.promoCodes')}
+          description={t('dashboard.promoDescription')}
           onClick={() => onNavigate('/promo-codes')}
         />
         <DashboardLink
-          title="Reviews"
-          description="Moderate pending product reviews."
+          title={t('nav.reviews')}
+          description={t('dashboard.reviewsDescription')}
           onClick={() => onNavigate('/reviews')}
         />
         <DashboardLink
-          title="Statistics"
-          description="Inspect basic event reporting and top products."
+          title={t('nav.statistics')}
+          description={t('dashboard.statisticsDescription')}
           onClick={() => onNavigate('/statistics')}
         />
       </section>
@@ -140,11 +154,13 @@ function DashboardLink({
   description: string;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <button className="dashboard-link" type="button" onClick={onClick}>
       <span>{title}</span>
       <p>{description}</p>
-      <strong>Open</strong>
+      <strong>{t('common.open')}</strong>
     </button>
   );
 }

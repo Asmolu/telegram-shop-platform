@@ -1,4 +1,5 @@
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
@@ -8,10 +9,19 @@ from app.common.cache import CacheService, banner_cache_patterns, public_banners
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Banner, BannerTargetType
+from app.db.models import Banner, BannerDisplayType, BannerTargetType
+from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.banners.repository import BannersRepository
-from app.modules.banners.schemas import BannerCreate, BannerList, BannerRead, BannerUpdate
+from app.modules.banners.schemas import (
+    BannerClickRead,
+    BannerCreate,
+    BannerList,
+    BannerRead,
+    BannerUpdate,
+)
+
+logger = logging.getLogger(__name__)
 
 BANNER_AUDIT_FIELDS = (
     "title",
@@ -20,6 +30,7 @@ BANNER_AUDIT_FIELDS = (
     "target_type",
     "target_id",
     "external_url",
+    "display_type",
     "position",
     "is_active",
     "starts_at",
@@ -35,11 +46,13 @@ class BannersService:
         session: AsyncSession,
         audit_service: AuditService | None = None,
         cache: CacheService | None = None,
+        analytics_tracker: AnalyticsTracker | None = None,
     ) -> None:
         self.session = session
         self.repository = BannersRepository(session)
         self.audit_service = audit_service or NoopAuditService()
         self.cache = cache
+        self.analytics_tracker = analytics_tracker
 
     async def list_public_banners(self, *, limit: int, offset: int) -> BannerList:
         cache_key = public_banners_list_key(limit=limit, offset=offset)
@@ -88,6 +101,7 @@ class BannersService:
             target_type=payload.target_type,
             target_id=payload.target_id,
             external_url=payload.external_url,
+            display_type=payload.display_type,
             position=payload.position,
             is_active=payload.is_active,
             starts_at=payload.starts_at,
@@ -113,6 +127,29 @@ class BannersService:
 
         await self._invalidate_public_cache()
         return BannerRead.model_validate(banner)
+
+    async def track_banner_click(
+        self,
+        *,
+        banner_id: int,
+        user_id: int | None = None,
+    ) -> BannerClickRead:
+        banner = await self._get_existing_banner(banner_id)
+        self._validate_banner_is_publicly_visible(banner)
+        target_type = banner.target_type.value if banner.target_type is not None else None
+        display_type = banner.display_type or BannerDisplayType.HORIZONTAL
+        await self._track_event(
+            "banner.clicked",
+            user_id=user_id,
+            banner_id=banner.id,
+            metadata={
+                "banner_id": banner.id,
+                "target_type": target_type,
+                "target_id": banner.target_id,
+                "display_type": display_type.value,
+            },
+        )
+        return BannerClickRead(banner_id=banner.id)
 
     async def update_banner(
         self,
@@ -226,11 +263,46 @@ class BannersService:
         if target_type == BannerTargetType.EXTERNAL_URL:
             if not external_url:
                 raise AppError("external_url is required", status.HTTP_400_BAD_REQUEST)
-        elif target_id is None:
-            raise AppError("target_id is required", status.HTTP_400_BAD_REQUEST)
+        elif target_type in {BannerTargetType.PRODUCT, BannerTargetType.CATEGORY}:
+            if target_id is None:
+                raise AppError("target_id is required", status.HTTP_400_BAD_REQUEST)
 
         if starts_at is not None and ends_at is not None and starts_at >= ends_at:
             raise AppError("starts_at must be before ends_at", status.HTTP_400_BAD_REQUEST)
+
+    def _validate_banner_is_publicly_visible(self, banner: Banner) -> None:
+        if not banner.is_active or banner.target_type is None:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+        now = datetime.now(UTC)
+        if banner.starts_at is not None and self._as_utc(banner.starts_at) > now:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+        if banner.ends_at is not None and self._as_utc(banner.ends_at) <= now:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int | None,
+        banner_id: int,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                banner_id=banner_id,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to track banner analytics event %s", event_name, exc_info=True)
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     async def _invalidate_public_cache(self) -> None:
         if self.cache is None:

@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { setStoredToken, type TokenStorageScope } from '../../shared/auth/tokenStorage';
+import { useI18n } from '../../shared/i18n';
 
 interface DevTokenLoginPageProps {
   authError: string | null;
@@ -7,6 +8,7 @@ interface DevTokenLoginPageProps {
 }
 
 export function DevTokenLoginPage({ authError, onTokenSaved }: DevTokenLoginPageProps) {
+  const { t } = useI18n();
   const [token, setToken] = useState('');
   const [scope, setScope] = useState<TokenStorageScope>('session');
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +18,7 @@ export function DevTokenLoginPage({ authError, onTokenSaved }: DevTokenLoginPage
     const cleanToken = token.trim();
 
     if (!cleanToken) {
-      setError('Paste a JWT access token to continue.');
+      setError(t('auth.pasteJwt'));
       return;
     }
 
@@ -27,26 +29,23 @@ export function DevTokenLoginPage({ authError, onTokenSaved }: DevTokenLoginPage
   return (
     <main className="login-page">
       <section className="login-card">
-        <p className="eyebrow">Temporary development auth</p>
-        <h1>Seller Portal</h1>
-        <p>
-          The backend currently exposes Telegram JWT auth, not a seller password login. Paste a
-          seller or admin access token here while the real login screen is pending.
-        </p>
+        <p className="eyebrow">{t('auth.devTitle')}</p>
+        <h1>{t('app.brand')}</h1>
+        <p>{t('auth.devDescription')}</p>
         {authError ? <div className="form-error">{authError}</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
         <form onSubmit={handleSubmit}>
           <label className="field">
-            <span>JWT access token</span>
+            <span>{t('auth.jwtToken')}</span>
             <textarea
               rows={6}
               value={token}
               onChange={(event) => setToken(event.target.value)}
-              placeholder="Paste Bearer token without the Bearer prefix"
+              placeholder={t('auth.jwtPlaceholder')}
             />
           </label>
           <fieldset className="segmented-field">
-            <legend>Storage</legend>
+            <legend>{t('auth.storage')}</legend>
             <label>
               <input
                 checked={scope === 'session'}
@@ -54,7 +53,7 @@ export function DevTokenLoginPage({ authError, onTokenSaved }: DevTokenLoginPage
                 type="radio"
                 onChange={() => setScope('session')}
               />
-              This tab
+              {t('auth.thisTab')}
             </label>
             <label>
               <input
@@ -63,11 +62,11 @@ export function DevTokenLoginPage({ authError, onTokenSaved }: DevTokenLoginPage
                 type="radio"
                 onChange={() => setScope('local')}
               />
-              This browser
+              {t('auth.thisBrowser')}
             </label>
           </fieldset>
           <button className="button button-primary button-wide" type="submit">
-            Continue
+            {t('auth.continue')}
           </button>
         </form>
       </section>

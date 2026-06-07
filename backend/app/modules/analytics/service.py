@@ -17,7 +17,9 @@ from app.modules.analytics.schemas import (
     AnalyticsEventList,
     AnalyticsEventRead,
     AnalyticsSummary,
+    TopBannerSummary,
     TopProductSummary,
+    TopPromoCodeSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,6 +120,8 @@ class AnalyticsService:
         user_id: int | None = None,
         product_id: int | None = None,
         order_id: int | None = None,
+        promo_code_id: int | None = None,
+        banner_id: int | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ) -> AnalyticsEventList:
@@ -128,6 +132,8 @@ class AnalyticsService:
             user_id=user_id,
             product_id=product_id,
             order_id=order_id,
+            promo_code_id=promo_code_id,
+            banner_id=banner_id,
             created_from=created_from,
             created_to=created_to,
         )
@@ -143,6 +149,16 @@ class AnalyticsService:
         created_to: datetime | None = None,
     ) -> AnalyticsSummary:
         top_products = await self.repository.top_products_by_views(
+            limit=10,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        top_promo_codes = await self.repository.top_promo_codes_by_usage(
+            limit=10,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        top_banners = await self.repository.top_banners_by_clicks(
             limit=10,
             created_from=created_from,
             created_to=created_to,
@@ -171,8 +187,18 @@ class AnalyticsService:
                 created_from=created_from,
                 created_to=created_to,
             ),
+            order_created_count=await self.repository.count_events(
+                "order.created",
+                created_from=created_from,
+                created_to=created_to,
+            ),
             promo_used_count=await self.repository.count_events(
                 "promo.used",
+                created_from=created_from,
+                created_to=created_to,
+            ),
+            banner_clicked_count=await self.repository.count_events(
+                "banner.clicked",
                 created_from=created_from,
                 created_to=created_to,
             ),
@@ -183,5 +209,21 @@ class AnalyticsService:
                     view_count=view_count,
                 )
                 for product_id, product_name, view_count in top_products
+            ],
+            top_promo_codes=[
+                TopPromoCodeSummary(
+                    promo_code_id=promo_code_id,
+                    promo_code=promo_code,
+                    used_count=used_count,
+                )
+                for promo_code_id, promo_code, used_count in top_promo_codes
+            ],
+            top_banners=[
+                TopBannerSummary(
+                    banner_id=banner_id,
+                    banner_title=banner_title,
+                    click_count=click_count,
+                )
+                for banner_id, banner_title, click_count in top_banners
             ],
         )

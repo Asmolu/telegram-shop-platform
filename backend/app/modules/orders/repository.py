@@ -4,7 +4,16 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Cart, CartItem, Order, OrderItem, OrderStatus, ProductVariant, User
+from app.db.models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+    OrderStatus,
+    Product,
+    ProductVariant,
+    User,
+)
 
 
 class OrdersRepository:
@@ -39,7 +48,7 @@ class OrdersRepository:
     async def list_for_user(self, *, user_id: int, limit: int, offset: int) -> list[Order]:
         result = await self.session.execute(
             select(Order)
-            .options(selectinload(Order.items))
+            .options(*self._order_detail_loads())
             .where(Order.user_id == user_id)
             .order_by(Order.created_at.desc(), Order.id.desc())
             .limit(limit)
@@ -81,7 +90,7 @@ class OrdersRepository:
         result = await self.session.execute(
             select(Order)
             .join(User, User.id == Order.user_id)
-            .options(selectinload(Order.items))
+            .options(*self._order_detail_loads())
             .where(*conditions)
             .order_by(Order.created_at.desc(), Order.id.desc())
             .limit(limit)
@@ -92,7 +101,7 @@ class OrdersRepository:
     async def get_by_id(self, order_id: int) -> Order | None:
         result = await self.session.execute(
             select(Order)
-            .options(selectinload(Order.items))
+            .options(*self._order_detail_loads())
             .where(Order.id == order_id)
         )
         return result.scalar_one_or_none()
@@ -100,7 +109,7 @@ class OrdersRepository:
     async def get_for_user(self, *, user_id: int, order_id: int) -> Order | None:
         result = await self.session.execute(
             select(Order)
-            .options(selectinload(Order.items))
+            .options(*self._order_detail_loads())
             .where(Order.user_id == user_id, Order.id == order_id)
         )
         return result.scalar_one_or_none()
@@ -110,3 +119,11 @@ class OrdersRepository:
 
     async def clear_cart(self, cart_id: int) -> None:
         await self.session.execute(delete(CartItem).where(CartItem.cart_id == cart_id))
+
+    def _order_detail_loads(self) -> tuple:
+        return (
+            selectinload(Order.items)
+            .selectinload(OrderItem.product)
+            .selectinload(Product.images),
+            selectinload(Order.items).selectinload(OrderItem.product_variant),
+        )
