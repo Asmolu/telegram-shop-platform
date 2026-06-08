@@ -254,6 +254,21 @@ async def test_block_seller_command_uses_internal_seller_id(
 
 
 @pytest.mark.asyncio
+async def test_new_product_caption_command_is_routed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_product_command_update())
+
+    assert response.handled is True
+    assert response.result == "bot_product_draft_created"
+    assert seller_bot.product_messages == ["White Hoodie"]
+    assert telegram.messages == [("-100", "Product draft created.")]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("command_text", "expected_fragment"),
     [
@@ -480,6 +495,7 @@ class FakeSellerBotCommandService:
     def __init__(self) -> None:
         self.blocked_user_ids: list[int] = []
         self.unblocked_user_ids: list[int] = []
+        self.product_messages: list[str] = []
 
     async def format_sellers_command(self, *, chat_id: int) -> str:
         return f"Seller list for {chat_id}"
@@ -505,6 +521,19 @@ class FakeSellerBotCommandService:
     ) -> str:
         self.unblocked_user_ids.append(target_user_id)
         return f"Seller #{target_user_id} has been unblocked."
+
+    async def create_quick_product_draft_command(
+        self,
+        *,
+        chat_id: int,
+        message,
+        actor_telegram_user_id: int | None,
+        actor_username: str | None,
+    ) -> str:
+        del chat_id, actor_telegram_user_id, actor_username
+        title_line = (message.caption or "").splitlines()[1]
+        self.product_messages.append(title_line.split(":", 1)[1].strip())
+        return "Product draft created."
 
 
 def _webhook_service() -> tuple[
@@ -588,6 +617,21 @@ def _seller_group_command_payload(text: str) -> dict[str, object]:
 
 def _seller_group_command_update(text: str) -> TelegramUpdate:
     return TelegramUpdate.model_validate(_seller_group_command_payload(text))
+
+
+def _seller_group_product_command_update() -> TelegramUpdate:
+    return TelegramUpdate.model_validate(
+        {
+            "update_id": 11,
+            "message": {
+                "message_id": 21,
+                "caption": "/new_product\nНазвание: White Hoodie\nЦена: 1990",
+                "photo": [{"file_id": "photo", "width": 1200, "height": 1500}],
+                "chat": {"id": -100, "type": "supergroup"},
+                "from": {"id": 500, "username": "operator"},
+            },
+        }
+    )
 
 
 def _telegram_start_update() -> TelegramUpdate:

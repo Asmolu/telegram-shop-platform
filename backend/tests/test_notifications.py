@@ -33,9 +33,15 @@ class FakeTelegramService:
     def __init__(self, *, error: TelegramDeliveryError | None = None) -> None:
         self.error = error
         self.messages: list[str] = []
+        self.photos: list[tuple[str, str | None]] = []
 
     async def send_seller_notification(self, message: str) -> None:
         self.messages.append(message)
+        if self.error is not None:
+            raise self.error
+
+    async def send_seller_photo(self, photo: str, *, caption: str | None = None) -> None:
+        self.photos.append((photo, caption))
         if self.error is not None:
             raise self.error
 
@@ -89,10 +95,63 @@ async def test_order_created_event_creates_and_sends_seller_notification() -> No
     assert stored.channel == NotificationChannel.TELEGRAM
     assert stored.status == NotificationStatus.SENT
     assert stored.sent_at is not None
-    assert telegram.messages == [
-        "New order ORD-00000001\n\nOrder ORD-00000001 was created. Total: 99.80."
-    ]
+    assert len(telegram.messages) == 1
+    message = telegram.messages[0]
+    assert "Order ID: 1" in message
+    assert "Order number: ORD-00000001" in message
+    assert "Customer ID: 1" in message
+    assert "Products:" in message
+    assert "Promo code: SAVE10" in message
+    assert "Discount: 20.00" in message
+    assert "Final total: 99.80" in message
+    assert "Seller Panel: https://seller.tsplatform.ru/orders" in message
     assert session.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_order_created_seller_notification_splits_long_messages() -> None:
+    service, _, _, telegram = _notifications_service()
+    payload = _detailed_order_created_payload()
+    payload["items"] = [
+        {
+            "product_id": index,
+            "product_title": f"Long Product {index} " + ("x" * 80),
+            "product_link": f"https://mini.tsplatform.ru/product/{index}",
+            "product_image_url": None,
+            "variant_size": "XL",
+            "variant_color": "White",
+            "variant_sku": f"SKU-{index}",
+            "quantity": 2,
+            "unit_price": "100.00",
+            "item_total": "200.00",
+        }
+        for index in range(1, 90)
+    ]
+
+    notification = await service.create_for_event(name=ORDER_CREATED, payload=payload)
+
+    assert notification is not None
+    assert len(telegram.messages) > 1
+    assert all(len(message) <= 4096 for message in telegram.messages)
+
+
+@pytest.mark.asyncio
+async def test_order_created_seller_notification_can_send_photo_caption() -> None:
+    service, _, _, telegram = _notifications_service()
+
+    notification = await service.create_for_event(
+        name=ORDER_CREATED,
+        payload=_detailed_order_created_payload(),
+    )
+
+    assert notification is not None
+    assert telegram.messages == []
+    assert telegram.photos
+    photo_url, caption = telegram.photos[0]
+    assert photo_url == "https://api.tsplatform.ru/uploads/products/hoodie.jpg"
+    assert caption is not None
+    assert "Product ID: 10" in caption
+    assert "Image: https://api.tsplatform.ru/uploads/products/hoodie.jpg" in caption
 
 
 @pytest.mark.asyncio
@@ -295,7 +354,55 @@ def _order_created_payload() -> dict[str, object]:
         "total_amount": "99.80",
         "promo_code_id": 7,
         "promo_code": "SAVE10",
+        "customer": {
+            "user_id": 1,
+            "telegram_id": 42,
+            "username": "buyer",
+            "first_name": "Ada",
+            "last_name": None,
+            "name": "Ada",
+        },
     }
+
+
+def _detailed_order_created_payload() -> dict[str, object]:
+    payload = _order_created_payload()
+    payload.update(
+        {
+            "status": "NEW",
+            "created_at": "2026-05-27T12:00:00+00:00",
+            "customer": {
+                "user_id": 1,
+                "telegram_id": 42,
+                "username": "buyer",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "name": "Ada Lovelace",
+            },
+            "items": [
+                {
+                    "product_id": 10,
+                    "product_title": "Hoodie",
+                    "product_link": "https://mini.tsplatform.ru/product/10",
+                    "product_image_url": "https://api.tsplatform.ru/uploads/products/hoodie.jpg",
+                    "variant_size": "M",
+                    "variant_color": "White",
+                    "variant_sku": "HD-M-W",
+                    "quantity": 1,
+                    "unit_price": "99.80",
+                    "item_total": "99.80",
+                }
+            ],
+            "contact": {
+                "name": "Ada",
+                "phone": "+79990000000",
+                "delivery_address": "Moscow",
+                "delivery_comment": "Call first",
+            },
+            "seller_panel_url": "https://seller.tsplatform.ru/orders",
+        }
+    )
+    return payload
 
 
 def _user(role: UserRole) -> User:

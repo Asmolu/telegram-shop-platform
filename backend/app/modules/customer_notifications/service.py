@@ -32,7 +32,7 @@ from app.events.names import (
     ORDER_STATUS_CHANGED,
     ORDER_STATUS_CHANGED_CUSTOMER,
 )
-from app.modules.audit.service import AuditService
+from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.customer_notifications.repository import CustomerNotificationsRepository
 from app.modules.customer_notifications.schemas import (
     CustomerBotWebhookResponse,
@@ -62,12 +62,10 @@ UNKNOWN_CHAT_TYPE = "unknown"
 START_LINK_PAYLOAD = "notify"
 CALLBACK_PREFIX = "customer_notifications"
 ACTION_SUBSCRIPTION_UPDATED = "customer_notifications.subscription_updated"
+ACTION_CUSTOMER_ORDER_NOTIFICATION_SENT = "customer_order_notification_sent"
+ACTION_CUSTOMER_ORDER_NOTIFICATION_FAILED = "customer_order_notification_failed"
 TELEGRAM_ERROR_MESSAGE_MAX_LENGTH = 500
 
-WELCOME_MESSAGE = (
-    "Уведомления подключены. Мы будем писать сюда о заказах и важных изменениях. "
-    "Рекламные предложения выключены, их можно включить отдельно в настройках."
-)
 STOP_MESSAGE = "Уведомления выключены. Чтобы снова получать сообщения, отправьте /start."
 CONNECT_PRIVATE_CHAT_MESSAGE = (
     "Уведомления можно подключить только в личном чате с ботом. Откройте бота и отправьте /start."
@@ -78,6 +76,9 @@ ORDER_PROCESSING_CUSTOMER_MESSAGE = "Заказ принят в обработк
 ORDER_SHIPPED_CUSTOMER_MESSAGE = "Заказ отправлен"
 ORDER_DELIVERED_CUSTOMER_MESSAGE = "Заказ доставлен"
 ORDER_CANCELLED_CUSTOMER_MESSAGE = "Заказ отменён"
+
+
+WELCOME_MESSAGE = "Уведомления подключены. Сообщения по заказам включены."
 
 
 class CustomerTelegramSender:
@@ -101,11 +102,15 @@ class CustomerServiceNotificationDeliveryService:
         *,
         repository: CustomerNotificationsRepository | None = None,
         sender: CustomerTelegramSender | None = None,
+        audit_service: AuditService | NoopAuditService | None = None,
         now_factory: Any | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or CustomerNotificationsRepository(session)
         self.sender = sender or CustomerTelegramSender()
+        self.audit_service = audit_service or (
+            AuditService(session) if hasattr(session, "add") else NoopAuditService()
+        )
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
 
     async def handle_order_event(
@@ -174,6 +179,8 @@ class CustomerServiceNotificationDeliveryService:
             delivery.error_code = error_code
             delivery.error_message = error_message
             self.repository.add_delivery(delivery)
+            await self._flush_if_supported()
+            await self._audit_delivery(delivery, action=ACTION_CUSTOMER_ORDER_NOTIFICATION_FAILED)
             await self._commit("Customer service notification skip recording failed")
             return delivery
 
@@ -202,6 +209,12 @@ class CustomerServiceNotificationDeliveryService:
             delivery.sent_at = self._now()
             subscription.last_delivery_error = None
 
+        action = (
+            ACTION_CUSTOMER_ORDER_NOTIFICATION_SENT
+            if delivery.status == CustomerServiceNotificationDeliveryStatus.SENT
+            else ACTION_CUSTOMER_ORDER_NOTIFICATION_FAILED
+        )
+        await self._audit_delivery(delivery, action=action)
         await self._commit("Customer service notification delivery update failed")
         return delivery
 
@@ -359,6 +372,34 @@ class CustomerServiceNotificationDeliveryService:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    async def _audit_delivery(
+        self,
+        delivery: CustomerServiceNotificationDelivery,
+        *,
+        action: str,
+    ) -> None:
+        await self.audit_service.record_action(
+            actor_user_id=None,
+            action=action,
+            entity_type="customer_service_notification_delivery",
+            entity_id=delivery.id,
+            after_data={
+                "id": delivery.id,
+                "user_id": delivery.user_id,
+                "order_id": delivery.order_id,
+                "event_name": delivery.event_name,
+                "status": delivery.status.value,
+                "error_code": delivery.error_code,
+            },
+            metadata={"source": "customer_order_service_notification"},
+            commit=False,
+        )
+
+    async def _flush_if_supported(self) -> None:
+        flush = getattr(self.session, "flush", None)
+        if callable(flush):
+            await flush()
 
     async def _commit(self, error_message: str) -> None:
         try:
@@ -542,11 +583,7 @@ class CustomerNotificationsService:
             source="bot_start",
         )
         await self._commit("Customer notification subscription start failed")
-        await self._send_settings_message(
-            message.chat.id,
-            subscription=subscription,
-            intro=WELCOME_MESSAGE,
-        )
+        await self._send_chat_message(message.chat.id, WELCOME_MESSAGE)
         result = "started_with_payload" if start_payload else "started"
         return self._response(handled=True, result=result)
 
@@ -785,11 +822,10 @@ class CustomerNotificationsService:
         return "\n".join(
             (
                 "Настройки уведомлений",
-                f"Telegram-чат: {chat_state}",
-                f"Заказы и сервисные сообщения: {service_state}",
-                f"Рекламные предложения: {marketing_state}",
-                "",
-                "Команда /stop выключит все сообщения от этого бота.",
+                f"Чат: {chat_state}",
+                f"Заказы: {service_state}",
+                f"Акции: {marketing_state}",
+                "/stop отключит сообщения.",
             )
         )
 

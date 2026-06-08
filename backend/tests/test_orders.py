@@ -257,21 +257,27 @@ async def test_checkout_from_valid_cart() -> None:
     assert repository.variants[1].stock_quantity == 3
     assert repository.carts[1].items == []
     assert session.committed is True
-    assert events.events == [
-        (
-            ORDER_CREATED,
-            {
-                "order_id": 1,
-                "order_number": order.order_number,
-                "user_id": 1,
-                "subtotal_amount": "119.80",
-                "discount_amount": "0.00",
-                "total_amount": "119.80",
-                "promo_code_id": None,
-                "promo_code": None,
-            },
-        )
-    ]
+    assert len(events.events) == 1
+    event_name, event_payload = events.events[0]
+    assert event_name == ORDER_CREATED
+    assert event_payload["order_id"] == 1
+    assert event_payload["order_number"] == order.order_number
+    assert event_payload["status"] == "NEW"
+    assert event_payload["user_id"] == 1
+    assert event_payload["subtotal_amount"] == "119.80"
+    assert event_payload["discount_amount"] == "0.00"
+    assert event_payload["total_amount"] == "119.80"
+    assert event_payload["promo_code_id"] is None
+    assert event_payload["promo_code"] is None
+    assert event_payload["customer"]["user_id"] == 1
+    assert event_payload["items"][0]["product_title"] == "Hoodie"
+    assert event_payload["items"][0]["product_id"] == 1
+    assert event_payload["items"][0]["product_link"] == "https://mini.tsplatform.ru/product/1"
+    assert event_payload["items"][0]["variant_color"] == "Black"
+    assert event_payload["items"][0]["variant_sku"] == "HOODIE-M-BLK"
+    assert event_payload["items"][0]["quantity"] == 2
+    assert event_payload["contact"]["name"] == "Ada Lovelace"
+    assert event_payload["seller_panel_url"] == "https://seller.tsplatform.ru/orders"
     assert events.commit_states == [True]
 
 

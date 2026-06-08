@@ -122,6 +122,7 @@ class OrdersRepository:
 
     def _order_detail_loads(self) -> tuple:
         return (
+            selectinload(Order.user),
             selectinload(Order.items)
             .selectinload(OrderItem.product)
             .selectinload(Product.images),

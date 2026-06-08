@@ -127,7 +127,9 @@ async def test_customer_bot_start_private_chat_creates_subscription_and_links_us
     assert subscription.service_opt_in is True
     assert subscription.marketing_opt_in is False
     assert telegram.messages[0][0] == "100"
-    assert telegram.messages[0][2] is not None
+    assert telegram.messages[0][1] == "Уведомления подключены. Сообщения по заказам включены."
+    assert "Telegram-" not in telegram.messages[0][1]
+    assert telegram.messages[0][2] is None
     assert audit.actions
 
 

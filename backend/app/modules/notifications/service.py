@@ -14,6 +14,9 @@ from app.modules.notifications.repository import NotificationsRepository
 from app.modules.notifications.schemas import NotificationList, NotificationRead
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 
+TELEGRAM_MESSAGE_LIMIT = 4096
+TELEGRAM_PHOTO_CAPTION_LIMIT = 1024
+
 
 class NotificationsEventPublisher:
     """Post-commit event adapter for notification creation."""
@@ -160,9 +163,8 @@ class NotificationsService:
 
     async def _create_order_created(self, payload: Mapping[str, object]) -> NotificationRead:
         order_number = self._order_label(payload)
-        total_amount = self._payload_value(payload, "total_amount", fallback="0.00")
         title = f"New order {order_number}"
-        message = f"Order {order_number} was created. Total: {total_amount}."
+        message = self._format_seller_order_created_message(payload)
         notification = await self.create_notification(
             type=ORDER_CREATED,
             title=title,
@@ -221,9 +223,7 @@ class NotificationsService:
 
     async def _deliver_telegram(self, notification: Notification) -> None:
         try:
-            await self.telegram_service.send_seller_notification(
-                self._format_telegram_message(notification)
-            )
+            await self._send_seller_telegram_notification(notification)
         except TelegramDeliveryError as exc:
             notification.status = NotificationStatus.FAILED
             notification.error_message = str(exc)
@@ -238,6 +238,160 @@ class NotificationsService:
 
     def _format_telegram_message(self, notification: Notification) -> str:
         return f"{notification.title}\n\n{notification.message}"
+
+    async def _send_seller_telegram_notification(self, notification: Notification) -> None:
+        message = self._format_telegram_message(notification)
+        parts = self._split_telegram_message(message)
+        image_url = self._first_product_image_url(notification.payload)
+        if (
+            notification.type == ORDER_CREATED
+            and image_url is not None
+            and len(parts) == 1
+            and len(parts[0]) <= TELEGRAM_PHOTO_CAPTION_LIMIT
+            and hasattr(self.telegram_service, "send_seller_photo")
+        ):
+            await self.telegram_service.send_seller_photo(image_url, caption=parts[0])
+            return
+
+        for part in parts:
+            await self.telegram_service.send_seller_notification(part)
+
+    def _format_seller_order_created_message(self, payload: Mapping[str, object]) -> str:
+        order_id = self._payload_value(payload, "order_id", fallback="unknown")
+        order_number = self._order_label(payload)
+        status_value = self._payload_value(payload, "status", fallback="unknown")
+        created_at = self._payload_value(payload, "created_at", fallback="unknown")
+        subtotal = self._payload_value(payload, "subtotal_amount", fallback="0.00")
+        discount = self._payload_value(payload, "discount_amount", fallback="0.00")
+        total = self._payload_value(payload, "total_amount", fallback="0.00")
+        promo = self._payload_value(payload, "promo_code", fallback="-")
+        seller_panel_url = self._payload_value(
+            payload,
+            "seller_panel_url",
+            fallback="https://seller.tsplatform.ru/orders",
+        )
+
+        lines = [
+            f"Order ID: {order_id}",
+            f"Order number: {order_number}",
+            f"Status: {status_value}",
+            f"Created at: {created_at}",
+            "",
+            "Customer:",
+            *self._customer_lines(payload.get("customer")),
+            "",
+            "Products:",
+            *self._product_lines(payload.get("items")),
+            "",
+            "Totals:",
+            f"Subtotal: {subtotal}",
+            f"Promo code: {promo or '-'}",
+            f"Discount: {discount}",
+            f"Final total: {total}",
+            "",
+            "Delivery/contact:",
+            *self._contact_lines(payload.get("contact")),
+            "",
+            f"Seller Panel: {seller_panel_url}",
+        ]
+        return "\n".join(lines)
+
+    def _customer_lines(self, customer: object) -> list[str]:
+        if not isinstance(customer, dict):
+            return ["-"]
+        username = customer.get("username")
+        telegram_tag = f"@{username}" if username else "-"
+        name = customer.get("name") or self._join_name(
+            customer.get("first_name"),
+            customer.get("last_name"),
+        )
+        return [
+            f"Telegram: {telegram_tag}",
+            f"Customer ID: {customer.get('user_id') or '-'}",
+            f"Telegram ID: {customer.get('telegram_id') or '-'}",
+            f"Mini App name: {name or '-'}",
+        ]
+
+    def _product_lines(self, items: object) -> list[str]:
+        if not isinstance(items, list) or not items:
+            return ["-"]
+        lines: list[str] = []
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                continue
+            variant_parts = [
+                f"size={item.get('variant_size') or '-'}",
+                f"color={item.get('variant_color') or '-'}",
+                f"sku={item.get('variant_sku') or '-'}",
+            ]
+            lines.extend(
+                [
+                    f"{index}. {item.get('product_title') or '-'}",
+                    f"   Product ID: {item.get('product_id') or '-'}",
+                    f"   Link: {item.get('product_link') or '-'}",
+                    f"   Image: {item.get('product_image_url') or '-'}",
+                    f"   Variant: {', '.join(variant_parts)}",
+                    f"   Quantity: {item.get('quantity') or '-'}",
+                    f"   Unit price: {item.get('unit_price') or '0.00'}",
+                    f"   Item total: {item.get('item_total') or '0.00'}",
+                ]
+            )
+        return lines or ["-"]
+
+    def _contact_lines(self, contact: object) -> list[str]:
+        if not isinstance(contact, dict):
+            return ["-"]
+        return [
+            f"Name: {contact.get('name') or '-'}",
+            f"Phone: {contact.get('phone') or '-'}",
+            f"Address: {contact.get('delivery_address') or '-'}",
+            f"Comment: {contact.get('delivery_comment') or '-'}",
+        ]
+
+    def _split_telegram_message(
+        self,
+        message: str,
+        *,
+        limit: int = TELEGRAM_MESSAGE_LIMIT,
+    ) -> list[str]:
+        if len(message) <= limit:
+            return [message]
+
+        parts: list[str] = []
+        current = ""
+        for line in message.splitlines(keepends=True):
+            if len(line) > limit:
+                if current:
+                    parts.append(current.rstrip())
+                    current = ""
+                parts.extend(line[index : index + limit] for index in range(0, len(line), limit))
+                continue
+            if len(current) + len(line) > limit:
+                parts.append(current.rstrip())
+                current = line
+            else:
+                current += line
+        if current:
+            parts.append(current.rstrip())
+        return [part for part in parts if part]
+
+    def _first_product_image_url(self, payload: Mapping[str, object] | None) -> str | None:
+        if payload is None:
+            return None
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return None
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            image_url = item.get("product_image_url")
+            if isinstance(image_url, str) and image_url.startswith(("http://", "https://")):
+                return image_url
+        return None
+
+    def _join_name(self, first_name: object, last_name: object) -> str | None:
+        parts = [part for part in (first_name, last_name) if isinstance(part, str) and part]
+        return " ".join(parts) or None
 
     async def _get_existing_notification(self, notification_id: int) -> Notification:
         notification = await self.repository.get_by_id(notification_id)

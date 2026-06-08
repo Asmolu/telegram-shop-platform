@@ -67,6 +67,14 @@ class FakeCustomerSender:
         return 123
 
 
+class FakeAuditService:
+    def __init__(self) -> None:
+        self.records: list[dict[str, object]] = []
+
+    async def record_action(self, **kwargs: object) -> None:
+        self.records.append(kwargs)
+
+
 @pytest.mark.asyncio
 async def test_eligible_customer_receives_order_created_service_notification() -> None:
     service, repository, sender, session = _delivery_service(subscription=_subscription())
@@ -234,6 +242,32 @@ async def test_order_status_update_creates_customer_status_notification_when_eli
     assert sender.messages == [(100, expected_message)]
 
 
+@pytest.mark.asyncio
+async def test_customer_order_notification_delivery_audits_sent_and_failed() -> None:
+    sent_audit = FakeAuditService()
+    service, _, _, _ = _delivery_service(
+        subscription=_subscription(),
+        audit_service=sent_audit,
+    )
+
+    sent_delivery = await service.notify_order_created(_order_created_payload())
+
+    assert sent_delivery is not None
+    assert sent_audit.records[0]["action"] == "customer_order_notification_sent"
+
+    failed_audit = FakeAuditService()
+    service, _, _, _ = _delivery_service(
+        subscription=_subscription(),
+        sender_error=TelegramDeliveryError("Telegram API request failed"),
+        audit_service=failed_audit,
+    )
+
+    failed_delivery = await service.notify_order_created(_order_created_payload())
+
+    assert failed_delivery is not None
+    assert failed_audit.records[0]["action"] == "customer_order_notification_failed"
+
+
 def test_customer_telegram_sender_uses_customer_bot_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,6 +284,7 @@ def _delivery_service(
     *,
     subscription: CustomerTelegramSubscription | None,
     sender_error: TelegramDeliveryError | None = None,
+    audit_service: FakeAuditService | None = None,
 ) -> tuple[
     CustomerServiceNotificationDeliveryService,
     FakeDeliveryRepository,
@@ -263,6 +298,7 @@ def _delivery_service(
         session,
         repository=repository,
         sender=sender,
+        audit_service=audit_service,
         now_factory=_now,
     )
     return service, repository, sender, session

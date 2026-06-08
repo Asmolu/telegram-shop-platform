@@ -1,4 +1,7 @@
+import mimetypes
 import re
+from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -14,7 +17,7 @@ START_COMMAND_RE = re.compile(
     re.IGNORECASE,
 )
 COMMAND_RE = re.compile(
-    r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$"
+    r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>[\s\S]*))?$"
 )
 SELLER_ID_RE = re.compile(r"^[0-9]+$")
 POSTGRES_INT32_MAX = 2_147_483_647
@@ -32,6 +35,15 @@ PRIVATE_CHAT_REQUIRED_MESSAGE = (
     "Откройте Bot 2 в личном чате и отправьте команду регистрации из Seller Panel."
 )
 MISSING_USER_MESSAGE = "Не удалось прочитать Telegram аккаунт. Откройте Bot 2 заново."
+
+
+@dataclass(frozen=True)
+class TelegramDownloadedFile:
+    content: bytes
+    file_path: str
+    original_filename: str
+    mime_type: str | None
+    extension: str
 
 
 class TelegramDeliveryError(Exception):
@@ -73,6 +85,12 @@ class TelegramService:
 
         await self.send_message(self.seller_chat_id, message)
 
+    async def send_seller_photo(self, photo: str, *, caption: str | None = None) -> None:
+        if not self.bot_token or not self.seller_chat_id:
+            raise TelegramDeliveryError("Telegram seller notification is not configured")
+
+        await self.send_photo(self.seller_chat_id, photo, caption=caption)
+
     async def send_message(
         self,
         chat_id: str,
@@ -98,6 +116,80 @@ class TelegramService:
             return None
         message_id = result.get("message_id")
         return int(message_id) if isinstance(message_id, int) else None
+
+    async def send_photo(
+        self,
+        chat_id: str,
+        photo: str,
+        *,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+        reply_markup: dict[str, object] | None = None,
+    ) -> int | None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "photo": photo,
+        }
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        body = await self._post("sendPhoto", payload)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        message_id = result.get("message_id")
+        return int(message_id) if isinstance(message_id, int) else None
+
+    async def get_file(self, file_id: str) -> dict[str, object]:
+        body = await self._post("getFile", {"file_id": file_id})
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise TelegramDeliveryError("Telegram API returned invalid file metadata")
+        return result
+
+    async def download_file(self, file_id: str) -> TelegramDownloadedFile:
+        if not self.bot_token:
+            raise TelegramDeliveryError(
+                "Telegram bot token is not configured",
+                error_code="configuration_error",
+            )
+
+        file_metadata = await self.get_file(file_id)
+        file_path_value = file_metadata.get("file_path")
+        if not isinstance(file_path_value, str) or not file_path_value.strip():
+            raise TelegramDeliveryError("Telegram API returned invalid file path")
+
+        url = f"https://api.telegram.org/file/bot{self.bot_token}/{file_path_value}"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            raise TelegramDeliveryError(
+                "Telegram file download failed",
+                error_code="request_failed",
+            ) from exc
+        if response.status_code >= 400:
+            raise TelegramDeliveryError(
+                f"Telegram file download returned HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
+
+        original_filename = Path(file_path_value).name or f"{file_id}.jpg"
+        extension = Path(original_filename).suffix.lower() or ".jpg"
+        return TelegramDownloadedFile(
+            content=response.content,
+            file_path=file_path_value,
+            original_filename=original_filename[:255],
+            mime_type=mimetypes.guess_type(original_filename)[0],
+            extension=extension,
+        )
 
     async def get_me(self) -> dict[str, object]:
         body = await self._post("getMe", {})
@@ -232,21 +324,22 @@ class SellerBotWebhookService:
             return await self._handle_callback_query(update)
 
         message = update.message
-        if message is None or message.text is None:
+        message_text = self._message_text(message)
+        if message is None or message_text is None:
             return self._response(handled=False, result="unsupported_update")
 
-        command_match = COMMAND_RE.match(message.text.strip())
+        command_match = COMMAND_RE.match(message_text.strip())
         if command_match is not None:
             command = command_match.group("command").lower()
             args = (command_match.group("args") or "").strip()
-            if command in {"/sellers", "/block_seller", "/unblock_seller"}:
+            if command in {"/sellers", "/block_seller", "/unblock_seller", "/new_product"}:
                 return await self._handle_seller_group_command(
                     command=command,
                     args=args,
                     update=update,
                 )
 
-        start_payload = self._extract_start_payload(message.text)
+        start_payload = self._extract_start_payload(message_text)
         if start_payload is None:
             return self._response(handled=False, result="ignored")
 
@@ -341,8 +434,18 @@ class SellerBotWebhookService:
                 await self._send_chat_message(message.chat.id, response_text)
                 return self._response(handled=True, result="sellers_list_sent")
 
-            target_user_id = self._parse_seller_id_arg(args, command=command)
             actor_user = message.from_user
+            if command == "/new_product":
+                response_text = await self.seller_bot_service.create_quick_product_draft_command(
+                    chat_id=message.chat.id,
+                    message=message,
+                    actor_telegram_user_id=actor_user.id if actor_user is not None else None,
+                    actor_username=actor_user.username if actor_user is not None else None,
+                )
+                await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="bot_product_draft_created")
+
+            target_user_id = self._parse_seller_id_arg(args, command=command)
             if command == "/block_seller":
                 response_text = await self.seller_bot_service.block_seller_command(
                     chat_id=message.chat.id,
@@ -363,7 +466,12 @@ class SellerBotWebhookService:
             return self._response(handled=True, result="seller_unblocked")
         except AppError as exc:
             await self._send_chat_message(message.chat.id, exc.message)
-            return self._response(handled=True, result="seller_command_error")
+            result = (
+                "bot_product_post_rejected"
+                if command == "/new_product"
+                else "seller_command_error"
+            )
+            return self._response(handled=True, result=result)
 
     def _extract_start_payload(self, text: str) -> str | None:
         match = START_COMMAND_RE.match(text.strip())
@@ -397,6 +505,12 @@ class SellerBotWebhookService:
                 raise AppError(TELEGRAM_ID_GUIDANCE_MESSAGE, 400)
             raise AppError(SELLER_ID_RANGE_MESSAGE, 400)
         return seller_id
+
+    def _message_text(self, message: object | None) -> str | None:
+        if message is None:
+            return None
+        text = getattr(message, "text", None) or getattr(message, "caption", None)
+        return text if isinstance(text, str) else None
 
     def _registration_error_message(self, exc: AppError) -> str:
         message = exc.message.lower()

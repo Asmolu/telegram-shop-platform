@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category
@@ -17,6 +17,15 @@ class CategoriesRepository:
 
     async def get_by_slug(self, slug: str) -> Category | None:
         result = await self.session.execute(select(Category).where(Category.slug == slug))
+        return result.scalar_one_or_none()
+
+    async def get_by_name_or_slug(self, value: str) -> Category | None:
+        normalized = value.strip().lower()
+        result = await self.session.execute(
+            select(Category).where(
+                (func.lower(Category.name) == normalized) | (Category.slug == normalized)
+            )
+        )
         return result.scalar_one_or_none()
 
     def add(self, category: Category) -> None:

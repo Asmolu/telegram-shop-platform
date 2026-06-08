@@ -21,7 +21,6 @@ from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
-from app.modules.products.search import sanitize_search_query
 from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
@@ -33,6 +32,7 @@ from app.modules.products.schemas import (
     ProductVariantList,
     ProductVariantUpdate,
 )
+from app.modules.products.search import sanitize_search_query
 from app.modules.tags.repository import TagsRepository
 
 logger = logging.getLogger(__name__)

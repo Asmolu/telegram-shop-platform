@@ -11,6 +11,7 @@ from app.db.models import Category, Product, ProductStatus, ProductVariant, Tag
 from app.modules.categories.schemas import CategoryCreate, CategoryUpdate
 from app.modules.categories.service import CategoriesService
 from app.modules.products.inventory import calculate_available_quantity
+from app.modules.products.repository import ProductsRepository
 from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
@@ -19,7 +20,6 @@ from app.modules.products.schemas import (
     ProductVariantCreate,
     ProductVariantUpdate,
 )
-from app.modules.products.repository import ProductsRepository
 from app.modules.products.search import (
     SEARCH_PRIORITY_DEFAULT,
     normalize_search_aliases,
