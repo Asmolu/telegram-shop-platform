@@ -7,6 +7,28 @@ export function formatPrice(value: string | number | null | undefined) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+export function getDisplayOldPrice(price: string | number | null | undefined, oldPrice?: string | number | null, compareAtPrice?: string | number | null) {
+  const current = Number(price ?? 0);
+  const candidate = Number(oldPrice ?? compareAtPrice ?? 0);
+
+  if (!Number.isFinite(current) || !Number.isFinite(candidate) || candidate <= current) {
+    return null;
+  }
+
+  return candidate;
+}
+
+export function formatDiscountPercent(price: string | number | null | undefined, oldPrice?: string | number | null) {
+  const current = Number(price ?? 0);
+  const previous = Number(oldPrice ?? 0);
+
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= current) {
+    return null;
+  }
+
+  return `-${Math.round(((previous - current) / previous) * 100)}%`;
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) {
     return '';

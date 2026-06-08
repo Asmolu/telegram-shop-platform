@@ -17,7 +17,7 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductImageCarousel, TopBar } from '../shared/ui';
-import { formatDate, formatPrice } from '../shared/utils/format';
+import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
@@ -26,11 +26,13 @@ export function ProductDetailPage() {
   const [product, setProduct] = React.useState<Product | null>(null);
   const [reviews, setReviews] = React.useState<Review[]>([]);
   const [cart, setCart] = React.useState<Cart | null>(null);
+  const [addedVariantIds, setAddedVariantIds] = React.useState<Set<number>>(new Set());
   const [favorite, setFavorite] = React.useState(false);
   const [selectedVariantId, setSelectedVariantId] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [cartBusy, setCartBusy] = React.useState(false);
   const [reviewText, setReviewText] = React.useState('');
   const [reviewRating, setReviewRating] = React.useState(5);
   const [reviewBusy, setReviewBusy] = React.useState(false);
@@ -60,6 +62,7 @@ export function ProductDetailPage() {
           setReviews(reviewsResult.items);
           setFavorite(favoritesResult.items.some((item) => item.product_id === productResult.id));
           setCart(cartResult);
+          setAddedVariantIds(new Set(cartResult?.items.map((item) => item.product_variant.id) ?? []));
           const activeVariant = productResult.variants.find((variant) => variant.is_active && variant.available_quantity > 0);
           setSelectedVariantId(activeVariant?.id ?? null);
         }
@@ -82,7 +85,10 @@ export function ProductDetailPage() {
 
   const selectedVariant = product?.variants.find((variant) => variant.id === selectedVariantId) ?? null;
   const inCart = Boolean(
-    selectedVariant && cart?.items.some((item) => item.product_variant.id === selectedVariant.id),
+    selectedVariant && (
+      addedVariantIds.has(selectedVariant.id)
+      || cart?.items.some((item) => item.product_variant.id === selectedVariant.id)
+    ),
   );
   const averageRating = reviews.length
     ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length
@@ -123,12 +129,16 @@ export function ProductDetailPage() {
     }
 
     try {
+      setCartBusy(true);
       const nextCart = await addCartItem(product.id, selectedVariant.id, 1);
       setCart(nextCart);
+      setAddedVariantIds((current) => new Set(current).add(selectedVariant.id));
       window.dispatchEvent(new Event('miniapp:cart-updated'));
       setNotice('Товар добавлен в корзину.');
     } catch (actionError) {
       setNotice(toApiErrorMessage(actionError));
+    } finally {
+      setCartBusy(false);
     }
   }
 
@@ -173,6 +183,8 @@ export function ProductDetailPage() {
   }
 
   const activeVariants = product.variants.filter((variant) => variant.is_active);
+  const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
+  const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
 
   return (
     <div className="page page--detail">
@@ -201,7 +213,15 @@ export function ProductDetailPage() {
 
       <section className="detail-card">
         <div className="price-block">
-          <strong>{formatPrice(product.base_price)}</strong>
+          <div className="price-stack">
+            <strong>{formatPrice(product.base_price)}</strong>
+            {oldPrice ? (
+              <span>
+                <del>{formatPrice(oldPrice)}</del>
+                {discount ? <em>{discount}</em> : null}
+              </span>
+            ) : null}
+          </div>
           <span>{product.is_available ? 'В наличии' : 'Нет в наличии'}</span>
         </div>
         <h1>{product.name}</h1>
@@ -288,9 +308,12 @@ export function ProductDetailPage() {
       </section>
 
       <div className="detail-cta">
-        <strong>{formatPrice(product.base_price)}</strong>
-        <button className="primary-button" type="button" onClick={() => void addSelectedToCart()}>
-          {inCart ? 'Перейти в корзину' : 'В корзину'}
+        <span className="detail-cta__price">
+          <strong>{formatPrice(product.base_price)}</strong>
+          {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
+        </span>
+        <button className="primary-button" type="button" disabled={cartBusy || !selectedVariant} onClick={() => void addSelectedToCart()}>
+          {cartBusy ? 'Добавляем...' : inCart ? 'Перейти в корзину' : 'В корзину'}
         </button>
       </div>
     </div>

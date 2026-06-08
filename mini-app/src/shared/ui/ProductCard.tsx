@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
-import { formatPrice } from '../utils/format';
+import { formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge } from '../utils/images';
 import { ProductImageCarousel } from './ProductImageCarousel';
 
@@ -18,6 +18,8 @@ export function ProductCard({
 }) {
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
   const badge = getProductBadge(product);
+  const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
+  const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
   const sizes = product.variants
     .filter((variant) => variant.is_active && variant.available_quantity > 0)
     .map((variant) => variant.size)
@@ -43,6 +45,7 @@ export function ProductCard({
       <Link className="product-card__media" to={`/product/${product.id}`}>
         <ProductImageCarousel product={product} variant="card" />
         {badge ? <span className={`product-badge product-badge--${badge.toLowerCase()}`}>{badge}</span> : null}
+        {discount ? <span className="product-discount-badge">{discount}</span> : null}
       </Link>
       <button
         className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
@@ -54,7 +57,10 @@ export function ProductCard({
         {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
       </button>
       <Link className="product-card__body" to={`/product/${product.id}`}>
-        <strong className="product-card__price">{formatPrice(product.base_price)}</strong>
+        <span className="product-card__price-row">
+          <strong className="product-card__price">{formatPrice(product.base_price)}</strong>
+          {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
+        </span>
         <span className="product-card__title">{product.name}</span>
         <span className="product-card__meta">
           {product.is_available ? 'В наличии' : 'Нет в наличии'}

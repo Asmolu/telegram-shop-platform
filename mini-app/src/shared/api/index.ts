@@ -56,6 +56,10 @@ export function getCategories() {
   return apiRequest<Category[]>('/categories');
 }
 
+export function getCategory(categoryId: number) {
+  return apiRequest<Category>(`/categories/${categoryId}`);
+}
+
 export function getTags() {
   return apiRequest<Tag[]>('/tags');
 }

@@ -4,30 +4,63 @@ import { TopBar } from '../shared/ui';
 import { getTelegramBotUrl } from '../shared/telegram/webApp';
 
 const faqItems = [
-  ['Как оформить заказ?', 'Добавьте товары в корзину, выберите размер, заполните контакты и нажмите «Оформить заказ».'],
-  ['Как применить промокод?', 'Введите промокод в корзине или на странице оформления. Итог пересчитается автоматически.'],
-  ['Как узнать статус заказа?', 'Откройте «Покупки» и вкладку «Заказы». Статус обновляется продавцом.'],
-  ['Как подобрать размер?', 'На странице товара доступны размеры и остатки. Рост и вес можно оставить в комментарии к заказу.'],
-  ['Как связаться с продавцом?', 'Используйте кнопку Telegram ниже или раздел поддержки в профиле.'],
-  ['Как оставить отзыв?', 'Откройте товар после покупки, поставьте оценку и отправьте отзыв. Он появится после модерации.'],
+  {
+    id: 'order',
+    question: 'Как совершить заказ?',
+    answer: 'Выберите товар, затем размер или цвет, добавьте его в корзину, примените промокод при наличии и оформите заказ. После этого дождитесь подтверждения продавца и следите за статусом во вкладке «Заказы».',
+  },
+  {
+    id: 'promo',
+    question: 'Как применить промокод?',
+    answer: 'Введите промокод в корзине или на странице оформления. Итог пересчитается автоматически.',
+  },
+  {
+    id: 'status',
+    question: 'Как узнать статус заказа?',
+    answer: 'Откройте «Покупки» и вкладку «Заказы». Статус обновляется продавцом.',
+  },
+  {
+    id: 'size',
+    question: 'Как подобрать размер?',
+    answer: 'На странице товара доступны размеры и остатки. Рост и вес можно оставить в комментарии к заказу.',
+  },
+  {
+    id: 'contact',
+    question: 'Как связаться с продавцом?',
+    answer: 'Используйте кнопку Telegram ниже или раздел поддержки в профиле.',
+  },
+  {
+    id: 'review',
+    question: 'Как оставить отзыв?',
+    answer: 'Откройте товар после покупки, поставьте оценку и отправьте отзыв. Он появится после модерации.',
+  },
 ];
 
 export function FaqPage() {
-  const { navigate } = useRouter();
-  const [openIndex, setOpenIndex] = React.useState(0);
+  const { navigate, searchParams } = useRouter();
+  const topic = searchParams.get('topic');
+  const initialOpenIndex = Math.max(0, faqItems.findIndex((item) => item.id === topic));
+  const [openIndex, setOpenIndex] = React.useState(initialOpenIndex);
   const botUrl = getTelegramBotUrl();
+
+  React.useEffect(() => {
+    const nextIndex = faqItems.findIndex((item) => item.id === topic);
+    if (nextIndex >= 0) {
+      setOpenIndex(nextIndex);
+    }
+  }, [topic]);
 
   return (
     <div className="page page--faq">
       <TopBar title="FAQ" onBack={() => navigate('/main')} />
       <div className="accordion-list">
-        {faqItems.map(([question, answer], index) => (
-          <section className="accordion-item" key={question}>
+        {faqItems.map((item, index) => (
+          <section className="accordion-item" key={item.id}>
             <button type="button" onClick={() => setOpenIndex(openIndex === index ? -1 : index)}>
-              <span>{question}</span>
+              <span>{item.question}</span>
               <strong>{openIndex === index ? '−' : '+'}</strong>
             </button>
-            {openIndex === index ? <p>{answer}</p> : null}
+            {openIndex === index ? <p>{item.answer}</p> : null}
           </section>
         ))}
       </div>

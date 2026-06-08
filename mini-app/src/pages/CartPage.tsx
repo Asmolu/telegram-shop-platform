@@ -16,10 +16,10 @@ import {
   type PromoValidation,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
+import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
-import { getProductImageUrl } from '../shared/utils/images';
+import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 
 type CartTab = 'favorites' | 'cart' | 'orders';
@@ -385,21 +385,64 @@ function OrdersTab({ orders }: { orders: Order[] }) {
 
   return (
     <div className="order-list">
-      {orders.map((order) => (
-        <article className="order-card" key={order.id}>
-          <div>
-            <strong>Заказ {order.order_number}</strong>
-            <small>{formatDate(order.created_at)} · {order.items.length} поз.</small>
-          </div>
-          <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>
-            {formatOrderStatus(order.status)}
-          </span>
-          <strong>{formatPrice(order.total_amount)}</strong>
-          <button className="secondary-button" type="button" onClick={() => navigate(`/order-success/${order.id}`)}>
-            Подробнее
-          </button>
-        </article>
-      ))}
+      {orders.map((order) => {
+        const promoCode = order.promo_code_code ?? order.promo_code;
+        const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
+
+        return (
+          <article className="order-card order-card--rich" key={order.id}>
+            <header className="order-card__header">
+              <div>
+                <strong>Заказ {order.order_number}</strong>
+                <small>{formatDate(order.created_at)} · {order.items.length} поз.</small>
+              </div>
+              <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>
+                {formatOrderStatus(order.status)}
+              </span>
+            </header>
+
+            <div className="order-card__totals">
+              <span>Итого</span>
+              <strong>{formatPrice(order.total_amount ?? order.total)}</strong>
+              {discountAmount > 0 ? (
+                <>
+                  <span>{promoCode ? `Промокод ${promoCode}` : 'Скидка'}</span>
+                  <strong>−{formatPrice(discountAmount)}</strong>
+                </>
+              ) : null}
+            </div>
+
+            <div className="order-item-list">
+              {order.items.map((item) => {
+                const thumbnailUrl = normalizeAssetUrl(item.product_thumbnail_url || item.product_thumbnail_path);
+                const variant = [
+                  item.variant_size,
+                  item.variant_color,
+                  item.variant_sku ? `SKU ${item.variant_sku}` : '',
+                ].filter(Boolean).join(' · ');
+
+                return (
+                  <div className="order-item-row" key={item.id}>
+                    <Link className="order-item-row__image" to={`/product/${item.product_id}`}>
+                      {thumbnailUrl ? <img src={thumbnailUrl} alt="" /> : <span>{item.product_name.slice(0, 1)}</span>}
+                    </Link>
+                    <div>
+                      <Link to={`/product/${item.product_id}`}>{item.product_title ?? item.product_name}</Link>
+                      <small>{variant}</small>
+                      <small>{item.quantity} × {formatPrice(item.unit_price)}</small>
+                    </div>
+                    <strong>{formatPrice(item.item_total ?? item.subtotal)}</strong>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button className="secondary-button" type="button" onClick={() => navigate(`/order-success/${order.id}`)}>
+              Подробнее
+            </button>
+          </article>
+        );
+      })}
     </div>
   );
 }

@@ -98,7 +98,7 @@ export function SearchResultsPage() {
 
   return (
     <div className="page">
-      <TopBar title={categoryName || 'Результаты'} onBack={() => navigate('/search')} />
+      <TopBar title={categoryName || 'Результаты'} variant="marketplace" onBack={() => navigate('/search')} />
       <button className="search-field search-field--static" type="button" onClick={() => navigate('/search')}>
         <span>⌕</span>
         {query || 'Найти одежду, бренд, размер...'}

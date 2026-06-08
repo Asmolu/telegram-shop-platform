@@ -62,11 +62,11 @@ export function SearchPage() {
 
   return (
     <div className="page">
-      <TopBar title="Расширенный поиск" />
+      <TopBar title="Поиск товаров" variant="marketplace" />
       {loading ? <PageLoader text="Готовим фильтры..." /> : null}
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error ? (
-        <form className="filter-form" onSubmit={showProducts}>
+        <form className="filter-form filter-form--compact" onSubmit={showProducts}>
           <label className="input-shell">
             <span>⌕</span>
             <input
@@ -89,7 +89,7 @@ export function SearchPage() {
             </select>
           </section>
 
-          <section className="filter-section">
+          <section className="filter-section filter-section--secondary">
             <h2>Размер</h2>
             <div className="chip-row">
               {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((item) => (
@@ -105,26 +105,25 @@ export function SearchPage() {
             </div>
           </section>
 
-          <section className="filter-section">
-            <h2>Цена</h2>
+          <section className="filter-section filter-section--secondary">
+            <h2>Бюджет</h2>
             <div className="two-inputs">
               <input value={priceFrom} onChange={(event) => setPriceFrom(event.target.value)} placeholder="от" type="number" min="0" />
               <input value={priceTo} onChange={(event) => setPriceTo(event.target.value)} placeholder="до" type="number" min="0" />
             </div>
           </section>
 
-          <section className="filter-section">
+          <section className="filter-section filter-section--secondary">
             <h2>Цвет</h2>
             <input
               value={color}
               onChange={(event) => setColor(event.target.value)}
               placeholder="Например: черный"
             />
-            <small>Покажем товары с подходящим цветом.</small>
           </section>
 
-          <section className="filter-section">
-            <h2>Теги</h2>
+          <section className="filter-section filter-section--secondary">
+            <h2>Подборки</h2>
             <div className="chip-row">
               {tags.map((tag) => (
                 <button
@@ -139,19 +138,16 @@ export function SearchPage() {
             </div>
           </section>
 
-          <section className="filter-section">
+          <section className="filter-section filter-section--secondary">
             <h2>Сортировка</h2>
             <div className="segmented-control">
               {[
-                ['newest', 'Сначала новые'],
-                ['price_asc', 'Дешевле'],
-                ['price_desc', 'Дороже'],
-                ['popular', 'Популярные'],
-                ['rating', 'По рейтингу'],
+                ['newest', 'Новинки'],
+                ['price_asc', 'Сначала дешевле'],
+                ['price_desc', 'Сначала дороже'],
               ].map(([value, label]) => (
                 <button
                   className={sort === value ? 'is-selected' : ''}
-                  disabled={value === 'popular' || value === 'rating'}
                   key={value}
                   type="button"
                   onClick={() => setSort(value)}
@@ -163,7 +159,7 @@ export function SearchPage() {
           </section>
 
           <button className="sticky-submit-button" type="submit">
-            Показать товары
+            Найти товары
           </button>
         </form>
       ) : null}

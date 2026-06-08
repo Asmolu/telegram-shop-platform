@@ -2,6 +2,7 @@ import { AuthProvider } from './shared/auth/AuthProvider';
 import { RouterProvider, getRouteId, useRouter } from './shared/router/RouterProvider';
 import { AppShell } from './shared/ui';
 import { CartPage } from './pages/CartPage';
+import { CategoryPage } from './pages/CategoryPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { FaqPage } from './pages/FaqPage';
@@ -30,6 +31,9 @@ function RouteSwitch() {
       break;
     case 'categories':
       page = <CategoriesPage />;
+      break;
+    case 'category-detail':
+      page = <CategoryPage />;
       break;
     case 'search':
       page = <SearchPage />;

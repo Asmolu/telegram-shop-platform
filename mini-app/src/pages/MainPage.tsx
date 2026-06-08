@@ -19,6 +19,7 @@ export function MainPage() {
   const [products, setProducts] = React.useState<Product[]>([]);
   const [banners, setBanners] = React.useState<Banner[]>([]);
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
+  const [feedQuery, setFeedQuery] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const { addToCart, toggleFavorite, notice, clearNotice } = useProductActions({
@@ -61,27 +62,39 @@ export function MainPage() {
     };
   }, [isAuthenticated]);
 
-  const activeBanner = banners[0];
+  const horizontalBanners = banners.filter((banner) => !banner.display_type || banner.display_type === 'horizontal');
+
+  function submitFeedSearch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = feedQuery.trim();
+    navigate(query ? `/search/results?q=${encodeURIComponent(query)}` : '/search/results');
+  }
 
   return (
     <div className="page page--feed">
       <TopBar
         title="Gadji Store"
+        variant="marketplace"
         right={
           <button className="avatar-button" type="button" onClick={() => navigate('/profile')} aria-label="Профиль">
             {telegramUser?.photo_url ? <img src={telegramUser.photo_url} alt="" /> : '◌'}
           </button>
         }
       />
-      <div className="search-row">
-        <button className="faq-button" type="button" onClick={() => navigate('/faq')} aria-label="FAQ">
-          ?
-        </button>
-        <button className="search-field" type="button" onClick={() => navigate('/search')}>
+      <form className="search-row search-row--feed" onSubmit={submitFeedSearch}>
+        <label className="search-field search-field--input">
           <span>⌕</span>
-          Найти одежду, бренд, размер...
+          <input
+            value={feedQuery}
+            onChange={(event) => setFeedQuery(event.target.value)}
+            placeholder="Найти одежду, бренд, размер..."
+            type="search"
+          />
+        </label>
+        <button className="search-submit-button" type="submit" aria-label="Искать">
+          Найти
         </button>
-      </div>
+      </form>
 
       {notice ? (
         <InlineNotice tone={notice.includes('добавлен') ? 'success' : 'warning'}>
@@ -92,7 +105,7 @@ export function MainPage() {
         </InlineNotice>
       ) : null}
 
-      {activeBanner ? <MainBanner banner={activeBanner} /> : null}
+      {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} /> : null}
 
       <div className="feed-chips" aria-label="Быстрые фильтры">
         <button type="button" onClick={() => navigate('/search/results?tag=new')}>
@@ -139,7 +152,7 @@ function MainBanner({ banner }: { banner: Banner }) {
     }
 
     if (banner.target_type === 'category' && banner.target_id) {
-      navigate(`/search/results?category_id=${banner.target_id}`);
+      navigate(`/category/${banner.target_id}`);
       return;
     }
 
@@ -155,7 +168,88 @@ function MainBanner({ banner }: { banner: Banner }) {
         {banner.subtitle ? <small>{banner.subtitle}</small> : null}
         <em>Смотреть</em>
       </span>
-      {imageUrl ? <img src={imageUrl} alt="" /> : null}
+      {imageUrl ? (
+        <span className="native-banner__image" aria-hidden="true">
+          <img src={imageUrl} alt="" />
+        </span>
+      ) : null}
     </button>
+  );
+}
+
+function BannerCarousel({ banners }: { banners: Banner[] }) {
+  const trackRef = React.useRef<HTMLDivElement | null>(null);
+  const interactionPauseUntil = React.useRef(0);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const hasMultipleBanners = banners.length > 1;
+
+  const updateActiveIndex = React.useCallback(() => {
+    const track = trackRef.current;
+    if (!track) {
+      return;
+    }
+
+    const nextIndex = Math.round(track.scrollLeft / Math.max(track.clientWidth, 1));
+    setActiveIndex(Math.min(Math.max(nextIndex, 0), banners.length - 1));
+  }, [banners.length]);
+
+  React.useEffect(() => {
+    if (!hasMultipleBanners) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      const track = trackRef.current;
+      if (!track || Date.now() < interactionPauseUntil.current) {
+        return;
+      }
+
+      const nextIndex = (activeIndex + 1) % banners.length;
+      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: 'smooth' });
+      setActiveIndex(nextIndex);
+    }, 4500);
+
+    return () => window.clearInterval(timer);
+  }, [activeIndex, banners.length, hasMultipleBanners]);
+
+  function pauseAutoplay() {
+    interactionPauseUntil.current = Date.now() + 7000;
+  }
+
+  function scrollToBanner(index: number) {
+    const track = trackRef.current;
+    pauseAutoplay();
+    track?.scrollTo({ left: track.clientWidth * index, behavior: 'smooth' });
+    setActiveIndex(index);
+  }
+
+  return (
+    <section className="banner-carousel" aria-label="Акции">
+      <div
+        className="banner-carousel__track"
+        ref={trackRef}
+        onPointerDown={pauseAutoplay}
+        onScroll={updateActiveIndex}
+      >
+        {banners.map((banner) => (
+          <div className="banner-carousel__slide" key={banner.id}>
+            <MainBanner banner={banner} />
+          </div>
+        ))}
+      </div>
+      {hasMultipleBanners ? (
+        <div className="banner-dots" aria-label="Баннеры">
+          {banners.map((banner, index) => (
+            <button
+              className={activeIndex === index ? 'is-active' : ''}
+              key={banner.id}
+              type="button"
+              aria-label={`Баннер ${index + 1}`}
+              onClick={() => scrollToBanner(index)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }

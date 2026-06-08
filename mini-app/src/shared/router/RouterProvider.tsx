@@ -98,6 +98,9 @@ export function getRouteId(pathname: string) {
   if (pathname === '/categories') {
     return 'categories';
   }
+  if (pathname.startsWith('/category/')) {
+    return 'category-detail';
+  }
   if (pathname === '/search') {
     return 'search';
   }

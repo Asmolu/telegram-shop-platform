@@ -10,6 +10,7 @@ export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type UserRole = 'USER' | 'SELLER' | 'ADMIN';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
+export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
 
 export type Category = {
   id: number;
@@ -62,6 +63,8 @@ export type Product = {
   slug: string;
   description?: string | null;
   base_price: string;
+  old_price?: string | null;
+  compare_at_price?: string | null;
   status: ProductStatus;
   category_id?: number | null;
   category?: Category | null;
@@ -87,6 +90,7 @@ export type Banner = {
   target_type?: BannerTargetType | null;
   target_id?: number | null;
   external_url?: string | null;
+  display_type?: BannerDisplayType | null;
   position: number;
   is_active: boolean;
   starts_at?: string | null;
@@ -124,6 +128,8 @@ export type CartProduct = {
   name: string;
   slug: string;
   base_price: string;
+  old_price?: string | null;
+  compare_at_price?: string | null;
   status: ProductStatus;
 };
 
@@ -185,10 +191,15 @@ export type OrderItem = {
   product_variant_id: number;
   product_name: string;
   variant_size: string;
+  variant_color?: string | null;
   variant_sku: string;
   unit_price: string;
   quantity: number;
   subtotal: string;
+  product_title?: string;
+  item_total?: string;
+  product_thumbnail_path?: string | null;
+  product_thumbnail_url?: string | null;
   created_at: string;
 };
 
@@ -201,7 +212,12 @@ export type Order = {
   discount_amount: string;
   promo_code_id?: number | null;
   promo_code_code?: string | null;
+  promo_code?: string | null;
+  promo_applied?: boolean;
   total_amount: string;
+  subtotal?: string;
+  discount?: string;
+  total?: string;
   contact_name: string;
   contact_phone: string;
   delivery_address: string;
