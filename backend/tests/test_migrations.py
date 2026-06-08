@@ -17,6 +17,7 @@ from app.db.models import (
     NotificationTemplate,
     NotificationTemplateCategory,
     PendingSellerRegistration,
+    Product,
     SellerRegistrationStatus,
 )
 
@@ -472,3 +473,27 @@ def test_order_item_color_and_banner_display_type_migration() -> None:
     assert "variant_color" in content
     assert "display_type" in content
     assert "ix_banners_display_type" in content
+
+
+def test_product_search_foundation_migration_and_model_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260608_0020_add_product_search_foundation.py"
+    )
+    content = migration_path.read_text()
+    table = Product.__table__
+    constraint_names = {constraint.name for constraint in table.constraints}
+
+    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in content
+    assert "old_price" in content
+    assert "search_priority" in content
+    assert "search_aliases" in content
+    assert "ix_products_search_priority" in content
+    assert "ix_products_name_trgm" in content
+    assert "ix_products_search_aliases_trgm" in content
+    assert "ck_products_old_price_above_base_price" in constraint_names
+    assert "ck_products_search_priority_range" in constraint_names
+    assert table.c.old_price.nullable is True
+    assert table.c.search_priority.default.arg == 2

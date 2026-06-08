@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Product, ProductStatus, ProductVariant, Tag
+from app.db.models import Category, Product, ProductStatus, ProductVariant, Tag
+from app.modules.products.search import (
+    SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
+    normalize_search_text,
+)
 
 
 class ProductsRepository:
@@ -34,6 +40,7 @@ class ProductsRepository:
                 Product.variants.and_(ProductVariant.is_active.is_(True))
             )
 
+        order_by = self._list_ordering(search=search)
         products_query = (
             select(Product)
             .options(
@@ -43,7 +50,7 @@ class ProductsRepository:
                 variants_loader,
             )
             .where(*conditions)
-            .order_by(Product.created_at.desc(), Product.id.desc())
+            .order_by(*order_by)
             .limit(limit)
             .offset(offset)
         )
@@ -103,7 +110,7 @@ class ProductsRepository:
         tag_id: int | None,
         status: ProductStatus | None,
         search: str | None,
-    ) -> list:
+    ) -> list[Any]:
         conditions = []
         if category_id is not None:
             conditions.append(Product.category_id == category_id)
@@ -111,16 +118,51 @@ class ProductsRepository:
             conditions.append(Product.tags.any(Tag.id == tag_id))
         if status is not None:
             conditions.append(Product.status == status)
-        if search:
-            search_pattern = f"%{search.strip()}%"
-            conditions.append(
-                or_(
-                    Product.name.ilike(search_pattern),
-                    Product.slug.ilike(search_pattern),
-                    Product.description.ilike(search_pattern),
-                )
-            )
+        normalized_search = normalize_search_text(search)
+        if normalized_search:
+            conditions.append(self._search_condition(normalized_search))
         return conditions
+
+    def _list_ordering(self, *, search: str | None) -> tuple[Any, ...]:
+        if normalize_search_text(search):
+            return (Product.search_priority.asc(), Product.created_at.desc(), Product.id.desc())
+        return (Product.created_at.desc(), Product.id.desc())
+
+    def _search_condition(self, normalized_search: str) -> Any:
+        search_pattern = f"%{normalized_search}%"
+        return or_(
+            self._text_matches(Product.name, normalized_search, search_pattern),
+            self._text_matches(Product.slug, normalized_search, search_pattern),
+            self._text_matches(Product.description, normalized_search, search_pattern),
+            self._text_matches(Product.search_aliases, normalized_search, search_pattern),
+            Product.category.has(
+                or_(
+                    self._text_matches(Category.name, normalized_search, search_pattern),
+                    self._text_matches(Category.slug, normalized_search, search_pattern),
+                    self._text_matches(Category.description, normalized_search, search_pattern),
+                )
+            ),
+            Product.tags.any(
+                or_(
+                    self._text_matches(Tag.name, normalized_search, search_pattern),
+                    self._text_matches(Tag.slug, normalized_search, search_pattern),
+                )
+            ),
+            Product.variants.any(
+                self._text_matches(ProductVariant.sku, normalized_search, search_pattern)
+            ),
+        )
+
+    def _text_matches(self, column: Any, normalized_search: str, search_pattern: str) -> Any:
+        normalized_column = self._normalized_column(column)
+        return or_(
+            normalized_column.ilike(search_pattern),
+            func.similarity(normalized_column, normalized_search)
+            >= SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
+        )
+
+    def _normalized_column(self, column: Any) -> Any:
+        return func.lower(func.replace(func.coalesce(column, ""), "ё", "е"))
 
 
 class ProductVariantsRepository:

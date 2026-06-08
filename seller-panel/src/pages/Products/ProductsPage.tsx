@@ -220,7 +220,15 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                       <small>{product.slug}</small>
                     </td>
                     <td>{product.category?.name ?? t('products.unassigned')}</td>
-                    <td>{formatMoney(product.base_price, language)}</td>
+                    <td>
+                      <span className="price-stack">
+                        {product.old_price ? (
+                          <span className="old-price">{formatMoney(product.old_price, language)}</span>
+                        ) : null}
+                        <strong>{formatMoney(product.base_price, language)}</strong>
+                      </span>
+                      <small>{t('productEditor.searchPriority')}: {product.search_priority ?? 2}</small>
+                    </td>
                     <td>
                       <strong>{product.variants.length}</strong>
                       <small>{t('products.available', { count: totalStock })}</small>

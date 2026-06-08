@@ -30,6 +30,7 @@ async def list_analytics_events(
     order_id: int | None = None,
     promo_code_id: int | None = None,
     banner_id: int | None = None,
+    search: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
 ) -> AnalyticsEventList:
@@ -42,6 +43,7 @@ async def list_analytics_events(
         order_id=order_id,
         promo_code_id=promo_code_id,
         banner_id=banner_id,
+        search=search,
         created_from=created_from,
         created_to=created_to,
     )

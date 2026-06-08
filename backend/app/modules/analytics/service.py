@@ -21,6 +21,7 @@ from app.modules.analytics.schemas import (
     TopProductSummary,
     TopPromoCodeSummary,
 )
+from app.modules.products.search import sanitize_search_query
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +123,11 @@ class AnalyticsService:
         order_id: int | None = None,
         promo_code_id: int | None = None,
         banner_id: int | None = None,
+        search: str | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ) -> AnalyticsEventList:
+        sanitized_search = sanitize_search_query(search)
         events, total = await self.repository.list(
             limit=limit,
             offset=offset,
@@ -134,6 +137,7 @@ class AnalyticsService:
             order_id=order_id,
             promo_code_id=promo_code_id,
             banner_id=banner_id,
+            search=sanitized_search,
             created_from=created_from,
             created_to=created_to,
         )

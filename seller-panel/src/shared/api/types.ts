@@ -121,6 +121,9 @@ export interface Product {
   slug: string;
   description: string | null;
   base_price: ApiDecimal;
+  old_price: ApiDecimal | null;
+  search_priority: 1 | 2 | 3;
+  search_aliases: string | null;
   status: ProductStatus;
   category_id: number | null;
   category: Category | null;
@@ -144,6 +147,9 @@ export interface ProductCreate {
   slug: string;
   description?: string | null;
   base_price: string;
+  old_price?: string | null;
+  search_priority?: 1 | 2 | 3;
+  search_aliases?: string | null;
   status: ProductStatus;
   category_id?: number | null;
   tag_ids: number[];
@@ -155,6 +161,9 @@ export interface ProductUpdate {
   slug?: string;
   description?: string | null;
   base_price?: string;
+  old_price?: string | null;
+  search_priority?: 1 | 2 | 3;
+  search_aliases?: string | null;
   status?: ProductStatus;
   category_id?: number | null;
   tag_ids?: number[];

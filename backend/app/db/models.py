@@ -449,12 +449,31 @@ class Tag(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (
+        CheckConstraint(
+            "old_price IS NULL OR old_price > base_price",
+            name="ck_products_old_price_above_base_price",
+        ),
+        CheckConstraint(
+            "search_priority IN (1, 2, 3)",
+            name="ck_products_search_priority_range",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    old_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    search_priority: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2,
+        server_default="2",
+        index=True,
+    )
+    search_aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ProductStatus] = mapped_column(
         Enum(ProductStatus, name="product_status", values_callable=_enum_values),
         nullable=False,

@@ -34,10 +34,15 @@ def get_banners_service(
 @router.get("", response_model=BannerList)
 async def list_public_banners(
     service: Annotated[BannersService, Depends(get_banners_service)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> BannerList:
-    return await service.list_public_banners(limit=limit, offset=offset)
+    return await service.list_public_banners(
+        limit=limit,
+        offset=offset,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
 
 @router.post("/{banner_id}/click", response_model=BannerClickRead)

@@ -54,11 +54,18 @@ class BannersService:
         self.cache = cache
         self.analytics_tracker = analytics_tracker
 
-    async def list_public_banners(self, *, limit: int, offset: int) -> BannerList:
+    async def list_public_banners(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        user_id: int | None = None,
+    ) -> BannerList:
         cache_key = public_banners_list_key(limit=limit, offset=offset)
         if self.cache is not None:
             cached = await self.cache.get_model(cache_key, BannerList)
             if cached is not None:
+                await self._track_banner_views(cached.items, user_id=user_id)
                 return cached
 
         items, total = await self.repository.list(
@@ -70,6 +77,7 @@ class BannersService:
             items=[BannerRead.model_validate(item) for item in items],
             meta=PageMeta(limit=limit, offset=offset, total=total),
         )
+        await self._track_banner_views(result.items, user_id=user_id)
         if self.cache is not None:
             await self.cache.set_model(cache_key, result, settings.cache_banners_ttl_seconds)
         return result
@@ -298,6 +306,26 @@ class BannersService:
             )
         except Exception:
             logger.warning("Failed to track banner analytics event %s", event_name, exc_info=True)
+
+    async def _track_banner_views(
+        self,
+        banners: list[BannerRead],
+        *,
+        user_id: int | None,
+    ) -> None:
+        for banner in banners:
+            display_type = banner.display_type or BannerDisplayType.HORIZONTAL
+            await self._track_event(
+                "banner.viewed",
+                user_id=user_id,
+                banner_id=banner.id,
+                metadata={
+                    "banner_id": banner.id,
+                    "target_type": banner.target_type.value if banner.target_type else None,
+                    "target_id": banner.target_id,
+                    "display_type": display_type.value,
+                },
+            )
 
     def _as_utc(self, value: datetime) -> datetime:
         if value.tzinfo is None:

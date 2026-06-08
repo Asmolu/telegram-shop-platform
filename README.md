@@ -128,6 +128,13 @@ Seller/admin endpoints are available under the canonical API prefix:
 - `GET /api/v1/audit-logs`
 - `GET /api/v1/audit-logs/{log_id}`
 
+## Product search foundation
+
+Product search uses PostgreSQL `pg_trgm` through Alembic-managed `CREATE EXTENSION IF NOT EXISTS
+pg_trgm`. Public product responses include `old_price`, `search_priority`, and `search_aliases` so
+the Mini App can show crossed-out prices and the Seller Panel can tune search matching. Lower
+numeric `search_priority` values rank first in matching search results; the default is `2`.
+
 ## Seller Portal auth and bot management
 
 Seller Portal now supports email/password auth through `/api/v1/seller-auth`.

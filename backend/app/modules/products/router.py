@@ -40,6 +40,7 @@ def get_products_service(
 async def list_public_products(
     pagination: Annotated[PaginationParams, Depends()],
     service: Annotated[ProductsService, Depends(get_products_service)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
     category_id: int | None = None,
     tag_id: int | None = None,
     status_filter: Annotated[ProductStatus | None, Query(alias="status")] = None,
@@ -52,6 +53,7 @@ async def list_public_products(
         tag_id=tag_id,
         status=status_filter,
         search=search,
+        user_id=current_user.id if current_user is not None else None,
     )
 
 

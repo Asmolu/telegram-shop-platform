@@ -136,6 +136,10 @@ Image upload validation checks decoded dimensions in addition to extension, MIME
 product images use 4:5 at 1200x1500 recommended, native banners use 16:9 at 1600x900 recommended,
 and aggressive promo banners use 3:1 at 1800x600 recommended.
 
+Product search uses PostgreSQL `pg_trgm` for typo-tolerant catalog matching. The Alembic head
+migration enables the extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then adds product
+search indexes for name, slug, description, and seller-managed search aliases.
+
 Useful local toggles:
 
 ```text

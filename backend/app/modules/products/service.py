@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
+from app.modules.products.search import sanitize_search_query
 from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
@@ -40,6 +42,9 @@ PRODUCT_AUDIT_FIELDS = (
     "slug",
     "description",
     "base_price",
+    "old_price",
+    "search_priority",
+    "search_aliases",
     "status",
     "category_id",
 )
@@ -80,9 +85,12 @@ class ProductsService:
         tag_id: int | None = None,
         status: ProductStatus | None = None,
         search: str | None = None,
+        user_id: int | None = None,
     ) -> ProductList:
         if status is not None and status != ProductStatus.ACTIVE:
-            return ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
+            result = ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
+            await self._track_search_event(search, user_id=user_id, result_count=0)
+            return result
 
         cache_key = public_products_list_key(
             limit=limit,
@@ -95,6 +103,11 @@ class ProductsService:
         if self.cache is not None:
             cached = await self.cache.get_model(cache_key, ProductList)
             if cached is not None:
+                await self._track_search_event(
+                    search,
+                    user_id=user_id,
+                    result_count=cached.meta.total,
+                )
                 return cached
 
         items, total = await self.repository.list(
@@ -107,6 +120,7 @@ class ProductsService:
             active_variants_only=True,
         )
         result = ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
+        await self._track_search_event(search, user_id=user_id, result_count=total)
         if self.cache is not None:
             await self.cache.set_model(
                 cache_key,
@@ -208,6 +222,11 @@ class ProductsService:
         product = await self.get_product(product_id)
         before_data = self.audit_service.snapshot(product, PRODUCT_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True, exclude={"tag_ids", "images"})
+        candidate_base_price = data.get("base_price", product.base_price)
+        candidate_old_price = data.get("old_price", product.old_price)
+        self._validate_price_pair(candidate_base_price, candidate_old_price)
+        if data.get("search_priority") is None and "search_priority" in data:
+            raise AppError("search_priority must be 1, 2, or 3", status.HTTP_400_BAD_REQUEST)
 
         if "category_id" in data:
             await self._ensure_category_exists(data["category_id"])
@@ -412,6 +431,17 @@ class ProductsService:
         except InventoryValidationError as exc:
             raise AppError(str(exc), status.HTTP_400_BAD_REQUEST) from exc
 
+    def _validate_price_pair(
+        self,
+        base_price: Decimal,
+        old_price: Decimal | None,
+    ) -> None:
+        if old_price is not None and old_price <= base_price:
+            raise AppError(
+                "old_price must be greater than base_price",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
     async def _set_product_status(
         self,
         product_id: int,
@@ -514,3 +544,24 @@ class ProductsService:
             )
         except Exception:
             logger.warning("Failed to track product analytics event %s", event_name, exc_info=True)
+
+    async def _track_search_event(
+        self,
+        search: str | None,
+        *,
+        user_id: int | None,
+        result_count: int | None,
+    ) -> None:
+        sanitized_query = sanitize_search_query(search)
+        if sanitized_query is None:
+            return
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                "search.performed",
+                user_id=user_id,
+                metadata={"query": sanitized_query, "result_count": result_count},
+            )
+        except Exception:
+            logger.warning("Failed to track product search analytics event", exc_info=True)

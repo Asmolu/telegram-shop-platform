@@ -91,6 +91,44 @@ def test_seller_can_filter_analytics_events_by_promo_and_banner() -> None:
     assert response.json()["items"][0]["banner_id"] == 3
 
 
+def test_seller_can_search_analytics_events_by_query_metadata() -> None:
+    app = create_app()
+
+    class FakeAnalyticsService:
+        async def list_events(self, **payload: object) -> dict[str, object]:
+            assert payload["event_name"] == "search.performed"
+            assert payload["search"] == "футболка"
+            return {
+                "items": [
+                    {
+                        "id": 1,
+                        "event_name": "search.performed",
+                        "user_id": None,
+                        "product_id": None,
+                        "order_id": None,
+                        "promo_code_id": None,
+                        "banner_id": None,
+                        "metadata": {"query": "футболка", "result_count": 2},
+                        "created_at": _now().isoformat(),
+                    }
+                ],
+                "meta": {"limit": 20, "offset": 0, "total": 1},
+            }
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_analytics_service] = lambda: FakeAnalyticsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/analytics/events?event_name=search.performed&search=футболка"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["metadata"]["query"] == "футболка"
+
+
 def test_seller_can_access_analytics_summary() -> None:
     app = create_app()
 

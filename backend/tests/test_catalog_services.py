@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
@@ -17,6 +18,12 @@ from app.modules.products.schemas import (
     ProductUpdate,
     ProductVariantCreate,
     ProductVariantUpdate,
+)
+from app.modules.products.repository import ProductsRepository
+from app.modules.products.search import (
+    SEARCH_PRIORITY_DEFAULT,
+    normalize_search_aliases,
+    search_text_matches_query,
 )
 from app.modules.products.service import ProductsService
 from app.modules.tags.schemas import TagCreate, TagUpdate
@@ -172,6 +179,22 @@ async def test_public_product_list_loads_only_active_variants() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_product_search_tracks_sanitized_query() -> None:
+    tracker = FakeAnalyticsTracker()
+    service = ProductsService(DummySession(), analytics_tracker=tracker)
+    service.repository.list = AsyncMock(return_value=([], 0))
+
+    await service.list_public_products(limit=20, offset=0, search=" \n футболка \t ")
+
+    assert tracker.events == [
+        (
+            "search.performed",
+            {"user_id": None, "metadata": {"query": "футболка", "result_count": 0}},
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_public_product_detail_tracks_product_view() -> None:
     tracker = FakeAnalyticsTracker()
     service = ProductsService(DummySession(), analytics_tracker=tracker)
@@ -257,6 +280,16 @@ async def test_product_update_records_audit_log() -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_update_rejects_old_price_below_new_base_price() -> None:
+    product = _product(old_price=Decimal("69.90"))
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    with pytest.raises(AppError, match="old_price"):
+        await service.update_product(1, ProductUpdate(base_price=Decimal("79.90")))
+
+
+@pytest.mark.asyncio
 async def test_product_variant_service_rejects_reserved_quantity_above_stock() -> None:
     service = ProductsService(DummySession())
     service.variants_repository.get_by_id = AsyncMock(
@@ -285,6 +318,43 @@ def test_product_availability_requires_active_variant_with_available_stock() -> 
     assert product.is_available is True
 
 
+def test_product_create_defaults_search_priority_to_medium() -> None:
+    product = ProductCreate(name="Hoodie", slug="hoodie", base_price=Decimal("59.90"))
+
+    assert product.search_priority == SEARCH_PRIORITY_DEFAULT == 2
+
+
+def test_product_create_rejects_old_price_not_above_base_price() -> None:
+    with pytest.raises(ValidationError, match="old_price"):
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie",
+            base_price=Decimal("59.90"),
+            old_price=Decimal("49.90"),
+        )
+
+
+def test_product_search_aliases_are_normalized() -> None:
+    assert normalize_search_aliases(" футболки, футболка\nфутболки ") == "футболки\nфутболка"
+
+
+def test_typo_tolerant_search_matches_required_russian_queries() -> None:
+    haystack = "Футболки хлопковые oversize"
+
+    assert search_text_matches_query(haystack, "футболка")
+    assert search_text_matches_query(haystack, "футблоки")
+    assert search_text_matches_query(haystack, "фудболка")
+    assert search_text_matches_query(haystack, "фтболка")
+
+
+def test_repository_search_ordering_prioritizes_lower_numeric_priority() -> None:
+    repository = ProductsRepository(DummySession())
+    ordering = repository._list_ordering(search="футболка")
+
+    assert "search_priority" in str(ordering[0])
+    assert "created_at" in str(ordering[1])
+
+
 def _category() -> Category:
     return Category(
         id=1,
@@ -309,6 +379,7 @@ def _tag() -> Tag:
 def _product(
     status: ProductStatus = ProductStatus.DRAFT,
     variants: list[ProductVariant] | None = None,
+    old_price: Decimal | None = None,
 ) -> Product:
     return Product(
         id=1,
@@ -316,6 +387,9 @@ def _product(
         slug="hoodie",
         description="Warm",
         base_price=Decimal("59.90"),
+        old_price=old_price,
+        search_priority=SEARCH_PRIORITY_DEFAULT,
+        search_aliases=None,
         status=status,
         category_id=1,
         category=_category(),

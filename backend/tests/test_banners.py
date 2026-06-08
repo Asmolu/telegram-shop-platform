@@ -183,6 +183,37 @@ async def test_public_banner_list_only_returns_active_banners() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_banner_list_returns_aggressive_popup_and_tracks_view() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, repository, _ = _banners_service(analytics_tracker=tracker)
+    repository.add(
+        _banner(
+            is_active=True,
+            display_type=BannerDisplayType.AGGRESSIVE_POPUP,
+        )
+    )
+
+    banners = await service.list_public_banners(limit=20, offset=0, user_id=42)
+
+    assert banners.items[0].display_type == BannerDisplayType.AGGRESSIVE_POPUP
+    assert tracker.events == [
+        (
+            "banner.viewed",
+            {
+                "user_id": 42,
+                "banner_id": 1,
+                "metadata": {
+                    "banner_id": 1,
+                    "target_type": "product",
+                    "target_id": 1,
+                    "display_type": "aggressive_popup",
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_activate_requires_complete_target() -> None:
     service, repository, _ = _banners_service()
     incomplete = _banner(target_type=None, target_id=None)

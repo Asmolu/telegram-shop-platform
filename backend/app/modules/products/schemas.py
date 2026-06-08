@@ -1,12 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
 from app.db.models import ProductStatus
 from app.modules.categories.schemas import CategoryRead
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
+from app.modules.products.search import (
+    SEARCH_ALIAS_MAX_LENGTH,
+    SEARCH_PRIORITY_DEFAULT,
+    normalize_search_aliases,
+)
 from app.modules.tags.schemas import TagRead
 
 
@@ -88,8 +93,32 @@ class ProductBase(BaseModel):
     slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     description: str | None = None
     base_price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    old_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    search_priority: int = Field(
+        default=SEARCH_PRIORITY_DEFAULT,
+        ge=1,
+        le=3,
+        description="Default is 2 (medium). Lower numbers sort first in matching search results.",
+    )
+    search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     status: ProductStatus = ProductStatus.DRAFT
     category_id: int | None = None
+
+    @field_validator("search_aliases")
+    @classmethod
+    def normalize_aliases(cls, value: str | None) -> str | None:
+        return normalize_search_aliases(value)
+
+    @field_validator("search_priority", mode="before")
+    @classmethod
+    def default_search_priority(cls, value: int | None) -> int:
+        return SEARCH_PRIORITY_DEFAULT if value is None else value
+
+    @model_validator(mode="after")
+    def validate_old_price(self) -> "ProductBase":
+        if self.old_price is not None and self.old_price <= self.base_price:
+            raise ValueError("old_price must be greater than base_price")
+        return self
 
 
 class ProductCreate(ProductBase):
@@ -107,10 +136,28 @@ class ProductUpdate(BaseModel):
     )
     description: str | None = None
     base_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    old_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    search_priority: int | None = Field(default=None, ge=1, le=3)
+    search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     status: ProductStatus | None = None
     category_id: int | None = None
     tag_ids: list[int] | None = None
     images: list[ProductImageCreate] | None = None
+
+    @field_validator("search_aliases")
+    @classmethod
+    def normalize_aliases(cls, value: str | None) -> str | None:
+        return normalize_search_aliases(value)
+
+    @model_validator(mode="after")
+    def validate_old_price_when_complete(self) -> "ProductUpdate":
+        if (
+            self.old_price is not None
+            and self.base_price is not None
+            and self.old_price <= self.base_price
+        ):
+            raise ValueError("old_price must be greater than base_price")
+        return self
 
 
 class ProductStatusUpdate(BaseModel):

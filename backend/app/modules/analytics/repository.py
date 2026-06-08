@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AnalyticsEvent, Banner, Order, Product, PromoCode
@@ -30,6 +30,7 @@ class AnalyticsRepository:
         order_id: int | None = None,
         promo_code_id: int | None = None,
         banner_id: int | None = None,
+        search: str | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ) -> tuple[list[AnalyticsEvent], int]:
@@ -40,6 +41,7 @@ class AnalyticsRepository:
             order_id=order_id,
             promo_code_id=promo_code_id,
             banner_id=banner_id,
+            search=search,
             created_from=created_from,
             created_to=created_to,
         )
@@ -71,6 +73,7 @@ class AnalyticsRepository:
                     order_id=None,
                     promo_code_id=None,
                     banner_id=None,
+                    search=None,
                     created_from=created_from,
                     created_to=created_to,
                 )
@@ -203,6 +206,7 @@ class AnalyticsRepository:
         order_id: int | None,
         promo_code_id: int | None,
         banner_id: int | None,
+        search: str | None,
         created_from: datetime | None,
         created_to: datetime | None,
     ) -> list[Any]:
@@ -219,6 +223,14 @@ class AnalyticsRepository:
             conditions.append(AnalyticsEvent.promo_code_id == promo_code_id)
         if banner_id is not None:
             conditions.append(AnalyticsEvent.banner_id == banner_id)
+        if search is not None:
+            search_pattern = f"%{search.strip()}%"
+            conditions.append(
+                or_(
+                    AnalyticsEvent.event_name.ilike(search_pattern),
+                    cast(AnalyticsEvent.event_metadata, String).ilike(search_pattern),
+                )
+            )
         conditions.extend(
             self._created_at_filters(
                 AnalyticsEvent.created_at,

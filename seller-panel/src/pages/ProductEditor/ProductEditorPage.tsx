@@ -25,6 +25,9 @@ interface ProductFormState {
   slug: string;
   description: string;
   basePrice: string;
+  oldPrice: string;
+  searchPriority: string;
+  searchAliases: string;
   status: ProductStatus;
   categoryId: string;
   tagIds: number[];
@@ -47,6 +50,9 @@ const initialForm: ProductFormState = {
   slug: '',
   description: '',
   basePrice: '',
+  oldPrice: '',
+  searchPriority: '2',
+  searchAliases: '',
   status: 'DRAFT',
   categoryId: '',
   tagIds: [],
@@ -100,6 +106,9 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             slug: loadedProduct.slug,
             description: loadedProduct.description ?? '',
             basePrice: String(loadedProduct.base_price),
+            oldPrice: loadedProduct.old_price ? String(loadedProduct.old_price) : '',
+            searchPriority: String(loadedProduct.search_priority ?? 2),
+            searchAliases: loadedProduct.search_aliases ?? '',
             status: loadedProduct.status,
             categoryId: loadedProduct.category_id ? String(loadedProduct.category_id) : '',
             tagIds: loadedProduct.tags.map((tag) => tag.id),
@@ -194,12 +203,21 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       return;
     }
 
+    if (form.oldPrice.trim() && Number(form.oldPrice) <= Number(form.basePrice)) {
+      setFormError(t('productEditor.oldPriceInvalid'));
+      setSaving(false);
+      return;
+    }
+
     try {
       const payload = {
         name: form.name.trim(),
         slug: form.slug.trim(),
         description: form.description.trim() || null,
         base_price: form.basePrice.trim(),
+        old_price: form.oldPrice.trim() || null,
+        search_priority: parseSearchPriority(form.searchPriority),
+        search_aliases: normalizeSearchAliases(form.searchAliases),
         status: form.status,
         category_id: form.categoryId ? Number(form.categoryId) : null,
         tag_ids: form.tagIds,
@@ -328,6 +346,17 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               />
             </label>
             <label className="field">
+              <span>{t('productEditor.oldPrice')}</span>
+              <input
+                min="0"
+                step="0.01"
+                type="number"
+                value={form.oldPrice}
+                onChange={(event) => updateField('oldPrice', event.target.value)}
+              />
+              <small className="field-hint">{t('productEditor.oldPriceHint')}</small>
+            </label>
+            <label className="field">
               <span>{t('common.status')}</span>
               <select
                 value={form.status}
@@ -339,6 +368,18 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
               </select>
             </label>
+            <label className="field">
+              <span>{t('productEditor.searchPriority')}</span>
+              <select
+                value={form.searchPriority}
+                onChange={(event) => updateField('searchPriority', event.target.value)}
+              >
+                <option value="1">{t('productEditor.priorityHigh')}</option>
+                <option value="2">{t('productEditor.priorityMedium')}</option>
+                <option value="3">{t('productEditor.priorityLow')}</option>
+              </select>
+              <small className="field-hint">{t('productEditor.searchPriorityHint')}</small>
+            </label>
             <label className="field field-wide">
               <span>{t('common.description')}</span>
               <textarea
@@ -346,6 +387,15 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 value={form.description}
                 onChange={(event) => updateField('description', event.target.value)}
               />
+            </label>
+            <label className="field field-wide">
+              <span>{t('productEditor.searchAliases')}</span>
+              <textarea
+                rows={4}
+                value={form.searchAliases}
+                onChange={(event) => updateField('searchAliases', event.target.value)}
+              />
+              <small className="field-hint">{t('productEditor.searchAliasesHint')}</small>
             </label>
           </div>
         </section>
@@ -368,7 +418,18 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               </div>
               <div>
                 <dt>{t('products.price')}</dt>
-                <dd>{formatMoney(product.base_price, language)}</dd>
+                <dd>
+                  <span className="price-stack">
+                    {product.old_price ? (
+                      <span className="old-price">{formatMoney(product.old_price, language)}</span>
+                    ) : null}
+                    <strong>{formatMoney(product.base_price, language)}</strong>
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('productEditor.searchPriority')}</dt>
+                <dd>{product.search_priority ?? 2}</dd>
               </div>
             </dl>
           ) : (
@@ -562,4 +623,22 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       ) : null}
     </form>
   );
+}
+
+function parseSearchPriority(value: string): 1 | 2 | 3 {
+  if (value === '1') return 1;
+  if (value === '3') return 3;
+  return 2;
+}
+
+function normalizeSearchAliases(value: string): string | null {
+  const aliases = value
+    .replace(/,/g, '\n')
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (aliases.length === 0) {
+    return null;
+  }
+  return Array.from(new Set(aliases)).join('\n');
 }
