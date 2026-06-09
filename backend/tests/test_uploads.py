@@ -126,9 +126,9 @@ async def test_product_upload_rejects_below_minimum_dimensions(tmp_path: Path) -
 async def test_banner_upload_rejects_below_minimum_dimensions(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
-    with pytest.raises(AppError, match="800x450") as exc_info:
+    with pytest.raises(AppError, match="900x300") as exc_info:
         await service.upload_banner_image(
-            file=_upload_file("small-banner.png", _image_bytes(640, 360, "PNG"), "image/png"),
+            file=_upload_file("small-banner.png", _image_bytes(600, 200, "PNG"), "image/png"),
         )
 
     assert exc_info.value.status_code == 422
@@ -138,7 +138,7 @@ async def test_banner_upload_rejects_below_minimum_dimensions(tmp_path: Path) ->
 async def test_banner_upload_rejects_wrong_aspect_ratio(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
-    with pytest.raises(AppError, match="16:9") as exc_info:
+    with pytest.raises(AppError, match="3:1") as exc_info:
         await service.upload_banner_image(
             file=_upload_file("portrait-banner.png", _image_bytes(900, 600, "PNG"), "image/png"),
         )
@@ -156,7 +156,7 @@ async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
         captured["banner"] = banner
 
     service.repository.add_banner = capture_banner
-    content = _image_bytes(1600, 900, "PNG")
+    content = _image_bytes(1800, 600, "PNG")
 
     banner = await service.upload_banner_image(
         file=_upload_file("../promo.png", content, "image/png"),
@@ -173,7 +173,7 @@ async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_aggressive_banner_upload_accepts_three_to_one_image(tmp_path: Path) -> None:
+async def test_vertical_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
     captured = {}
 
@@ -183,8 +183,50 @@ async def test_aggressive_banner_upload_accepts_three_to_one_image(tmp_path: Pat
     service.repository.add_banner = capture_banner
 
     banner = await service.upload_banner_image(
-        file=_upload_file("promo-strip.jpg", _image_bytes(1800, 600, "JPEG"), "image/jpeg"),
-        alt_text="Promo strip",
+        file=_upload_file("vertical-promo.jpg", _image_bytes(900, 1600, "JPEG"), "image/jpeg"),
+        alt_text="Vertical promo",
+        image_kind=ImageUploadKind.VERTICAL_BANNER,
+    )
+
+    assert banner.file_path.startswith("banners/")
+    assert banner.mime_type == "image/jpeg"
+    assert captured["banner"] is banner
+
+
+@pytest.mark.asyncio
+async def test_popup_banner_upload_accepts_three_to_four_image(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    captured = {}
+
+    def capture_banner(banner: object) -> None:
+        captured["banner"] = banner
+
+    service.repository.add_banner = capture_banner
+
+    banner = await service.upload_banner_image(
+        file=_upload_file("popup-promo.jpg", _image_bytes(900, 1200, "JPEG"), "image/jpeg"),
+        alt_text="Popup promo",
+        image_kind=ImageUploadKind.POPUP_BANNER,
+    )
+
+    assert banner.file_path.startswith("banners/")
+    assert banner.mime_type == "image/jpeg"
+    assert captured["banner"] is banner
+
+
+@pytest.mark.asyncio
+async def test_aggressive_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    captured = {}
+
+    def capture_banner(banner: object) -> None:
+        captured["banner"] = banner
+
+    service.repository.add_banner = capture_banner
+
+    banner = await service.upload_banner_image(
+        file=_upload_file("entry-promo.jpg", _image_bytes(900, 1600, "JPEG"), "image/jpeg"),
+        alt_text="Entry promo",
         image_kind=ImageUploadKind.AGGRESSIVE_BANNER,
     )
 

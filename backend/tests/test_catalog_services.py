@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
-from app.db.models import Category, Product, ProductStatus, ProductVariant, Tag
+from app.db.models import Category, Product, ProductCategory, ProductStatus, ProductVariant, Tag
 from app.modules.categories.schemas import CategoryCreate, CategoryUpdate
 from app.modules.categories.service import CategoriesService
 from app.modules.products.inventory import calculate_available_quantity
@@ -334,6 +334,105 @@ def test_product_create_rejects_old_price_not_above_base_price() -> None:
         )
 
 
+def test_product_create_rejects_more_than_three_categories() -> None:
+    with pytest.raises(ValidationError, match="at most 3 categories"):
+        ProductCreate(
+            name="Suit",
+            slug="suit",
+            base_price=Decimal("199.90"),
+            categories=[
+                {"category_id": 1, "priority": 1},
+                {"category_id": 2, "priority": 2},
+                {"category_id": 3, "priority": 3},
+                {"category_id": 4, "priority": 1},
+            ],
+        )
+
+
+def test_product_create_rejects_duplicate_category_assignment() -> None:
+    with pytest.raises(ValidationError, match="duplicate"):
+        ProductCreate(
+            name="Suit",
+            slug="suit",
+            base_price=Decimal("199.90"),
+            categories=[
+                {"category_id": 1, "priority": 1},
+                {"category_id": 1, "priority": 2},
+            ],
+        )
+
+
+def test_product_create_rejects_duplicate_category_priority() -> None:
+    with pytest.raises(ValidationError, match="priorities"):
+        ProductCreate(
+            name="Suit",
+            slug="suit",
+            base_price=Decimal("199.90"),
+            categories=[
+                {"category_id": 1, "priority": 1},
+                {"category_id": 2, "priority": 1},
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_product_service_sets_prioritized_categories_and_primary_category() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.categories_repository.get_by_id = AsyncMock(return_value=_category())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+
+    def capture_product(product: Product) -> None:
+        product.id = 1
+        captured["product"] = product
+
+    service.repository.add = capture_product
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    product = await service.create_product(
+        ProductCreate(
+            name="Suit",
+            slug="suit",
+            base_price=Decimal("199.90"),
+            categories=[
+                {"category_id": 2, "priority": 2},
+                {"category_id": 1, "priority": 1},
+                {"category_id": 3, "priority": 3},
+            ],
+        )
+    )
+
+    assert product.category_id == 1
+    assert [
+        (assignment.category_id, assignment.priority)
+        for assignment in product.product_categories
+    ] == [(1, 1), (2, 2), (3, 3)]
+
+
+@pytest.mark.asyncio
+async def test_product_update_can_set_prioritized_categories() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.categories_repository.get_by_id = AsyncMock(return_value=_category())
+
+    updated = await service.update_product(
+        1,
+        ProductUpdate(
+            categories=[
+                {"category_id": 3, "priority": 3},
+                {"category_id": 2, "priority": 1},
+            ]
+        ),
+    )
+
+    assert updated.category_id == 2
+    assert [
+        (assignment.category_id, assignment.priority)
+        for assignment in updated.product_categories
+    ] == [(2, 1), (3, 3)]
+
+
 def test_product_search_aliases_are_normalized() -> None:
     assert normalize_search_aliases(" футболки, футболка\nфутболки ") == "футболки\nфутболка"
 
@@ -353,6 +452,26 @@ def test_repository_search_ordering_prioritizes_lower_numeric_priority() -> None
 
     assert "search_priority" in str(ordering[0])
     assert "created_at" in str(ordering[1])
+
+
+def test_repository_category_filter_uses_assignment_relation() -> None:
+    repository = ProductsRepository(DummySession())
+    filters = repository._build_filters(
+        category_id=2,
+        tag_id=None,
+        status=ProductStatus.ACTIVE,
+        search=None,
+    )
+
+    rendered = " ".join(str(item) for item in filters)
+    assert "product_categories" in rendered
+
+
+def test_repository_category_context_orders_by_category_priority() -> None:
+    repository = ProductsRepository(DummySession())
+    ordering = repository._list_ordering(search=None, category_id=2)
+
+    assert "product_categories.priority" in str(ordering[0])
 
 
 def _category() -> Category:
@@ -393,6 +512,9 @@ def _product(
         status=status,
         category_id=1,
         category=_category(),
+        product_categories=[
+            ProductCategory(category_id=1, priority=1, category=_category()),
+        ],
         tags=[_tag()],
         images=[],
         variants=variants or [],

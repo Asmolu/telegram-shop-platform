@@ -14,6 +14,7 @@ const navItems = [
 ] as const;
 
 const AGGRESSIVE_POPUP_SESSION_KEY = 'telegram_shop_aggressive_popup_dismissed';
+const POPUP_SESSION_KEY = 'telegram_shop_popup_dismissed';
 
 function isActive(pathname: string, item: (typeof navItems)[number]) {
   return item.match.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -50,7 +51,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, telegramUser, user } = useAuth();
   const [cartCount, setCartCount] = React.useState(0);
   const [aggressiveBanners, setAggressiveBanners] = React.useState<Banner[]>([]);
+  const [popupBanners, setPopupBanners] = React.useState<Banner[]>([]);
   const [showAggressivePopup, setShowAggressivePopup] = React.useState(false);
+  const [showPopup, setShowPopup] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -85,31 +88,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let cancelled = false;
 
-    async function loadAggressiveBanners() {
-      if (window.sessionStorage.getItem(AGGRESSIVE_POPUP_SESSION_KEY) === '1') {
-        return;
-      }
-
+    async function loadBannerPopups() {
       try {
         const result = await getBanners();
         if (cancelled) {
           return;
         }
 
-        const popupBanners = result.items.filter((banner) => banner.display_type === 'aggressive_popup');
-        if (popupBanners.length > 0) {
-          setAggressiveBanners(popupBanners);
+        const entryBanners = result.items.filter((banner) => banner.display_type === 'aggressive_popup');
+        const modalBanners = result.items.filter((banner) => banner.display_type === 'popup');
+        if (
+          window.sessionStorage.getItem(AGGRESSIVE_POPUP_SESSION_KEY) !== '1'
+          && entryBanners.length > 0
+        ) {
+          setAggressiveBanners(entryBanners);
           setShowAggressivePopup(true);
+        }
+        if (window.sessionStorage.getItem(POPUP_SESSION_KEY) !== '1' && modalBanners.length > 0) {
+          setPopupBanners(modalBanners);
+          setShowPopup(true);
         }
       } catch {
         if (!cancelled) {
           setAggressiveBanners([]);
+          setPopupBanners([]);
           setShowAggressivePopup(false);
+          setShowPopup(false);
         }
       }
     }
 
-    void loadAggressiveBanners();
+    void loadBannerPopups();
     return () => {
       cancelled = true;
     };
@@ -120,6 +129,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setShowAggressivePopup(false);
   }
 
+  function closePopup() {
+    window.sessionStorage.setItem(POPUP_SESSION_KEY, '1');
+    setShowPopup(false);
+  }
+
   const profilePhoto = telegramUser?.photo_url;
   const profileLabel = getUserDisplayName(user ?? telegramUser);
 
@@ -128,11 +142,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="app-content">{children}</main>
       <FloatingOrderHelp currentPath={currentPath} onOpen={() => navigate('/faq?topic=order')} />
       {showAggressivePopup && aggressiveBanners.length > 0 ? (
-        <AggressiveBannerPopup
+        <BannerPopup
           banners={aggressiveBanners}
+          variant="aggressive"
           onClose={closeAggressivePopup}
           onNavigate={(to) => {
             closeAggressivePopup();
+            navigate(to);
+          }}
+        />
+      ) : null}
+      {!showAggressivePopup && showPopup && popupBanners.length > 0 ? (
+        <BannerPopup
+          banners={popupBanners}
+          variant="popup"
+          onClose={closePopup}
+          onNavigate={(to) => {
+            closePopup();
             navigate(to);
           }}
         />
@@ -174,7 +200,8 @@ function FloatingOrderHelp({
     || currentPath.startsWith('/cart')
     || currentPath.startsWith('/checkout')
     || currentPath.startsWith('/product/')
-    || currentPath.startsWith('/order-success/');
+    || currentPath.startsWith('/order-success/')
+    || currentPath.startsWith('/profile');
 
   if (hidden) {
     return null;
@@ -188,23 +215,36 @@ function FloatingOrderHelp({
   );
 }
 
-function AggressiveBannerPopup({
+function BannerPopup({
   banners,
+  variant,
   onClose,
   onNavigate,
 }: {
   banners: Banner[];
+  variant: 'aggressive' | 'popup';
   onClose: () => void;
   onNavigate: (to: string) => void;
 }) {
+  const trackRef = React.useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = React.useState(0);
   const interactionPauseUntil = React.useRef(0);
   const activeBanner = banners[activeIndex] ?? banners[0];
-  const imageUrl = normalizeAssetUrl(activeBanner.image_url || activeBanner.image_path);
-  const targetPath = getBannerTargetPath(activeBanner);
+  const bannerAction = getBannerAction(activeBanner);
+  const hasMultipleBanners = banners.length > 1;
+
+  const updateActiveIndex = React.useCallback(() => {
+    const track = trackRef.current;
+    if (!track) {
+      return;
+    }
+
+    const nextIndex = Math.round(track.scrollLeft / Math.max(track.clientWidth, 1));
+    setActiveIndex(Math.min(Math.max(nextIndex, 0), banners.length - 1));
+  }, [banners.length]);
 
   React.useEffect(() => {
-    if (banners.length <= 1) {
+    if (!hasMultipleBanners) {
       return undefined;
     }
 
@@ -212,31 +252,74 @@ function AggressiveBannerPopup({
       if (Date.now() < interactionPauseUntil.current) {
         return;
       }
-      setActiveIndex((current) => (current + 1) % banners.length);
+
+      const track = trackRef.current;
+      if (!track) {
+        return;
+      }
+
+      const nextIndex = (activeIndex + 1) % banners.length;
+      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: 'smooth' });
+      setActiveIndex(nextIndex);
     }, 4200);
 
     return () => window.clearInterval(timer);
-  }, [banners.length]);
+  }, [activeIndex, banners.length, hasMultipleBanners]);
+
+  function pauseAutoplay() {
+    interactionPauseUntil.current = Date.now() + 7000;
+  }
 
   function chooseSlide(index: number) {
-    interactionPauseUntil.current = Date.now() + 7000;
+    const track = trackRef.current;
+    pauseAutoplay();
+    track?.scrollTo({ left: track.clientWidth * index, behavior: 'smooth' });
     setActiveIndex(index);
   }
 
+  function handleBannerAction() {
+    if (!bannerAction) {
+      onClose();
+      return;
+    }
+
+    if (bannerAction.kind === 'internal') {
+      onNavigate(bannerAction.value);
+      return;
+    }
+
+    onClose();
+    window.open(bannerAction.value, '_blank', 'noopener,noreferrer');
+  }
+
   return (
-    <div className="aggressive-popup" role="dialog" aria-modal="true" aria-label="Акция">
+    <div
+      className={`aggressive-popup aggressive-popup--${variant}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Акция"
+    >
       <div className="aggressive-popup__backdrop" onClick={onClose} />
       <section className="aggressive-popup__card">
         <button className="aggressive-popup__close" type="button" aria-label="Закрыть" onClick={onClose}>
           ×
         </button>
-        <div className="aggressive-popup__media">
-          {imageUrl ? <img src={imageUrl} alt="" /> : <span>{activeBanner.title.slice(0, 1).toUpperCase()}</span>}
+        <div className="aggressive-popup__media" onPointerDown={pauseAutoplay}>
+          <div className="aggressive-popup__track" ref={trackRef} onScroll={updateActiveIndex}>
+            {banners.map((banner) => {
+              const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
+              return (
+                <div className="aggressive-popup__slide" key={banner.id}>
+                  {imageUrl ? <img src={imageUrl} alt="" /> : <span>{banner.title.slice(0, 1).toUpperCase()}</span>}
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="aggressive-popup__body">
           <strong>{activeBanner.title}</strong>
           {activeBanner.subtitle ? <p>{activeBanner.subtitle}</p> : null}
-          {banners.length > 1 ? (
+          {hasMultipleBanners ? (
             <div className="banner-dots banner-dots--popup" aria-label="Баннеры">
               {banners.map((banner, index) => (
                 <button
@@ -249,8 +332,8 @@ function AggressiveBannerPopup({
               ))}
             </div>
           ) : null}
-          {targetPath ? (
-            <button className="primary-button full-width" type="button" onClick={() => onNavigate(targetPath)}>
+          {bannerAction ? (
+            <button className="primary-button full-width" type="button" onClick={handleBannerAction}>
               Смотреть
             </button>
           ) : (
@@ -264,13 +347,17 @@ function AggressiveBannerPopup({
   );
 }
 
-function getBannerTargetPath(banner: Banner) {
+function getBannerAction(banner: Banner) {
   if (banner.target_type === 'product' && banner.target_id) {
-    return `/product/${banner.target_id}`;
+    return { kind: 'internal' as const, value: `/product/${banner.target_id}` };
   }
 
   if (banner.target_type === 'category' && banner.target_id) {
-    return `/category/${banner.target_id}`;
+    return { kind: 'internal' as const, value: `/category/${banner.target_id}` };
+  }
+
+  if (banner.target_type === 'external_url' && banner.external_url) {
+    return { kind: 'external' as const, value: banner.external_url };
   }
 
   return null;

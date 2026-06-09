@@ -32,8 +32,10 @@ The Seller Panel crops images before upload to match these display-safe standard
 | ------- | ------------ | ----------- | ------- | ---------------- |
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
-| Native Mini App banner | 16:9 | 1600x900 | 800x450 | 2400x1350 |
-| Aggressive promo banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+| Horizontal Mini App banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+| Vertical Mini App banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
+| Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
+| Aggressive popup banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 
 Backend uploads keep the existing extension, MIME, and 5 MB file-size checks and also reject
 images that are too small, too large, or outside the expected aspect-ratio tolerance.

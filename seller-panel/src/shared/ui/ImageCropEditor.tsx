@@ -25,24 +25,46 @@ export const PRODUCT_IMAGE_CROP_SPEC: ImageCropSpec = {
 
 export const NATIVE_BANNER_CROP_SPEC: ImageCropSpec = {
   id: 'native-banner',
-  title: 'Native banner crop',
-  aspectLabel: '16:9',
-  aspectRatio: 16 / 9,
-  outputWidth: 1600,
-  outputHeight: 900,
-  minWidth: 800,
-  minHeight: 450,
-};
-
-export const AGGRESSIVE_BANNER_CROP_SPEC: ImageCropSpec = {
-  id: 'aggressive-banner',
-  title: 'Promotional banner crop',
+  title: 'Horizontal banner crop',
   aspectLabel: '3:1',
   aspectRatio: 3 / 1,
   outputWidth: 1800,
   outputHeight: 600,
   minWidth: 900,
   minHeight: 300,
+};
+
+export const VERTICAL_BANNER_CROP_SPEC: ImageCropSpec = {
+  id: 'vertical-banner',
+  title: 'Vertical banner crop',
+  aspectLabel: '9:16',
+  aspectRatio: 9 / 16,
+  outputWidth: 900,
+  outputHeight: 1600,
+  minWidth: 450,
+  minHeight: 800,
+};
+
+export const POPUP_BANNER_CROP_SPEC: ImageCropSpec = {
+  id: 'popup-banner',
+  title: 'Popup banner crop',
+  aspectLabel: '3:4',
+  aspectRatio: 3 / 4,
+  outputWidth: 900,
+  outputHeight: 1200,
+  minWidth: 450,
+  minHeight: 600,
+};
+
+export const AGGRESSIVE_BANNER_CROP_SPEC: ImageCropSpec = {
+  id: 'aggressive-banner',
+  title: 'Aggressive popup banner crop',
+  aspectLabel: '9:16',
+  aspectRatio: 9 / 16,
+  outputWidth: 900,
+  outputHeight: 1600,
+  minWidth: 450,
+  minHeight: 800,
 };
 
 interface CropRect {

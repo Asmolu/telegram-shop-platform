@@ -5,7 +5,7 @@ export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
 export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
-export type BannerImageKind = 'native_banner' | 'aggressive_banner';
+export type BannerImageKind = 'native_banner' | 'vertical_banner' | 'popup_banner' | 'aggressive_banner';
 
 export type ApiDecimal = string | number;
 
@@ -115,6 +115,12 @@ export interface ProductVariant {
   updated_at: string;
 }
 
+export interface ProductCategoryAssignment {
+  category_id: number;
+  priority: 1 | 2 | 3;
+  category?: Category | null;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -127,6 +133,7 @@ export interface Product {
   status: ProductStatus;
   category_id: number | null;
   category: Category | null;
+  categories: ProductCategoryAssignment[];
   tags: Tag[];
   images: ProductImage[];
   variants: ProductVariant[];
@@ -152,6 +159,7 @@ export interface ProductCreate {
   search_aliases?: string | null;
   status: ProductStatus;
   category_id?: number | null;
+  categories?: ProductCategoryAssignment[];
   tag_ids: number[];
   images: ProductImageCreate[];
 }
@@ -166,6 +174,7 @@ export interface ProductUpdate {
   search_aliases?: string | null;
   status?: ProductStatus;
   category_id?: number | null;
+  categories?: ProductCategoryAssignment[];
   tag_ids?: number[];
   images?: ProductImageCreate[];
 }

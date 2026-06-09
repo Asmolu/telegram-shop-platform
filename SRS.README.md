@@ -200,10 +200,19 @@ Seller Panel работает через тот же Backend API, что и Mini
 - описание;
 - базовую цену;
 - статус;
-- категорию;
+- основную категорию для обратной совместимости;
+- до 3 категорий товара через ProductCategory с приоритетом 1..3;
 - изображения;
 - варианты товара;
 - теги.
+
+Категории товара:
+
+- ProductCategory связывает товар и категорию и хранит priority 1..3.
+- У одного товара не может быть больше 3 категорий, дубликатов категорий или повторяющихся приоритетов.
+- priority 1 считается основной категорией и синхронизируется в legacy `Product.category_id`.
+- При просмотре категории товары сортируются по ProductCategory.priority, затем по дате создания.
+- При поиске внутри категории сначала применяется `Product.search_priority`, затем ProductCategory.priority.
 
 Статусы:
 
@@ -531,8 +540,10 @@ and file-size checks. The Seller Panel should crop uploads before sending them t
 | ------- | ------------ | ----------- | ------- | ---------------- |
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
-| Native banner | 16:9 | 1600x900 | 800x450 | 2400x1350 |
-| Aggressive promo banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+| Horizontal banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+| Vertical banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
+| Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
+| Aggressive popup banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 
 ---
 

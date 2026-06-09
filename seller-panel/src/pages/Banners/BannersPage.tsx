@@ -13,6 +13,8 @@ import {
   AGGRESSIVE_BANNER_CROP_SPEC,
   ImageCropEditor,
   NATIVE_BANNER_CROP_SPEC,
+  POPUP_BANNER_CROP_SPEC,
+  VERTICAL_BANNER_CROP_SPEC,
   type ImageCropSpec,
 } from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
@@ -131,7 +133,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
         const uploaded = await api.banners.uploadImage(
           imageFile,
           form.title,
-          getBannerImageKind(form.targetType, form.displayType),
+          getBannerImageKind(form.displayType),
         );
         imagePath = uploaded.file_path;
       }
@@ -198,7 +200,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   if (error) {
     return <ErrorState error={error} onRetry={loadBanners} onAuthExpired={onAuthExpired} />;
   }
-  const bannerCropSpec = getBannerCropSpec(form.targetType, form.displayType);
+  const bannerCropSpec = getBannerCropSpec(form.displayType);
 
   return (
     <div className="split-view">
@@ -360,6 +362,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
               <option value="promo">{labelForEnum('promo', t)}</option>
               <option value="external_url">{labelForEnum('external_url', t)}</option>
             </select>
+            <small className="field-hint">{t('banners.targetTypeHint')}</small>
           </label>
           <label className="field">
             <span>{t('banners.targetId')}</span>
@@ -401,6 +404,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
               <option value="popup">{labelForEnum('popup', t)}</option>
               <option value="aggressive_popup">{labelForEnum('aggressive_popup', t)}</option>
             </select>
+            <small className="field-hint">{t('banners.displayTypeHint')}</small>
           </label>
           <label className="field">
             <span>{t('banners.position')}</span>
@@ -468,20 +472,30 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   );
 }
 
-function getBannerCropSpec(
-  targetType: BannerTargetType,
-  displayType: BannerDisplayType,
-): ImageCropSpec {
-  return targetType === 'promo' || displayType === 'aggressive_popup'
-    ? AGGRESSIVE_BANNER_CROP_SPEC
-    : NATIVE_BANNER_CROP_SPEC;
+function getBannerCropSpec(displayType: BannerDisplayType): ImageCropSpec {
+  switch (displayType) {
+    case 'vertical':
+      return VERTICAL_BANNER_CROP_SPEC;
+    case 'popup':
+      return POPUP_BANNER_CROP_SPEC;
+    case 'aggressive_popup':
+      return AGGRESSIVE_BANNER_CROP_SPEC;
+    case 'horizontal':
+    default:
+      return NATIVE_BANNER_CROP_SPEC;
+  }
 }
 
-function getBannerImageKind(
-  targetType: BannerTargetType,
-  displayType: BannerDisplayType,
-): BannerImageKind {
-  return targetType === 'promo' || displayType === 'aggressive_popup'
-    ? 'aggressive_banner'
-    : 'native_banner';
+function getBannerImageKind(displayType: BannerDisplayType): BannerImageKind {
+  switch (displayType) {
+    case 'vertical':
+      return 'vertical_banner';
+    case 'popup':
+      return 'popup_banner';
+    case 'aggressive_popup':
+      return 'aggressive_banner';
+    case 'horizontal':
+    default:
+      return 'native_banner';
+  }
 }

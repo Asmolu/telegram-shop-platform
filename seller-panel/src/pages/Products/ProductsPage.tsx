@@ -219,7 +219,7 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                       <strong>{product.name}</strong>
                       <small>{product.slug}</small>
                     </td>
-                    <td>{product.category?.name ?? t('products.unassigned')}</td>
+                    <td>{formatProductCategories(product) || t('products.unassigned')}</td>
                     <td>
                       <span className="price-stack">
                         {product.old_price ? (
@@ -283,4 +283,19 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
       </div>
     </div>
   );
+}
+
+function formatProductCategories(product: Product) {
+  const names =
+    product.categories
+      ?.slice()
+      .sort((left, right) => left.priority - right.priority)
+      .map((assignment) => assignment.category?.name)
+      .filter(Boolean) ?? [];
+
+  if (names.length > 0) {
+    return names.join(', ');
+  }
+
+  return product.category?.name ?? '';
 }

@@ -63,6 +63,7 @@ export function MainPage() {
   }, [isAuthenticated]);
 
   const horizontalBanners = banners.filter((banner) => !banner.display_type || banner.display_type === 'horizontal');
+  const verticalBanners = banners.filter((banner) => banner.display_type === 'vertical');
 
   function submitFeedSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,6 +107,7 @@ export function MainPage() {
       ) : null}
 
       {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} /> : null}
+      {verticalBanners.length > 0 ? <VerticalBannerGrid banners={verticalBanners} /> : null}
 
       <div className="feed-chips" aria-label="Быстрые фильтры">
         <button type="button" onClick={() => navigate('/search/results?tag=new')}>
@@ -162,17 +164,60 @@ function MainBanner({ banner }: { banner: Banner }) {
   }
 
   return (
-    <button className="native-banner" type="button" onClick={openBanner}>
-      <span>
-        <strong>{banner.title}</strong>
-        {banner.subtitle ? <small>{banner.subtitle}</small> : null}
-        <em>Смотреть</em>
-      </span>
+    <button className={`native-banner ${imageUrl ? 'native-banner--with-image' : ''}`} type="button" onClick={openBanner}>
       {imageUrl ? (
         <span className="native-banner__image" aria-hidden="true">
           <img src={imageUrl} alt="" />
         </span>
       ) : null}
+      <span className="native-banner__content">
+        <strong>{banner.title}</strong>
+        {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+        <em>Смотреть</em>
+      </span>
+    </button>
+  );
+}
+
+function VerticalBannerGrid({ banners }: { banners: Banner[] }) {
+  return (
+    <section className="vertical-banner-grid" aria-label="Вертикальные акции">
+      {banners.map((banner) => (
+        <VerticalBannerCard banner={banner} key={banner.id} />
+      ))}
+    </section>
+  );
+}
+
+function VerticalBannerCard({ banner }: { banner: Banner }) {
+  const { navigate } = useRouter();
+  const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
+
+  function openBanner() {
+    if (banner.target_type === 'product' && banner.target_id) {
+      navigate(`/product/${banner.target_id}`);
+      return;
+    }
+
+    if (banner.target_type === 'category' && banner.target_id) {
+      navigate(`/category/${banner.target_id}`);
+      return;
+    }
+
+    if (banner.external_url) {
+      window.open(banner.external_url, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  return (
+    <button className="vertical-banner-card" type="button" onClick={openBanner}>
+      <span className="vertical-banner-card__media" aria-hidden="true">
+        {imageUrl ? <img src={imageUrl} alt="" /> : <span>{banner.title.slice(0, 1).toUpperCase()}</span>}
+      </span>
+      <span className="vertical-banner-card__body">
+        <strong>{banner.title}</strong>
+        {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+      </span>
     </button>
   );
 }

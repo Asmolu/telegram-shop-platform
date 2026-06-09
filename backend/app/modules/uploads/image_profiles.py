@@ -4,6 +4,8 @@ from enum import StrEnum
 
 class ImageUploadKind(StrEnum):
     NATIVE_BANNER = "native_banner"
+    VERTICAL_BANNER = "vertical_banner"
+    POPUP_BANNER = "popup_banner"
     AGGRESSIVE_BANNER = "aggressive_banner"
 
 
@@ -49,19 +51,6 @@ PRODUCT_IMAGE_PROFILE = ImageUploadProfile(
 
 NATIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
     display_name="баннера",
-    aspect_label="16:9",
-    aspect_ratio=16 / 9,
-    recommended_width=1600,
-    recommended_height=900,
-    min_width=800,
-    min_height=450,
-    max_width=2400,
-    max_height=1350,
-    max_pixels=3_240_000,
-)
-
-AGGRESSIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
-    display_name="баннера",
     aspect_label="3:1",
     aspect_ratio=3 / 1,
     recommended_width=1800,
@@ -73,7 +62,48 @@ AGGRESSIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
     max_pixels=1_920_000,
 )
 
+VERTICAL_BANNER_IMAGE_PROFILE = ImageUploadProfile(
+    display_name="banner",
+    aspect_label="9:16",
+    aspect_ratio=9 / 16,
+    recommended_width=900,
+    recommended_height=1600,
+    min_width=450,
+    min_height=800,
+    max_width=1350,
+    max_height=2400,
+    max_pixels=3_240_000,
+)
+
+POPUP_BANNER_IMAGE_PROFILE = ImageUploadProfile(
+    display_name="banner",
+    aspect_label="3:4",
+    aspect_ratio=3 / 4,
+    recommended_width=900,
+    recommended_height=1200,
+    min_width=450,
+    min_height=600,
+    max_width=1350,
+    max_height=1800,
+    max_pixels=2_430_000,
+)
+
+AGGRESSIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
+    display_name="баннера",
+    aspect_label="9:16",
+    aspect_ratio=9 / 16,
+    recommended_width=900,
+    recommended_height=1600,
+    min_width=450,
+    min_height=800,
+    max_width=1350,
+    max_height=2400,
+    max_pixels=3_240_000,
+)
+
 BANNER_IMAGE_PROFILES = {
     ImageUploadKind.NATIVE_BANNER: NATIVE_BANNER_IMAGE_PROFILE,
+    ImageUploadKind.VERTICAL_BANNER: VERTICAL_BANNER_IMAGE_PROFILE,
+    ImageUploadKind.POPUP_BANNER: POPUP_BANNER_IMAGE_PROFILE,
     ImageUploadKind.AGGRESSIVE_BANNER: AGGRESSIVE_BANNER_IMAGE_PROFILE,
 }

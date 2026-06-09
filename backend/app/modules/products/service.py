@@ -15,13 +15,14 @@ from app.common.cache import (
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Product, ProductImage, ProductStatus, ProductVariant, Tag
+from app.db.models import Product, ProductCategory, ProductImage, ProductStatus, ProductVariant, Tag
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
 from app.modules.products.schemas import (
+    ProductCategoryInput,
     ProductCreate,
     ProductImageCreate,
     ProductList,
@@ -186,13 +187,24 @@ class ProductsService:
         actor_user_id: int | None = None,
     ) -> Product:
         tags = await self._resolve_tags(payload.tag_ids)
-        await self._ensure_category_exists(payload.category_id)
+        category_assignments = await self._resolve_category_assignments(
+            category_id=payload.category_id,
+            categories=payload.categories,
+        )
         self._validate_images(payload.images)
 
-        product_data = payload.model_dump(exclude={"tag_ids", "images"})
+        product_data = payload.model_dump(exclude={"tag_ids", "images", "categories"})
+        product_data["category_id"] = self._primary_category_id(category_assignments)
         product = Product(
             **product_data,
             tags=tags,
+            product_categories=[
+                ProductCategory(
+                    category_id=assignment.category_id,
+                    priority=assignment.priority,
+                )
+                for assignment in category_assignments
+            ],
             images=[ProductImage(**image.model_dump()) for image in payload.images],
         )
         self.repository.add(product)
@@ -221,15 +233,28 @@ class ProductsService:
     ) -> Product:
         product = await self.get_product(product_id)
         before_data = self.audit_service.snapshot(product, PRODUCT_AUDIT_FIELDS)
-        data = payload.model_dump(exclude_unset=True, exclude={"tag_ids", "images"})
+        data = payload.model_dump(exclude_unset=True, exclude={"tag_ids", "images", "categories"})
         candidate_base_price = data.get("base_price", product.base_price)
         candidate_old_price = data.get("old_price", product.old_price)
         self._validate_price_pair(candidate_base_price, candidate_old_price)
         if data.get("search_priority") is None and "search_priority" in data:
             raise AppError("search_priority must be 1, 2, or 3", status.HTTP_400_BAD_REQUEST)
 
-        if "category_id" in data:
-            await self._ensure_category_exists(data["category_id"])
+        categories_were_provided = "categories" in payload.model_fields_set
+        category_id_was_provided = "category_id" in data
+        if categories_were_provided or category_id_was_provided:
+            category_assignments = await self._resolve_category_assignments(
+                category_id=data.get("category_id", product.category_id),
+                categories=payload.categories if categories_were_provided else None,
+            )
+            product.product_categories = [
+                ProductCategory(
+                    category_id=assignment.category_id,
+                    priority=assignment.priority,
+                )
+                for assignment in category_assignments
+            ]
+            data["category_id"] = self._primary_category_id(category_assignments)
 
         if "tag_ids" in payload.model_fields_set and payload.tag_ids is not None:
             product.tags = await self._resolve_tags(payload.tag_ids)
@@ -412,6 +437,31 @@ class ProductsService:
         category = await self.categories_repository.get_by_id(category_id)
         if category is None:
             raise AppError("Category not found", status.HTTP_404_NOT_FOUND)
+
+    async def _resolve_category_assignments(
+        self,
+        *,
+        category_id: int | None,
+        categories: list[ProductCategoryInput] | None,
+    ) -> list[ProductCategoryInput]:
+        assignments = (
+            [ProductCategoryInput(category_id=category_id, priority=1)]
+            if categories is None and category_id is not None
+            else categories or []
+        )
+
+        for assignment in assignments:
+            await self._ensure_category_exists(assignment.category_id)
+
+        return sorted(assignments, key=lambda assignment: assignment.priority)
+
+    def _primary_category_id(
+        self,
+        assignments: list[ProductCategoryInput],
+    ) -> int | None:
+        if not assignments:
+            return None
+        return min(assignments, key=lambda assignment: assignment.priority).category_id
 
     async def _resolve_tags(self, tag_ids: list[int]) -> list[Tag]:
         unique_tag_ids = list(dict.fromkeys(tag_ids))

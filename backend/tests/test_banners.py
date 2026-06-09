@@ -183,6 +183,32 @@ async def test_public_banner_list_only_returns_active_banners() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "display_type",
+    [
+        BannerDisplayType.HORIZONTAL,
+        BannerDisplayType.VERTICAL,
+        BannerDisplayType.POPUP,
+        BannerDisplayType.AGGRESSIVE_POPUP,
+    ],
+)
+async def test_public_banner_list_returns_display_and_target_metadata(
+    display_type: BannerDisplayType,
+) -> None:
+    service, repository, _ = _banners_service()
+    repository.add(_banner(is_active=True, display_type=display_type))
+
+    banners = await service.list_public_banners(limit=20, offset=0)
+
+    assert banners.items[0].display_type == display_type
+    assert banners.items[0].target_type == BannerTargetType.PRODUCT
+    assert banners.items[0].target_id == 1
+    assert banners.items[0].external_url is None
+    assert banners.items[0].image_path == "banners/spring.webp"
+    assert banners.items[0].image_url == "/uploads/banners/spring.webp"
+
+
+@pytest.mark.asyncio
 async def test_public_banner_list_returns_aggressive_popup_and_tracks_view() -> None:
     tracker = FakeAnalyticsTracker()
     service, repository, _ = _banners_service(analytics_tracker=tracker)

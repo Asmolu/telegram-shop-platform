@@ -22,7 +22,7 @@ export function SearchResultsPage() {
   const tagId = searchParams.get('tag_id');
   const size = searchParams.get('size') ?? '';
   const color = searchParams.get('color') ?? '';
-  const sort = searchParams.get('sort') ?? 'newest';
+  const sort = searchParams.get('sort') ?? '';
   const priceFrom = Number(searchParams.get('price_from') ?? 0);
   const priceTo = Number(searchParams.get('price_to') ?? 0);
   const categoryName = searchParams.get('category');
@@ -87,12 +87,19 @@ export function SearchResultsPage() {
       if (sort === 'price_desc') {
         return Number(right.base_price) - Number(left.base_price);
       }
-      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      if (sort === 'newest') {
+        return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      }
+      return 0;
     });
 
   function changeSort(nextSort: string) {
     const params = new URLSearchParams(searchParams);
-    params.set('sort', nextSort);
+    if (nextSort) {
+      params.set('sort', nextSort);
+    } else {
+      params.delete('sort');
+    }
     navigate(`/search/results?${params.toString()}`);
   }
 
@@ -105,6 +112,7 @@ export function SearchResultsPage() {
       </button>
       <div className="sort-row">
         {[
+          ['', 'По умолчанию'],
           ['newest', 'Сначала новые'],
           ['price_asc', 'Дешевле'],
           ['price_desc', 'Дороже'],

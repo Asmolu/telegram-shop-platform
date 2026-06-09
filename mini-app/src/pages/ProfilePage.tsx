@@ -8,7 +8,7 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
-import { getTelegramThemeParams, openTelegramLink } from '../shared/telegram/webApp';
+import { openTelegramLink } from '../shared/telegram/webApp';
 import { EmptyState, TopBar } from '../shared/ui';
 import { getUserDisplayName } from '../shared/utils/format';
 
@@ -21,7 +21,6 @@ export function ProfilePage() {
   const [notificationsSaving, setNotificationsSaving] = React.useState<string | null>(null);
   const [notificationsError, setNotificationsError] = React.useState<string | null>(null);
   const [notificationsHint, setNotificationsHint] = React.useState<string | null>(null);
-  const theme = getTelegramThemeParams();
   const displayUser = user ?? telegramUser;
   const displayName = getUserDisplayName(displayUser);
   const username = displayUser?.username
@@ -155,8 +154,8 @@ export function ProfilePage() {
       <section className="settings-card">
         <h2>Настройки</h2>
         <div>
-          <span>Тема Telegram</span>
-          <strong>{theme.bg_color ? 'определена' : 'по умолчанию'}</strong>
+          <span>Тема интерфейса</span>
+          <strong>светлая</strong>
         </div>
         <div>
           <span>Данные и приватность</span>

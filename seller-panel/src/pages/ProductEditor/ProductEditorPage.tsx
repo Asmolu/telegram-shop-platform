@@ -29,8 +29,13 @@ interface ProductFormState {
   searchPriority: string;
   searchAliases: string;
   status: ProductStatus;
-  categoryId: string;
   tagIds: number[];
+}
+
+interface CategoryAssignmentRow {
+  localId: number;
+  categoryId: string;
+  priority: '1' | '2' | '3';
 }
 
 interface VariantRow {
@@ -54,9 +59,16 @@ const initialForm: ProductFormState = {
   searchPriority: '2',
   searchAliases: '',
   status: 'DRAFT',
-  categoryId: '',
   tagIds: [],
 };
+
+function createCategoryAssignmentRow(priority: '1' | '2' | '3' = '1'): CategoryAssignmentRow {
+  return {
+    localId: Date.now() + Math.random(),
+    categoryId: '',
+    priority,
+  };
+}
 
 function createVariantRow(): VariantRow {
   return {
@@ -73,6 +85,9 @@ function createVariantRow(): VariantRow {
 export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }: PageProps) {
   const { language, t } = useI18n();
   const [form, setForm] = useState<ProductFormState>(initialForm);
+  const [categoryAssignments, setCategoryAssignments] = useState<CategoryAssignmentRow[]>([
+    createCategoryAssignmentRow(),
+  ]);
   const [variants, setVariants] = useState<VariantRow[]>([createVariantRow()]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -110,9 +125,9 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             searchPriority: String(loadedProduct.search_priority ?? 2),
             searchAliases: loadedProduct.search_aliases ?? '',
             status: loadedProduct.status,
-            categoryId: loadedProduct.category_id ? String(loadedProduct.category_id) : '',
             tagIds: loadedProduct.tags.map((tag) => tag.id),
           });
+          setCategoryAssignments(getCategoryRowsFromProduct(loadedProduct));
           setVariants(
             loadedProduct.variants.length > 0
               ? loadedProduct.variants.map((variant) => ({
@@ -127,6 +142,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 }))
               : [createVariantRow()],
           );
+        } else {
+          setCategoryAssignments([createCategoryAssignmentRow()]);
         }
       })
       .catch(setError)
@@ -171,6 +188,33 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     }));
   }
 
+  function updateCategoryAssignment(localId: number, patch: Partial<CategoryAssignmentRow>) {
+    setCategoryAssignments((current) =>
+      current.map((assignment) =>
+        assignment.localId === localId ? { ...assignment, ...patch } : assignment,
+      ),
+    );
+  }
+
+  function addCategoryAssignment() {
+    setCategoryAssignments((current) => {
+      if (current.length >= 3) {
+        return current;
+      }
+      const usedPriorities = new Set(current.map((assignment) => assignment.priority));
+      const nextPriority =
+        (['1', '2', '3'] as const).find((priority) => !usedPriorities.has(priority)) ?? '3';
+      return [...current, createCategoryAssignmentRow(nextPriority)];
+    });
+  }
+
+  function removeCategoryAssignment(localId: number) {
+    setCategoryAssignments((current) => {
+      const next = current.filter((assignment) => assignment.localId !== localId);
+      return next.length > 0 ? next : [createCategoryAssignmentRow()];
+    });
+  }
+
   function updateVariant(localId: number, patch: Partial<VariantRow>) {
     setVariants((current) =>
       current.map((variant) => (variant.localId === localId ? { ...variant, ...patch } : variant)),
@@ -209,6 +253,29 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       return;
     }
 
+    const normalizedCategories = normalizeCategoryAssignments(categoryAssignments);
+    if (normalizedCategories.length > 3) {
+      setFormError(t('productEditor.maxCategories'));
+      setSaving(false);
+      return;
+    }
+
+    if (hasDuplicateValues(normalizedCategories.map((assignment) => assignment.category_id))) {
+      setFormError(t('productEditor.duplicateCategories'));
+      setSaving(false);
+      return;
+    }
+
+    if (hasDuplicateValues(normalizedCategories.map((assignment) => assignment.priority))) {
+      setFormError(t('productEditor.duplicateCategoryPriorities'));
+      setSaving(false);
+      return;
+    }
+
+    const primaryCategoryId =
+      [...normalizedCategories].sort((left, right) => left.priority - right.priority)[0]
+        ?.category_id ?? null;
+
     try {
       const payload = {
         name: form.name.trim(),
@@ -219,7 +286,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         search_priority: parseSearchPriority(form.searchPriority),
         search_aliases: normalizeSearchAliases(form.searchAliases),
         status: form.status,
-        category_id: form.categoryId ? Number(form.categoryId) : null,
+        category_id: primaryCategoryId,
+        categories: normalizedCategories,
         tag_ids: form.tagIds,
       };
 
@@ -335,51 +403,55 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               <span>{t('productEditor.slug')}</span>
               <input value={form.slug} onChange={(event) => updateField('slug', event.target.value)} />
             </label>
-            <label className="field">
-              <span>{t('productEditor.basePrice')}</span>
-              <input
-                min="0"
-                step="0.01"
-                type="number"
-                value={form.basePrice}
-                onChange={(event) => updateField('basePrice', event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span>{t('productEditor.oldPrice')}</span>
-              <input
-                min="0"
-                step="0.01"
-                type="number"
-                value={form.oldPrice}
-                onChange={(event) => updateField('oldPrice', event.target.value)}
-              />
-              <small className="field-hint">{t('productEditor.oldPriceHint')}</small>
-            </label>
-            <label className="field">
-              <span>{t('common.status')}</span>
-              <select
-                value={form.status}
-                onChange={(event) => updateField('status', event.target.value as ProductStatus)}
-              >
-                <option value="DRAFT">{labelForEnum('DRAFT', t)}</option>
-                <option value="ACTIVE">{labelForEnum('ACTIVE', t)}</option>
-                <option value="OUT_OF_STOCK">{labelForEnum('OUT_OF_STOCK', t)}</option>
-                <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>{t('productEditor.searchPriority')}</span>
-              <select
-                value={form.searchPriority}
-                onChange={(event) => updateField('searchPriority', event.target.value)}
-              >
-                <option value="1">{t('productEditor.priorityHigh')}</option>
-                <option value="2">{t('productEditor.priorityMedium')}</option>
-                <option value="3">{t('productEditor.priorityLow')}</option>
-              </select>
-              <small className="field-hint">{t('productEditor.searchPriorityHint')}</small>
-            </label>
+            <div className="form-pair-row field-wide">
+              <label className="field">
+                <span>{t('productEditor.basePrice')}</span>
+                <input
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  value={form.basePrice}
+                  onChange={(event) => updateField('basePrice', event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>{t('productEditor.oldPrice')}</span>
+                <input
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  value={form.oldPrice}
+                  onChange={(event) => updateField('oldPrice', event.target.value)}
+                />
+                <small className="field-hint">{t('productEditor.oldPriceHint')}</small>
+              </label>
+            </div>
+            <div className="form-pair-row field-wide">
+              <label className="field">
+                <span>{t('common.status')}</span>
+                <select
+                  value={form.status}
+                  onChange={(event) => updateField('status', event.target.value as ProductStatus)}
+                >
+                  <option value="DRAFT">{labelForEnum('DRAFT', t)}</option>
+                  <option value="ACTIVE">{labelForEnum('ACTIVE', t)}</option>
+                  <option value="OUT_OF_STOCK">{labelForEnum('OUT_OF_STOCK', t)}</option>
+                  <option value="ARCHIVED">{labelForEnum('ARCHIVED', t)}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{t('productEditor.searchPriority')}</span>
+                <select
+                  value={form.searchPriority}
+                  onChange={(event) => updateField('searchPriority', event.target.value)}
+                >
+                  <option value="1">{t('productEditor.priorityHigh')}</option>
+                  <option value="2">{t('productEditor.priorityMedium')}</option>
+                  <option value="3">{t('productEditor.priorityLow')}</option>
+                </select>
+                <small className="field-hint">{t('productEditor.searchPriorityHint')}</small>
+              </label>
+            </div>
             <label className="field field-wide">
               <span>{t('common.description')}</span>
               <textarea
@@ -441,20 +513,66 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       <section className="panel">
         <h2>{t('productEditor.categoryTags')}</h2>
         <div className="form-grid">
-          <label className="field">
-            <span>{t('common.category')}</span>
-            <select
-              value={form.categoryId}
-              onChange={(event) => updateField('categoryId', event.target.value)}
-            >
-              <option value="">{t('products.unassigned')}</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
+          <div className="field field-wide">
+            <span>{t('productEditor.categoryAssignments')}</span>
+            <div className="category-assignment-list">
+              {categoryAssignments.map((assignment) => (
+                <div className="category-assignment-row" key={assignment.localId}>
+                  <label>
+                    <span>{t('common.category')}</span>
+                    <select
+                      value={assignment.categoryId}
+                      onChange={(event) =>
+                        updateCategoryAssignment(assignment.localId, {
+                          categoryId: event.target.value,
+                        })
+                      }
+                    >
+                      <option value="">{t('products.unassigned')}</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>{t('productEditor.categoryPriority')}</span>
+                    <select
+                      value={assignment.priority}
+                      onChange={(event) =>
+                        updateCategoryAssignment(assignment.localId, {
+                          priority: event.target.value as CategoryAssignmentRow['priority'],
+                        })
+                      }
+                    >
+                      <option value="1">{t('productEditor.priorityHigh')}</option>
+                      <option value="2">{t('productEditor.priorityMedium')}</option>
+                      <option value="3">{t('productEditor.priorityLow')}</option>
+                    </select>
+                  </label>
+                  <button
+                    className="text-button danger-text"
+                    type="button"
+                    onClick={() => removeCategoryAssignment(assignment.localId)}
+                  >
+                    {t('common.remove')}
+                  </button>
+                </div>
               ))}
-            </select>
-          </label>
+            </div>
+            <div className="category-assignment-actions">
+              <button
+                className="button button-secondary"
+                disabled={categoryAssignments.length >= 3}
+                type="button"
+                onClick={addCategoryAssignment}
+              >
+                {t('productEditor.addCategory')}
+              </button>
+              <small className="field-hint">{t('productEditor.categoryPriorityHint')}</small>
+            </div>
+          </div>
           <div className="field field-wide">
             <span>{t('products.tags')}</span>
             <div className="checkbox-grid">
@@ -623,6 +741,43 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       ) : null}
     </form>
   );
+}
+
+function getCategoryRowsFromProduct(product: Product): CategoryAssignmentRow[] {
+  const rows =
+    product.categories?.length > 0
+      ? product.categories
+          .slice()
+          .sort((left, right) => left.priority - right.priority)
+          .map((assignment) => ({
+            localId: Date.now() + Math.random(),
+            categoryId: String(assignment.category_id),
+            priority: String(assignment.priority) as CategoryAssignmentRow['priority'],
+          }))
+      : product.category_id
+        ? [
+            {
+              localId: Date.now() + Math.random(),
+              categoryId: String(product.category_id),
+              priority: '1' as const,
+            },
+          ]
+        : [];
+
+  return rows.length > 0 ? rows : [createCategoryAssignmentRow()];
+}
+
+function normalizeCategoryAssignments(assignments: CategoryAssignmentRow[]) {
+  return assignments
+    .filter((assignment) => assignment.categoryId)
+    .map((assignment) => ({
+      category_id: Number(assignment.categoryId),
+      priority: Number(assignment.priority) as 1 | 2 | 3,
+    }));
+}
+
+function hasDuplicateValues(values: Array<number | string>) {
+  return new Set(values).size !== values.length;
 }
 
 function parseSearchPriority(value: string): 1 | 2 | 3 {

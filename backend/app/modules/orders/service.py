@@ -58,8 +58,19 @@ class InternalOrderEventPublisher:
         )
 
     async def emit(self, name: str, payload: Mapping[str, object]) -> None:
-        await self.notifications_publisher.emit(name, payload)
-        await self.customer_notifications_publisher.emit(name, payload)
+        for publisher_name, publisher in (
+            ("seller", self.notifications_publisher),
+            ("customer", self.customer_notifications_publisher),
+        ):
+            try:
+                await publisher.emit(name, payload)
+            except Exception:
+                logger.warning(
+                    "Failed to process %s post-commit order event %s",
+                    publisher_name,
+                    name,
+                    exc_info=True,
+                )
 
 
 class OrdersService:

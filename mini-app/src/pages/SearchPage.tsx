@@ -16,7 +16,7 @@ export function SearchPage() {
   const [color, setColor] = React.useState('');
   const [priceFrom, setPriceFrom] = React.useState('');
   const [priceTo, setPriceTo] = React.useState('');
-  const [sort, setSort] = React.useState('newest');
+  const [sort, setSort] = React.useState('');
 
   React.useEffect(() => {
     let cancelled = false;
@@ -142,6 +142,7 @@ export function SearchPage() {
             <h2>Сортировка</h2>
             <div className="segmented-control">
               {[
+                ['', 'По умолчанию'],
                 ['newest', 'Новинки'],
                 ['price_asc', 'Сначала дешевле'],
                 ['price_desc', 'Сначала дороже'],

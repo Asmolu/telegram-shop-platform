@@ -53,7 +53,7 @@ export function CategoriesPage() {
       {!loading && !error && categories.length > 0 ? (
         <div className="category-grid">
           {categories.map((category) => {
-            const categoryProducts = products.filter((product) => product.category_id === category.id);
+            const categoryProducts = products.filter((product) => isProductInCategory(product, category.id));
             const imageUrl = categoryProducts[0] ? getProductImageUrl(categoryProducts[0]) : null;
 
             return (
@@ -77,4 +77,12 @@ export function CategoriesPage() {
       ) : null}
     </div>
   );
+}
+
+function isProductInCategory(product: Product, categoryId: number) {
+  if (product.category_id === categoryId) {
+    return true;
+  }
+
+  return Boolean(product.categories?.some((assignment) => assignment.category_id === categoryId));
 }

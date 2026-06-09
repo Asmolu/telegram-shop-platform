@@ -421,6 +421,11 @@ class Category(Base):
     )
 
     products: Mapped[list["Product"]] = relationship(back_populates="category")
+    product_categories: Mapped[list["ProductCategory"]] = relationship(
+        back_populates="category",
+        cascade="all, delete-orphan",
+        order_by="ProductCategory.priority",
+    )
 
 
 class Tag(Base):
@@ -445,6 +450,54 @@ class Tag(Base):
         secondary=product_tags,
         back_populates="tags",
     )
+
+
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+    __table_args__ = (
+        CheckConstraint(
+            "priority IN (1, 2, 3)",
+            name="ck_product_categories_priority_range",
+        ),
+        UniqueConstraint(
+            "product_id",
+            "category_id",
+            name="uq_product_categories_product_category",
+        ),
+        UniqueConstraint(
+            "product_id",
+            "priority",
+            name="uq_product_categories_product_priority",
+        ),
+        Index("ix_product_categories_category_priority", "category_id", "priority"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product: Mapped["Product"] = relationship(back_populates="product_categories")
+    category: Mapped[Category] = relationship(back_populates="product_categories")
 
 
 class Product(Base):
@@ -500,6 +553,11 @@ class Product(Base):
     )
 
     category: Mapped[Category | None] = relationship(back_populates="products")
+    product_categories: Mapped[list[ProductCategory]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductCategory.priority",
+    )
     images: Mapped[list["ProductImage"]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
@@ -532,6 +590,10 @@ class Product(Base):
         return any(
             variant.is_active and variant.available_quantity > 0 for variant in self.variants
         )
+
+    @property
+    def categories(self) -> list[ProductCategory]:
+        return self.product_categories
 
 
 class ProductVariant(Base):

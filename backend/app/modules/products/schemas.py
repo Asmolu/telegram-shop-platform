@@ -88,6 +88,35 @@ class ProductVariantRead(ProductVariantBase):
     updated_at: datetime
 
 
+class ProductCategoryInput(BaseModel):
+    category_id: int = Field(gt=0)
+    priority: int = Field(ge=1, le=3)
+
+
+class ProductCategoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    category_id: int
+    priority: int
+    category: CategoryRead | None = None
+
+
+def _validate_category_assignments(
+    categories: list[ProductCategoryInput] | None,
+) -> list[ProductCategoryInput] | None:
+    if categories is None:
+        return None
+    if len(categories) > 3:
+        raise ValueError("products can have at most 3 categories")
+    category_ids = [item.category_id for item in categories]
+    if len(category_ids) != len(set(category_ids)):
+        raise ValueError("duplicate product categories are not allowed")
+    priorities = [item.priority for item in categories]
+    if len(priorities) != len(set(priorities)):
+        raise ValueError("product category priorities must be unique")
+    return categories
+
+
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -122,8 +151,17 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
+    categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] = Field(default_factory=list)
     images: list[ProductImageCreate] = Field(default_factory=list)
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(
+        cls,
+        value: list[ProductCategoryInput] | None,
+    ) -> list[ProductCategoryInput] | None:
+        return _validate_category_assignments(value)
 
 
 class ProductUpdate(BaseModel):
@@ -141,6 +179,7 @@ class ProductUpdate(BaseModel):
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     status: ProductStatus | None = None
     category_id: int | None = None
+    categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] | None = None
     images: list[ProductImageCreate] | None = None
 
@@ -148,6 +187,14 @@ class ProductUpdate(BaseModel):
     @classmethod
     def normalize_aliases(cls, value: str | None) -> str | None:
         return normalize_search_aliases(value)
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(
+        cls,
+        value: list[ProductCategoryInput] | None,
+    ) -> list[ProductCategoryInput] | None:
+        return _validate_category_assignments(value)
 
     @model_validator(mode="after")
     def validate_old_price_when_complete(self) -> "ProductUpdate":
@@ -169,6 +216,7 @@ class ProductRead(ProductBase):
 
     id: int
     category: CategoryRead | None
+    categories: list[ProductCategoryRead] = Field(default_factory=list)
     tags: list[TagRead]
     images: list[ProductImageRead]
     variants: list[ProductVariantRead] = Field(default_factory=list)

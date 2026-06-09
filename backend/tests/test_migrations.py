@@ -18,6 +18,7 @@ from app.db.models import (
     NotificationTemplateCategory,
     PendingSellerRegistration,
     Product,
+    ProductCategory,
     SellerRegistrationStatus,
 )
 
@@ -497,3 +498,25 @@ def test_product_search_foundation_migration_and_model_constraints() -> None:
     assert "ck_products_search_priority_range" in constraint_names
     assert table.c.old_price.nullable is True
     assert table.c.search_priority.default.arg == 2
+
+
+def test_product_category_assignments_migration_and_model_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260609_0021_add_product_category_assignments.py"
+    )
+    content = migration_path.read_text()
+    table = ProductCategory.__table__
+    constraint_names = {constraint.name for constraint in table.constraints}
+    index_names = {index.name for index in table.indexes}
+
+    assert "product_categories" in content
+    assert "INSERT INTO product_categories" in content
+    assert "WHERE category_id IS NOT NULL" in content
+    assert "ck_product_categories_priority_range" in constraint_names
+    assert "uq_product_categories_product_category" in constraint_names
+    assert "uq_product_categories_product_priority" in constraint_names
+    assert "ix_product_categories_category_priority" in index_names
+    assert table.c.priority.nullable is False

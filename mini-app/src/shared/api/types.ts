@@ -57,6 +57,12 @@ export type ProductVariant = {
   updated_at: string;
 };
 
+export type ProductCategoryAssignment = {
+  category_id: number;
+  priority: 1 | 2 | 3;
+  category?: Category | null;
+};
+
 export type Product = {
   id: number;
   name: string;
@@ -68,6 +74,7 @@ export type Product = {
   status: ProductStatus;
   category_id?: number | null;
   category?: Category | null;
+  categories?: ProductCategoryAssignment[];
   tags: Tag[];
   images: ProductImage[];
   variants: ProductVariant[];

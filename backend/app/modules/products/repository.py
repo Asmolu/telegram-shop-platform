@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Category, Product, ProductStatus, ProductVariant, Tag
+from app.db.models import Category, Product, ProductCategory, ProductStatus, ProductVariant, Tag
 from app.modules.products.search import (
     SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
     normalize_search_text,
@@ -40,11 +40,12 @@ class ProductsRepository:
                 Product.variants.and_(ProductVariant.is_active.is_(True))
             )
 
-        order_by = self._list_ordering(search=search)
+        order_by = self._list_ordering(search=search, category_id=category_id)
         products_query = (
             select(Product)
             .options(
                 selectinload(Product.category),
+                selectinload(Product.product_categories).selectinload(ProductCategory.category),
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 variants_loader,
@@ -76,6 +77,7 @@ class ProductsRepository:
             select(Product)
             .options(
                 selectinload(Product.category),
+                selectinload(Product.product_categories).selectinload(ProductCategory.category),
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 variants_loader,
@@ -89,6 +91,7 @@ class ProductsRepository:
             select(Product)
             .options(
                 selectinload(Product.category),
+                selectinload(Product.product_categories).selectinload(ProductCategory.category),
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))),
@@ -113,7 +116,12 @@ class ProductsRepository:
     ) -> list[Any]:
         conditions = []
         if category_id is not None:
-            conditions.append(Product.category_id == category_id)
+            conditions.append(
+                or_(
+                    Product.category_id == category_id,
+                    Product.product_categories.any(ProductCategory.category_id == category_id),
+                )
+            )
         if tag_id is not None:
             conditions.append(Product.tags.any(Tag.id == tag_id))
         if status is not None:
@@ -123,9 +131,26 @@ class ProductsRepository:
             conditions.append(self._search_condition(normalized_search))
         return conditions
 
-    def _list_ordering(self, *, search: str | None) -> tuple[Any, ...]:
+    def _list_ordering(
+        self,
+        *,
+        search: str | None,
+        category_id: int | None = None,
+    ) -> tuple[Any, ...]:
+        category_priority = (
+            self._category_priority_expression(category_id) if category_id is not None else None
+        )
         if normalize_search_text(search):
+            if category_priority is not None:
+                return (
+                    Product.search_priority.asc(),
+                    category_priority.asc(),
+                    Product.created_at.desc(),
+                    Product.id.desc(),
+                )
             return (Product.search_priority.asc(), Product.created_at.desc(), Product.id.desc())
+        if category_priority is not None:
+            return (category_priority.asc(), Product.created_at.desc(), Product.id.desc())
         return (Product.created_at.desc(), Product.id.desc())
 
     def _search_condition(self, normalized_search: str) -> Any:
@@ -140,6 +165,15 @@ class ProductsRepository:
                     self._text_matches(Category.name, normalized_search, search_pattern),
                     self._text_matches(Category.slug, normalized_search, search_pattern),
                     self._text_matches(Category.description, normalized_search, search_pattern),
+                )
+            ),
+            Product.product_categories.any(
+                ProductCategory.category.has(
+                    or_(
+                        self._text_matches(Category.name, normalized_search, search_pattern),
+                        self._text_matches(Category.slug, normalized_search, search_pattern),
+                        self._text_matches(Category.description, normalized_search, search_pattern),
+                    )
                 )
             ),
             Product.tags.any(
@@ -163,6 +197,19 @@ class ProductsRepository:
 
     def _normalized_column(self, column: Any) -> Any:
         return func.lower(func.replace(func.coalesce(column, ""), "ё", "е"))
+
+    def _category_priority_expression(self, category_id: int) -> Any:
+        relation_priority = (
+            select(func.min(ProductCategory.priority))
+            .where(
+                ProductCategory.product_id == Product.id,
+                ProductCategory.category_id == category_id,
+            )
+            .correlate(Product)
+            .scalar_subquery()
+        )
+        legacy_priority = case((Product.category_id == category_id, 1), else_=4)
+        return func.coalesce(relation_priority, legacy_priority)
 
 
 class ProductVariantsRepository:

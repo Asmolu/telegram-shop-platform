@@ -64,6 +64,11 @@ class FakeOrderEventPublisher:
             self.commit_states.append(self.session.committed)
 
 
+class FailingOrderEventPublisher:
+    async def emit(self, name: str, payload: dict[str, object]) -> None:
+        raise RuntimeError(f"{name} delivery failed")
+
+
 class FakeAnalyticsTracker:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
@@ -626,6 +631,39 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
             },
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_order_status_update_does_not_fail_when_seller_notification_fails() -> None:
+    service, repository, session, _ = _orders_service()
+    customer_events = FakeOrderEventPublisher(session)
+    service.event_publisher = InternalOrderEventPublisher(
+        session,
+        notifications_publisher=FailingOrderEventPublisher(),
+        customer_notifications_publisher=customer_events,
+    )
+    repository.orders[10] = _order(order_id=10, user_id=1)
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.PROCESSING),
+    )
+
+    assert updated.status == OrderStatus.PROCESSING
+    assert customer_events.events == [
+        (
+            ORDER_STATUS_CHANGED,
+            {
+                "order_id": 10,
+                "order_number": "ORD-00000010",
+                "user_id": 1,
+                "previous_status": "NEW",
+                "new_status": "PROCESSING",
+            },
+        )
+    ]
+    assert customer_events.commit_states == [True]
+    assert session.committed is True
 
 
 @pytest.mark.asyncio
