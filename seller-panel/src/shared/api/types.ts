@@ -191,14 +191,12 @@ export interface ProductVariantPayload {
 export interface UploadedProductImage extends ProductImage {}
 
 export interface UploadedBannerImage {
-  id: number;
   file_path: string;
   url: string;
   original_filename: string;
   mime_type: string;
   size_bytes: number;
   alt_text: string | null;
-  created_at: string;
 }
 
 export interface OrderItem {

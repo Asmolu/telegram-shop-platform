@@ -1,7 +1,7 @@
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Banner, ProductImage
+from app.db.models import ProductImage
 
 
 class UploadsRepository:
@@ -10,9 +10,6 @@ class UploadsRepository:
 
     def add_product_image(self, image: ProductImage) -> None:
         self.session.add(image)
-
-    def add_banner(self, banner: Banner) -> None:
-        self.session.add(banner)
 
     async def next_product_image_position(self, product_id: int) -> int:
         result = await self.session.execute(

@@ -2,7 +2,7 @@ import React from 'react';
 import { getFavorites, getProducts, toApiErrorMessage, type Product } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { useRouter } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, SearchIcon, TopBar } from '../shared/ui';
 import { useProductActions } from '../features/catalog/useProductActions';
 
 export function SearchResultsPage() {
@@ -107,7 +107,7 @@ export function SearchResultsPage() {
     <div className="page">
       <TopBar title={categoryName || 'Результаты'} variant="marketplace" onBack={() => navigate('/search')} />
       <button className="search-field search-field--static" type="button" onClick={() => navigate('/search')}>
-        <span>⌕</span>
+        <SearchIcon className="search-icon" />
         {query || 'Найти одежду, бренд, размер...'}
       </button>
       <div className="sort-row">

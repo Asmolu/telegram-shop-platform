@@ -90,20 +90,14 @@ export type ProductList = {
 
 export type Banner = {
   id: number;
-  title: string;
-  subtitle?: string | null;
   image_path: string;
   image_url: string;
-  target_type?: BannerTargetType | null;
+  target_type: BannerTargetType;
   target_id?: number | null;
   external_url?: string | null;
-  display_type?: BannerDisplayType | null;
+  promo_code?: string | null;
+  display_type: BannerDisplayType;
   position: number;
-  is_active: boolean;
-  starts_at?: string | null;
-  ends_at?: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
 export type BannerList = {

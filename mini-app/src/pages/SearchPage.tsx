@@ -1,7 +1,7 @@
 import React from 'react';
 import { getCategories, getTags, toApiErrorMessage, type Category, type Tag } from '../shared/api';
 import { useRouter } from '../shared/router/RouterProvider';
-import { ErrorState, PageLoader, TopBar } from '../shared/ui';
+import { ErrorState, PageLoader, SearchIcon, TopBar } from '../shared/ui';
 
 export function SearchPage() {
   const { navigate } = useRouter();
@@ -67,15 +67,20 @@ export function SearchPage() {
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error ? (
         <form className="filter-form filter-form--compact" onSubmit={showProducts}>
-          <label className="input-shell">
-            <span>⌕</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Найти одежду, бренд, размер..."
-              type="search"
-            />
-          </label>
+          <div className="search-row search-row--filters">
+            <label className="search-field search-field--input">
+              <SearchIcon className="search-icon" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Найти одежду, бренд, размер..."
+                type="search"
+              />
+            </label>
+            <button className="search-submit-button" type="submit">
+              Найти
+            </button>
+          </div>
 
           <section className="filter-section">
             <h2>Категория</h2>

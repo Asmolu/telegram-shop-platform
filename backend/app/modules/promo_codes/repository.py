@@ -32,6 +32,14 @@ class PromoCodesRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_ids(self, promo_code_ids: set[int]) -> dict[int, PromoCode]:
+        if not promo_code_ids:
+            return {}
+        result = await self.session.execute(
+            select(PromoCode).where(PromoCode.id.in_(promo_code_ids))
+        )
+        return {promo_code.id: promo_code for promo_code in result.scalars().all()}
+
     async def get_by_code(self, code: str, *, for_update: bool = False) -> PromoCode | None:
         query = select(PromoCode).where(PromoCode.code == code)
         if for_update:

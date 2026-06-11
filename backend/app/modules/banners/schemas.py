@@ -101,6 +101,23 @@ class BannerList(BaseModel):
     meta: PageMeta
 
 
+class PublicBannerRead(BaseModel):
+    id: int
+    image_path: str
+    image_url: str
+    target_type: BannerTargetType
+    target_id: int | None = None
+    external_url: str | None = None
+    promo_code: str | None = None
+    display_type: BannerDisplayType = BannerDisplayType.HORIZONTAL
+    position: int
+
+
+class PublicBannerList(BaseModel):
+    items: list[PublicBannerRead]
+    meta: PageMeta
+
+
 class BannerClickRead(BaseModel):
     banner_id: int
     event_name: str = "banner.clicked"

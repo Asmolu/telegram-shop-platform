@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import User, UserRole
 from app.modules.audit.service import AuditService
@@ -22,7 +23,11 @@ router = APIRouter(prefix="/promo-codes", tags=["promo-codes"])
 def get_promo_codes_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> PromoCodesService:
-    return PromoCodesService(session, audit_service=AuditService(session))
+    return PromoCodesService(
+        session,
+        audit_service=AuditService(session),
+        cache=CacheService(),
+    )
 
 
 @router.post("/validate", response_model=PromoCodeValidationRead)

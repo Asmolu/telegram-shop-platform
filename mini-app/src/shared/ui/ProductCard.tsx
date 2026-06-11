@@ -25,7 +25,6 @@ export function ProductCard({
     .map((variant) => variant.size)
     .filter((size, index, all) => all.indexOf(size) === index)
     .slice(0, 4);
-  const firstTag = product.tags[0]?.name;
 
   async function runAction(action: 'favorite' | 'cart', callback?: (product: Product) => void | Promise<void>) {
     if (!callback) {
@@ -64,7 +63,6 @@ export function ProductCard({
         <span className="product-card__title">{product.name}</span>
         <span className="product-card__meta">
           {product.is_available ? 'В наличии' : 'Нет в наличии'}
-          {firstTag ? ` · ${firstTag}` : ''}
         </span>
         {sizes.length > 0 ? (
           <span className="size-row">

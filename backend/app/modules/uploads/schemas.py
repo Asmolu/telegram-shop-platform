@@ -25,13 +25,9 @@ class ProductImageUploadRead(BaseModel):
 
 
 class BannerImageUploadRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
     file_path: str
     url: str
     original_filename: str
     mime_type: str
     size_bytes: int
     alt_text: str | None
-    created_at: datetime

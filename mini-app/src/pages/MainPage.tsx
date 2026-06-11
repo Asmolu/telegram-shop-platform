@@ -3,13 +3,15 @@ import {
   getBanners,
   getFavorites,
   getProducts,
+  trackBannerClick,
   toApiErrorMessage,
   type Banner,
   type Product,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { useRouter } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, SearchIcon, TopBar } from '../shared/ui';
+import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { useProductActions } from '../features/catalog/useProductActions';
 
@@ -22,6 +24,7 @@ export function MainPage() {
   const [feedQuery, setFeedQuery] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [bannerNotice, setBannerNotice] = React.useState<string | null>(null);
   const { addToCart, toggleFavorite, notice, clearNotice } = useProductActions({
     favoriteIds,
     setFavoriteIds,
@@ -62,7 +65,7 @@ export function MainPage() {
     };
   }, [isAuthenticated]);
 
-  const horizontalBanners = banners.filter((banner) => !banner.display_type || banner.display_type === 'horizontal');
+  const horizontalBanners = banners.filter((banner) => banner.display_type === 'horizontal');
   const verticalBanners = banners.filter((banner) => banner.display_type === 'vertical');
 
   function submitFeedSearch(event: React.FormEvent<HTMLFormElement>) {
@@ -84,7 +87,7 @@ export function MainPage() {
       />
       <form className="search-row search-row--feed" onSubmit={submitFeedSearch}>
         <label className="search-field search-field--input">
-          <span>⌕</span>
+          <SearchIcon className="search-icon" />
           <input
             value={feedQuery}
             onChange={(event) => setFeedQuery(event.target.value)}
@@ -106,20 +109,17 @@ export function MainPage() {
         </InlineNotice>
       ) : null}
 
-      {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} /> : null}
-      {verticalBanners.length > 0 ? <VerticalBannerGrid banners={verticalBanners} /> : null}
+      {bannerNotice ? (
+        <InlineNotice tone={bannerNotice.includes('скопирован') ? 'success' : 'warning'}>
+          <span>{bannerNotice}</span>
+          <button type="button" onClick={() => setBannerNotice(null)}>
+            ×
+          </button>
+        </InlineNotice>
+      ) : null}
 
-      <div className="feed-chips" aria-label="Быстрые фильтры">
-        <button type="button" onClick={() => navigate('/search/results?tag=new')}>
-          Новинки
-        </button>
-        <button type="button" onClick={() => navigate('/search/results?tag=sale')}>
-          Скидки
-        </button>
-        <button type="button" onClick={() => navigate('/search/results?tag=premium')}>
-          Premium
-        </button>
-      </div>
+      {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} onNotice={setBannerNotice} /> : null}
+      {verticalBanners.length > 0 ? <VerticalBannerGrid banners={verticalBanners} onNotice={setBannerNotice} /> : null}
 
       {loading ? <ProductGridSkeleton count={6} /> : null}
       {!loading && error ? <ErrorState message={error} actionLabel="Повторить" onAction={() => window.location.reload()} /> : null}
@@ -143,86 +143,61 @@ export function MainPage() {
   );
 }
 
-function MainBanner({ banner }: { banner: Banner }) {
+function MainBanner({ banner, onNotice }: { banner: Banner; onNotice: (message: string) => void }) {
   const { navigate } = useRouter();
   const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
-
-  function openBanner() {
-    if (banner.target_type === 'product' && banner.target_id) {
-      navigate(`/product/${banner.target_id}`);
-      return;
-    }
-
-    if (banner.target_type === 'category' && banner.target_id) {
-      navigate(`/category/${banner.target_id}`);
-      return;
-    }
-
-    if (banner.external_url) {
-      window.location.href = banner.external_url;
-    }
-  }
+  const action = getBannerAction(banner);
+  const ctaLabel = getBannerCtaLabel(action);
 
   return (
-    <button className={`native-banner ${imageUrl ? 'native-banner--with-image' : ''}`} type="button" onClick={openBanner}>
+    <button
+      className="native-banner"
+      type="button"
+      aria-disabled={!action}
+      onClick={() => void activateBanner(banner, navigate, onNotice)}
+    >
       {imageUrl ? (
         <span className="native-banner__image" aria-hidden="true">
           <img src={imageUrl} alt="" />
         </span>
-      ) : null}
-      <span className="native-banner__content">
-        <strong>{banner.title}</strong>
-        {banner.subtitle ? <small>{banner.subtitle}</small> : null}
-        <em>Смотреть</em>
-      </span>
+      ) : <span className="banner-image-fallback" aria-hidden="true" />}
+      {ctaLabel ? <span className="banner-cta">{ctaLabel}</span> : null}
     </button>
   );
 }
 
-function VerticalBannerGrid({ banners }: { banners: Banner[] }) {
+function VerticalBannerGrid({ banners, onNotice }: { banners: Banner[]; onNotice: (message: string) => void }) {
   return (
     <section className="vertical-banner-grid" aria-label="Вертикальные акции">
       {banners.map((banner) => (
-        <VerticalBannerCard banner={banner} key={banner.id} />
+        <VerticalBannerCard banner={banner} key={banner.id} onNotice={onNotice} />
       ))}
     </section>
   );
 }
 
-function VerticalBannerCard({ banner }: { banner: Banner }) {
+function VerticalBannerCard({ banner, onNotice }: { banner: Banner; onNotice: (message: string) => void }) {
   const { navigate } = useRouter();
   const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
-
-  function openBanner() {
-    if (banner.target_type === 'product' && banner.target_id) {
-      navigate(`/product/${banner.target_id}`);
-      return;
-    }
-
-    if (banner.target_type === 'category' && banner.target_id) {
-      navigate(`/category/${banner.target_id}`);
-      return;
-    }
-
-    if (banner.external_url) {
-      window.open(banner.external_url, '_blank', 'noopener,noreferrer');
-    }
-  }
+  const action = getBannerAction(banner);
+  const ctaLabel = getBannerCtaLabel(action);
 
   return (
-    <button className="vertical-banner-card" type="button" onClick={openBanner}>
+    <button
+      className="vertical-banner-card"
+      type="button"
+      aria-disabled={!action}
+      onClick={() => void activateBanner(banner, navigate, onNotice)}
+    >
       <span className="vertical-banner-card__media" aria-hidden="true">
-        {imageUrl ? <img src={imageUrl} alt="" /> : <span>{banner.title.slice(0, 1).toUpperCase()}</span>}
+        {imageUrl ? <img src={imageUrl} alt="" /> : <span className="banner-image-fallback" />}
       </span>
-      <span className="vertical-banner-card__body">
-        <strong>{banner.title}</strong>
-        {banner.subtitle ? <small>{banner.subtitle}</small> : null}
-      </span>
+      {ctaLabel ? <span className="banner-cta">{ctaLabel}</span> : null}
     </button>
   );
 }
 
-function BannerCarousel({ banners }: { banners: Banner[] }) {
+function BannerCarousel({ banners, onNotice }: { banners: Banner[]; onNotice: (message: string) => void }) {
   const trackRef = React.useRef<HTMLDivElement | null>(null);
   const interactionPauseUntil = React.useRef(0);
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -278,7 +253,7 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
       >
         {banners.map((banner) => (
           <div className="banner-carousel__slide" key={banner.id}>
-            <MainBanner banner={banner} />
+            <MainBanner banner={banner} onNotice={onNotice} />
           </div>
         ))}
       </div>
@@ -297,4 +272,33 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
       ) : null}
     </section>
   );
+}
+
+async function activateBanner(
+  banner: Banner,
+  navigate: (to: string) => void,
+  onNotice: (message: string) => void,
+) {
+  const action = getBannerAction(banner);
+  if (!action) {
+    return;
+  }
+
+  void trackBannerClick(banner.id).catch(() => undefined);
+  if (action.kind === 'copy') {
+    try {
+      await copyTextToClipboard(action.value);
+      onNotice(`Промокод ${action.value} скопирован`);
+    } catch {
+      onNotice('Не удалось скопировать промокод');
+    }
+    return;
+  }
+
+  if (action.kind === 'internal') {
+    navigate(action.value);
+    return;
+  }
+
+  window.open(action.value, '_blank', 'noopener,noreferrer');
 }

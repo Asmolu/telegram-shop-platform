@@ -14,6 +14,7 @@ from app.modules.banners.schemas import (
     BannerList,
     BannerRead,
     BannerUpdate,
+    PublicBannerList,
 )
 from app.modules.banners.service import BannersService
 
@@ -31,13 +32,13 @@ def get_banners_service(
     )
 
 
-@router.get("", response_model=BannerList)
+@router.get("", response_model=PublicBannerList)
 async def list_public_banners(
     service: Annotated[BannersService, Depends(get_banners_service)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> BannerList:
+) -> PublicBannerList:
     return await service.list_public_banners(
         limit=limit,
         offset=offset,

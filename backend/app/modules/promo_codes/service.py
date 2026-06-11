@@ -6,6 +6,7 @@ from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.cache import CacheService, banner_cache_patterns
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import CouponUsage, DiscountType, PromoCode
@@ -43,10 +44,16 @@ class PromoCodeCalculation:
 class PromoCodesService:
     """Promo code management and validation business logic."""
 
-    def __init__(self, session: AsyncSession, audit_service: AuditService | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        audit_service: AuditService | None = None,
+        cache: CacheService | None = None,
+    ) -> None:
         self.session = session
         self.repository = PromoCodesRepository(session)
         self.audit_service = audit_service or NoopAuditService()
+        self.cache = cache
 
     async def create_promo_code(
         self,
@@ -73,6 +80,7 @@ class PromoCodesService:
             await self.session.rollback()
             raise AppError("Promo code already exists", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_banner_cache()
         return PromoCodeRead.model_validate(promo_code)
 
     async def list_promo_codes(self, *, limit: int, offset: int) -> PromoCodeList:
@@ -122,6 +130,7 @@ class PromoCodesService:
             await self.session.rollback()
             raise AppError("Promo code already exists", status.HTTP_409_CONFLICT) from exc
 
+        await self._invalidate_banner_cache()
         return PromoCodeRead.model_validate(promo_code)
 
     async def deactivate_promo_code(
@@ -145,6 +154,8 @@ class PromoCodesService:
         except IntegrityError as exc:
             await self.session.rollback()
             raise AppError("Promo code update failed", status.HTTP_409_CONFLICT) from exc
+
+        await self._invalidate_banner_cache()
 
     async def validate_current_cart(self, *, user_id: int, code: str) -> PromoCodeValidationRead:
         cart = await self.repository.get_cart_for_validation(user_id)
@@ -293,3 +304,8 @@ class PromoCodesService:
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+    async def _invalidate_banner_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*banner_cache_patterns())

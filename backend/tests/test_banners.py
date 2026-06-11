@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,7 +7,15 @@ from pydantic import ValidationError
 
 from app.common.deps import get_current_user
 from app.core.errors import AppError
-from app.db.models import Banner, BannerDisplayType, BannerTargetType, User, UserRole
+from app.db.models import (
+    Banner,
+    BannerDisplayType,
+    BannerTargetType,
+    DiscountType,
+    PromoCode,
+    User,
+    UserRole,
+)
 from app.main import create_app
 from app.modules.banners.router import get_banners_service
 from app.modules.banners.schemas import BannerCreate, BannerUpdate
@@ -67,6 +76,18 @@ class FakeAnalyticsTracker:
 
     async def track(self, event_name: str, **payload: object) -> None:
         self.events.append((event_name, payload))
+
+
+class FakePromoCodesRepository:
+    def __init__(self) -> None:
+        self.promo_codes: dict[int, PromoCode] = {}
+
+    async def get_by_ids(self, promo_code_ids: set[int]) -> dict[int, PromoCode]:
+        return {
+            promo_code_id: self.promo_codes[promo_code_id]
+            for promo_code_id in promo_code_ids
+            if promo_code_id in self.promo_codes
+        }
 
 
 @pytest.mark.asyncio
@@ -179,7 +200,9 @@ async def test_public_banner_list_only_returns_active_banners() -> None:
     banners = await service.list_public_banners(limit=20, offset=0)
 
     assert len(banners.items) == 1
-    assert banners.items[0].is_active is True
+    assert "is_active" not in banners.items[0].model_dump()
+    assert "title" not in banners.items[0].model_dump()
+    assert "subtitle" not in banners.items[0].model_dump()
 
 
 @pytest.mark.asyncio
@@ -206,6 +229,36 @@ async def test_public_banner_list_returns_display_and_target_metadata(
     assert banners.items[0].external_url is None
     assert banners.items[0].image_path == "banners/spring.webp"
     assert banners.items[0].image_url == "/uploads/banners/spring.webp"
+
+
+@pytest.mark.asyncio
+async def test_public_promo_banner_exposes_active_promo_code_only() -> None:
+    service, repository, _ = _banners_service()
+    service.promo_codes_repository.promo_codes[7] = _promo_code(id=7, code="SAVE20")
+    service.promo_codes_repository.promo_codes[8] = _promo_code(
+        id=8,
+        code="HIDDEN",
+        is_active=False,
+    )
+    repository.add(
+        _banner(
+            is_active=True,
+            target_type=BannerTargetType.PROMO,
+            target_id=7,
+        )
+    )
+    repository.add(
+        _banner(
+            is_active=True,
+            target_type=BannerTargetType.PROMO,
+            target_id=8,
+        )
+    )
+
+    banners = await service.list_public_banners(limit=20, offset=0)
+
+    assert banners.items[0].promo_code == "SAVE20"
+    assert banners.items[1].promo_code is None
 
 
 @pytest.mark.asyncio
@@ -294,7 +347,10 @@ def test_public_active_banner_list_is_anonymous() -> None:
 
     class FakeBannersService:
         async def list_public_banners(self, **_: object) -> dict[str, object]:
-            return {"items": [_banner_response()], "meta": {"limit": 20, "offset": 0, "total": 1}}
+            return {
+                "items": [_public_banner_response()],
+                "meta": {"limit": 20, "offset": 0, "total": 1},
+            }
 
     app.dependency_overrides[get_banners_service] = lambda: FakeBannersService()
     try:
@@ -304,7 +360,9 @@ def test_public_active_banner_list_is_anonymous() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["is_active"] is True
+    assert response.json()["items"][0]["target_type"] == "product"
+    assert "title" not in response.json()["items"][0]
+    assert "subtitle" not in response.json()["items"][0]
 
 
 def _banners_service(
@@ -315,6 +373,7 @@ def _banners_service(
     service = BannersService(session, analytics_tracker=analytics_tracker)
     repository = FakeBannersRepository()
     service.repository = repository
+    service.promo_codes_repository = FakePromoCodesRepository()
     return service, repository, session
 
 
@@ -373,6 +432,36 @@ def _banner_response() -> dict[str, object]:
         "created_at": now,
         "updated_at": now,
     }
+
+
+def _public_banner_response() -> dict[str, object]:
+    return {
+        "id": 1,
+        "image_path": "banners/spring.webp",
+        "image_url": "/uploads/banners/spring.webp",
+        "target_type": "product",
+        "target_id": 1,
+        "external_url": None,
+        "promo_code": None,
+        "display_type": "horizontal",
+        "position": 0,
+    }
+
+
+def _promo_code(*, id: int, code: str, is_active: bool = True) -> PromoCode:
+    return PromoCode(
+        id=id,
+        code=code,
+        discount_type=DiscountType.PERCENT,
+        discount_value=Decimal("20"),
+        is_active=is_active,
+        starts_at=None,
+        ends_at=None,
+        usage_limit=None,
+        per_user_limit=None,
+        created_at=_now(),
+        updated_at=_now(),
+    )
 
 
 def _user(role: UserRole) -> User:

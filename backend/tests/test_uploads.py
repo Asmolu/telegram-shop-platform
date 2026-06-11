@@ -147,15 +147,9 @@ async def test_banner_upload_rejects_wrong_aspect_ratio(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
+async def test_banner_image_upload_stores_file_without_creating_banner(tmp_path: Path) -> None:
     session = DummySession()
     service = UploadsService(session, storage=LocalStorageService(tmp_path))
-    captured = {}
-
-    def capture_banner(banner: object) -> None:
-        captured["banner"] = banner
-
-    service.repository.add_banner = capture_banner
     content = _image_bytes(1800, 600, "PNG")
 
     banner = await service.upload_banner_image(
@@ -169,18 +163,12 @@ async def test_banner_image_upload_persists_metadata(tmp_path: Path) -> None:
     assert banner.size_bytes == len(content)
     assert banner.alt_text == "Promo"
     assert (tmp_path / banner.file_path).is_file()
-    assert captured["banner"] is banner
+    assert session.committed is False
 
 
 @pytest.mark.asyncio
 async def test_vertical_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
-    captured = {}
-
-    def capture_banner(banner: object) -> None:
-        captured["banner"] = banner
-
-    service.repository.add_banner = capture_banner
 
     banner = await service.upload_banner_image(
         file=_upload_file("vertical-promo.jpg", _image_bytes(900, 1600, "JPEG"), "image/jpeg"),
@@ -190,18 +178,11 @@ async def test_vertical_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Pa
 
     assert banner.file_path.startswith("banners/")
     assert banner.mime_type == "image/jpeg"
-    assert captured["banner"] is banner
 
 
 @pytest.mark.asyncio
 async def test_popup_banner_upload_accepts_three_to_four_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
-    captured = {}
-
-    def capture_banner(banner: object) -> None:
-        captured["banner"] = banner
-
-    service.repository.add_banner = capture_banner
 
     banner = await service.upload_banner_image(
         file=_upload_file("popup-promo.jpg", _image_bytes(900, 1200, "JPEG"), "image/jpeg"),
@@ -211,18 +192,11 @@ async def test_popup_banner_upload_accepts_three_to_four_image(tmp_path: Path) -
 
     assert banner.file_path.startswith("banners/")
     assert banner.mime_type == "image/jpeg"
-    assert captured["banner"] is banner
 
 
 @pytest.mark.asyncio
 async def test_aggressive_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
-    captured = {}
-
-    def capture_banner(banner: object) -> None:
-        captured["banner"] = banner
-
-    service.repository.add_banner = capture_banner
 
     banner = await service.upload_banner_image(
         file=_upload_file("entry-promo.jpg", _image_bytes(900, 1600, "JPEG"), "image/jpeg"),
@@ -232,7 +206,6 @@ async def test_aggressive_banner_upload_accepts_nine_to_sixteen_image(tmp_path: 
 
     assert banner.file_path.startswith("banners/")
     assert banner.mime_type == "image/jpeg"
-    assert captured["banner"] is banner
 
 
 def test_product_upload_route_requires_seller_or_admin_auth() -> None:
@@ -303,16 +276,13 @@ def test_banner_upload_route_allows_admin() -> None:
 
     class FakeUploadsService:
         async def upload_banner_image(self, **_: object) -> dict[str, object]:
-            now = datetime(2026, 5, 27, tzinfo=UTC).isoformat()
             return {
-                "id": 1,
                 "file_path": "banners/generated.webp",
                 "url": "/uploads/banners/generated.webp",
                 "original_filename": "promo.webp",
                 "mime_type": "image/webp",
                 "size_bytes": 12,
                 "alt_text": None,
-                "created_at": now,
             }
 
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.ADMIN)

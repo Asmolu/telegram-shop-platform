@@ -9,7 +9,7 @@ from app.common.cache import CacheService, banner_cache_patterns, public_banners
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Banner, BannerDisplayType, BannerTargetType
+from app.db.models import Banner, BannerDisplayType, BannerTargetType, PromoCode
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.banners.repository import BannersRepository
@@ -19,7 +19,10 @@ from app.modules.banners.schemas import (
     BannerList,
     BannerRead,
     BannerUpdate,
+    PublicBannerList,
+    PublicBannerRead,
 )
+from app.modules.promo_codes.repository import PromoCodesRepository
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,7 @@ class BannersService:
     ) -> None:
         self.session = session
         self.repository = BannersRepository(session)
+        self.promo_codes_repository = PromoCodesRepository(session)
         self.audit_service = audit_service or NoopAuditService()
         self.cache = cache
         self.analytics_tracker = analytics_tracker
@@ -60,10 +64,10 @@ class BannersService:
         limit: int,
         offset: int,
         user_id: int | None = None,
-    ) -> BannerList:
+    ) -> PublicBannerList:
         cache_key = public_banners_list_key(limit=limit, offset=offset)
         if self.cache is not None:
-            cached = await self.cache.get_model(cache_key, BannerList)
+            cached = await self.cache.get_model(cache_key, PublicBannerList)
             if cached is not None:
                 await self._track_banner_views(cached.items, user_id=user_id)
                 return cached
@@ -73,8 +77,15 @@ class BannersService:
             offset=offset,
             active_only=True,
         )
-        result = BannerList(
-            items=[BannerRead.model_validate(item) for item in items],
+        promo_code_ids = {
+            banner.target_id
+            for banner in items
+            if banner.target_type == BannerTargetType.PROMO and banner.target_id is not None
+        }
+        promo_codes = await self.promo_codes_repository.get_by_ids(promo_code_ids)
+        now = datetime.now(UTC)
+        result = PublicBannerList(
+            items=[self._to_public_banner(item, promo_codes, now=now) for item in items],
             meta=PageMeta(limit=limit, offset=offset, total=total),
         )
         await self._track_banner_views(result.items, user_id=user_id)
@@ -309,7 +320,7 @@ class BannersService:
 
     async def _track_banner_views(
         self,
-        banners: list[BannerRead],
+        banners: list[PublicBannerRead],
         *,
         user_id: int | None,
     ) -> None:
@@ -326,6 +337,38 @@ class BannersService:
                     "display_type": display_type.value,
                 },
             )
+
+    def _to_public_banner(
+        self,
+        banner: Banner,
+        promo_codes: dict[int, PromoCode],
+        *,
+        now: datetime,
+    ) -> PublicBannerRead:
+        promo_code: str | None = None
+        if banner.target_type == BannerTargetType.PROMO and banner.target_id is not None:
+            promo = promo_codes.get(banner.target_id)
+            if promo is not None and self._is_promo_public(promo, now=now):
+                promo_code = promo.code
+
+        return PublicBannerRead(
+            id=banner.id,
+            image_path=banner.image_path,
+            image_url=banner.image_url,
+            target_type=banner.target_type,
+            target_id=banner.target_id,
+            external_url=banner.external_url,
+            promo_code=promo_code,
+            display_type=banner.display_type or BannerDisplayType.HORIZONTAL,
+            position=banner.position,
+        )
+
+    def _is_promo_public(self, promo_code: PromoCode, *, now: datetime) -> bool:
+        if not promo_code.is_active:
+            return False
+        if promo_code.starts_at is not None and self._as_utc(promo_code.starts_at) > now:
+            return False
+        return promo_code.ends_at is None or self._as_utc(promo_code.ends_at) > now
 
     def _as_utc(self, value: datetime) -> datetime:
         if value.tzinfo is None:

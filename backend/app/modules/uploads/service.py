@@ -6,9 +6,9 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.cache import CacheService, banner_cache_patterns, product_cache_patterns
+from app.common.cache import CacheService, product_cache_patterns
 from app.core.errors import AppError
-from app.db.models import Banner, ProductImage
+from app.db.models import ProductImage
 from app.modules.products.repository import ProductsRepository
 from app.modules.uploads.image_profiles import (
     BANNER_IMAGE_PROFILES,
@@ -17,6 +17,7 @@ from app.modules.uploads.image_profiles import (
     ImageUploadProfile,
 )
 from app.modules.uploads.repository import UploadsRepository
+from app.modules.uploads.schemas import BannerImageUploadRead
 from app.modules.uploads.storage import LocalStorageService
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
@@ -90,7 +91,7 @@ class UploadsService:
         file: UploadFile,
         alt_text: str | None = None,
         image_kind: ImageUploadKind = ImageUploadKind.NATIVE_BANNER,
-    ) -> Banner:
+    ) -> BannerImageUploadRead:
         upload = await self._validate_and_read_image(
             file,
             profile=BANNER_IMAGE_PROFILES[image_kind],
@@ -100,26 +101,14 @@ class UploadsService:
             folder="banners",
             suffix=upload.extension,
         )
-        banner = Banner(
-            title=alt_text or upload.original_filename,
+        return BannerImageUploadRead(
             file_path=file_path,
+            url=f"/uploads/{file_path}",
             original_filename=upload.original_filename,
             mime_type=upload.mime_type,
             size_bytes=upload.size_bytes,
             alt_text=alt_text,
         )
-
-        try:
-            self.repository.add_banner(banner)
-            await self.session.commit()
-            await self.session.refresh(banner)
-        except IntegrityError as exc:
-            await self.session.rollback()
-            self.storage.delete(file_path)
-            raise AppError("Could not persist banner image", status.HTTP_409_CONFLICT) from exc
-
-        await self._invalidate_banner_cache()
-        return banner
 
     async def _validate_and_read_image(
         self,
@@ -200,12 +189,6 @@ class UploadsService:
         if self.cache is None:
             return
         await self.cache.delete_patterns(*product_cache_patterns())
-
-    async def _invalidate_banner_cache(self) -> None:
-        if self.cache is None:
-            return
-        await self.cache.delete_patterns(*banner_cache_patterns())
-
 
 class _ValidatedUpload:
     def __init__(

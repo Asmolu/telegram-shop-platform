@@ -68,6 +68,10 @@ export function getBanners() {
   return apiRequest<BannerList>('/banners', { query: { limit: 20, offset: 0 } });
 }
 
+export function trackBannerClick(bannerId: number) {
+  return apiRequest(`/banners/${bannerId}/click`, { method: 'POST' });
+}
+
 export function getCart() {
   return apiRequest<Cart>('/cart');
 }

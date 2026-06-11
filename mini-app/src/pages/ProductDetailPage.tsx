@@ -338,7 +338,7 @@ function VariantButton({
       type="button"
       onClick={onSelect}
     >
-      <strong>{variant.size}</strong>
+      <strong>{variant.color ? `${variant.size} · ${variant.color}` : variant.size}</strong>
       <span>{disabled ? 'нет' : `${variant.available_quantity} шт.`}</span>
     </button>
   );

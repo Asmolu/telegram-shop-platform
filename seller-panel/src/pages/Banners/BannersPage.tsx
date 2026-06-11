@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
 import type {
   Banner,
@@ -64,6 +64,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   const [error, setError] = useState<unknown>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const savingRef = useRef(false);
 
   function loadBanners() {
     setLoading(true);
@@ -123,6 +124,10 @@ export function BannersPage({ onAuthExpired }: PageProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (savingRef.current) {
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     setFormError(null);
     setNotice(null);
@@ -181,6 +186,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
     } catch (requestError) {
       setError(requestError);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
