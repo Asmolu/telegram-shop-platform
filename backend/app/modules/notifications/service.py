@@ -12,6 +12,7 @@ from app.db.models import Notification, NotificationChannel, NotificationStatus
 from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
 from app.modules.notifications.repository import NotificationsRepository
 from app.modules.notifications.schemas import NotificationList, NotificationRead
+from app.modules.products.size_grids import format_size_for_display
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 
 TELEGRAM_MESSAGE_LIMIT = 4096
@@ -319,8 +320,14 @@ class NotificationsService:
         for index, item in enumerate(items, start=1):
             if not isinstance(item, dict):
                 continue
+            size = item.get("variant_size")
+            size_grid = item.get("variant_size_grid") or "clothing_alpha"
+            try:
+                display_size = format_size_for_display(str(size_grid), str(size)) if size else "-"
+            except ValueError:
+                display_size = str(size) if size else "-"
             variant_parts = [
-                f"size={item.get('variant_size') or '-'}",
+                f"size={display_size}",
                 f"color={item.get('variant_color') or '-'}",
                 f"sku={item.get('variant_sku') or '-'}",
             ]

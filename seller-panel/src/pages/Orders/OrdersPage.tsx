@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
-import type { Order, OrderStatus } from '../../shared/api';
+import type { Order, OrderStatus, ProductSizeGrid } from '../../shared/api';
 import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
@@ -314,7 +314,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                         </div>
                       </td>
                       <td>
-                        <strong>{item.variant_size}</strong>
+                        <strong>{formatVariantSize(item.variant_size_grid, item.variant_size, t('productEditor.oneSize'))}</strong>
                         <small>{item.variant_color ?? t('common.notProvided')}</small>
                         <small>{item.variant_sku}</small>
                       </td>
@@ -334,4 +334,9 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
       </div>
     </div>
   );
+}
+
+function formatVariantSize(sizeGrid: ProductSizeGrid, size: string, oneSizeLabel: string): string {
+  if (sizeGrid === 'shoes_ru') return `RU ${size}`;
+  return size === 'ONE_SIZE' ? oneSizeLabel : size;
 }

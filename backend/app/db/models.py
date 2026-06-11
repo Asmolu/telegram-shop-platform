@@ -53,6 +53,11 @@ class ProductStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class ProductSizeGrid(StrEnum):
+    CLOTHING_ALPHA = "clothing_alpha"
+    SHOES_RU = "shoes_ru"
+
+
 class OrderStatus(StrEnum):
     NEW = "NEW"
     PROCESSING = "PROCESSING"
@@ -527,6 +532,12 @@ class Product(Base):
         index=True,
     )
     search_aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_grid: Mapped[ProductSizeGrid] = mapped_column(
+        Enum(ProductSizeGrid, name="product_size_grid", values_callable=_enum_values),
+        nullable=False,
+        default=ProductSizeGrid.CLOTHING_ALPHA,
+        server_default=ProductSizeGrid.CLOTHING_ALPHA.value,
+    )
     status: Mapped[ProductStatus] = mapped_column(
         Enum(ProductStatus, name="product_status", values_callable=_enum_values),
         nullable=False,
@@ -607,6 +618,12 @@ class ProductVariant(Base):
         CheckConstraint(
             "reserved_quantity <= stock_quantity",
             name="ck_product_variants_reserved_not_above_stock",
+        ),
+        Index(
+            "ix_product_variants_size_active_product",
+            "size",
+            "is_active",
+            "product_id",
         ),
     )
 
@@ -819,6 +836,12 @@ class OrderItem(Base):
     )
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     variant_size: Mapped[str] = mapped_column(String(64), nullable=False)
+    variant_size_grid: Mapped[ProductSizeGrid] = mapped_column(
+        Enum(ProductSizeGrid, name="product_size_grid", values_callable=_enum_values),
+        nullable=False,
+        default=ProductSizeGrid.CLOTHING_ALPHA,
+        server_default=ProductSizeGrid.CLOTHING_ALPHA.value,
+    )
     variant_color: Mapped[str | None] = mapped_column(String(64), nullable=True)
     variant_sku: Mapped[str] = mapped_column(String(100), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)

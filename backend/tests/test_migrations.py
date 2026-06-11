@@ -16,9 +16,12 @@ from app.db.models import (
     NotificationStatus,
     NotificationTemplate,
     NotificationTemplateCategory,
+    OrderItem,
     PendingSellerRegistration,
     Product,
     ProductCategory,
+    ProductSizeGrid,
+    ProductVariant,
     SellerRegistrationStatus,
 )
 
@@ -520,3 +523,25 @@ def test_product_category_assignments_migration_and_model_constraints() -> None:
     assert "uq_product_categories_product_priority" in constraint_names
     assert "ix_product_categories_category_priority" in index_names
     assert table.c.priority.nullable is False
+
+
+def test_product_size_grid_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260611_0022_add_product_size_grids.py"
+    )
+    content = migration_path.read_text()
+    product_table = Product.__table__
+    order_item_table = OrderItem.__table__
+    variant_index_names = {index.name for index in ProductVariant.__table__.indexes}
+
+    assert "product_size_grid" in content
+    assert "clothing_alpha" in content
+    assert "shoes_ru" in content
+    assert product_table.c.size_grid.nullable is False
+    assert product_table.c.size_grid.default.arg == ProductSizeGrid.CLOTHING_ALPHA
+    assert order_item_table.c.variant_size_grid.nullable is False
+    assert order_item_table.c.variant_size_grid.default.arg == ProductSizeGrid.CLOTHING_ALPHA
+    assert "ix_product_variants_size_active_product" in variant_index_names

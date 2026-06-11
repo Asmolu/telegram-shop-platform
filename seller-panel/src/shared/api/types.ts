@@ -1,5 +1,6 @@
 export type UserRole = 'USER' | 'SELLER' | 'ADMIN';
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
+export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
@@ -130,6 +131,7 @@ export interface Product {
   old_price: ApiDecimal | null;
   search_priority: 1 | 2 | 3;
   search_aliases: string | null;
+  size_grid: ProductSizeGrid;
   status: ProductStatus;
   category_id: number | null;
   category: Category | null;
@@ -157,6 +159,7 @@ export interface ProductCreate {
   old_price?: string | null;
   search_priority?: 1 | 2 | 3;
   search_aliases?: string | null;
+  size_grid?: ProductSizeGrid;
   status: ProductStatus;
   category_id?: number | null;
   categories?: ProductCategoryAssignment[];
@@ -172,6 +175,7 @@ export interface ProductUpdate {
   old_price?: string | null;
   search_priority?: 1 | 2 | 3;
   search_aliases?: string | null;
+  size_grid?: ProductSizeGrid;
   status?: ProductStatus;
   category_id?: number | null;
   categories?: ProductCategoryAssignment[];
@@ -206,6 +210,7 @@ export interface OrderItem {
   product_name: string;
   product_title?: string;
   variant_size: string;
+  variant_size_grid: ProductSizeGrid;
   variant_color?: string | null;
   variant_sku: string;
   unit_price: ApiDecimal;

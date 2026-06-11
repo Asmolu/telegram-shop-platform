@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.cache import CacheService
 from app.common.deps import get_db_session, get_optional_current_user, require_roles
 from app.common.pagination import PaginationParams
-from app.db.models import ProductStatus, User, UserRole
+from app.db.models import ProductSizeGrid, ProductStatus, User, UserRole
 from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.audit.service import AuditService
 from app.modules.products.schemas import (
@@ -45,6 +45,9 @@ async def list_public_products(
     tag_id: int | None = None,
     status_filter: Annotated[ProductStatus | None, Query(alias="status")] = None,
     search: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
+    size_grid: ProductSizeGrid | None = None,
+    size: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    color: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> ProductList:
     return await service.list_public_products(
         limit=pagination.limit,
@@ -53,6 +56,9 @@ async def list_public_products(
         tag_id=tag_id,
         status=status_filter,
         search=search,
+        size_grid=size_grid,
+        size=size,
+        color=color,
         user_id=current_user.id if current_user is not None else None,
     )
 
@@ -66,6 +72,9 @@ async def list_products(
     tag_id: int | None = None,
     status_filter: Annotated[ProductStatus | None, Query(alias="status")] = None,
     search: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
+    size_grid: ProductSizeGrid | None = None,
+    size: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    color: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> ProductList:
     return await service.list_products(
         limit=pagination.limit,
@@ -74,6 +83,9 @@ async def list_products(
         tag_id=tag_id,
         status=status_filter,
         search=search,
+        size_grid=size_grid,
+        size=size,
+        color=color,
     )
 
 

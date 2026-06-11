@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import AppError
-from app.db.models import Cart, CartItem, Product, ProductStatus, ProductVariant
+from app.db.models import Cart, CartItem, Product, ProductSizeGrid, ProductStatus, ProductVariant
 from app.main import create_app
 from app.modules.cart.schemas import CartItemCreate, CartItemUpdate
 from app.modules.cart.service import CartService
@@ -122,6 +122,7 @@ async def test_add_item() -> None:
 
     assert len(cart.items) == 1
     assert cart.items[0].quantity == 2
+    assert cart.items[0].product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert cart.items[0].subtotal == Decimal("119.80")
     assert cart.total == Decimal("119.80")
 
@@ -284,6 +285,7 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         slug="hoodie",
         description="Warm",
         base_price=Decimal("59.90"),
+        size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
         category_id=None,
         created_at=_now(),

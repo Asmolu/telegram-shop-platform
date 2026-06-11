@@ -18,6 +18,7 @@ from app.db.models import (
     OrderStatus,
     Product,
     ProductImage,
+    ProductSizeGrid,
     ProductStatus,
     ProductVariant,
     PromoCode,
@@ -258,6 +259,7 @@ async def test_checkout_from_valid_cart() -> None:
     assert order.total_amount == Decimal("119.80")
     assert order.items[0].product_name == "Hoodie"
     assert order.items[0].variant_size == "M"
+    assert order.items[0].variant_size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert order.items[0].variant_sku == "HOODIE-M-BLK"
     assert repository.variants[1].stock_quantity == 3
     assert repository.carts[1].items == []
@@ -541,11 +543,13 @@ async def test_order_item_snapshot_is_immutable() -> None:
     repository.carts[1] = _cart(user_id=1)
     repository.carts[1].items[0].product.name = "Renamed Hoodie"
     repository.carts[1].items[0].product.base_price = Decimal("10.00")
+    repository.carts[1].items[0].product.size_grid = ProductSizeGrid.SHOES_RU
     repository.variants[1].size = "L"
     repository.variants[1].sku = "CHANGED"
 
     assert order.items[0].product_name == "Hoodie"
     assert order.items[0].variant_size == "M"
+    assert order.items[0].variant_size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert order.items[0].variant_color == "Black"
     assert order.items[0].variant_sku == "HOODIE-M-BLK"
     assert order.items[0].unit_price == Decimal("59.90")
@@ -821,6 +825,7 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
                 product_variant_id=1,
                 product_name="Hoodie",
                 variant_size="M",
+                variant_size_grid=ProductSizeGrid.CLOTHING_ALPHA,
                 variant_sku="HOODIE-M-BLK",
                 unit_price=Decimal("59.90"),
                 quantity=1,
@@ -840,6 +845,7 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         slug="hoodie",
         description="Warm",
         base_price=Decimal("59.90"),
+        size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
         category_id=None,
         images=[
@@ -910,6 +916,7 @@ def _order_response(status_value: str = "NEW") -> dict[str, object]:
                 "product_variant_id": 1,
                 "product_name": "Hoodie",
                 "variant_size": "M",
+                "variant_size_grid": "clothing_alpha",
                 "variant_color": "Black",
                 "variant_sku": "HOODIE-M-BLK",
                 "unit_price": "59.90",

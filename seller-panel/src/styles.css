@@ -297,6 +297,17 @@ code {
   font-weight: 700;
 }
 
+.variant-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  color: var(--muted-color, #64748b);
+  font-size: 12px;
+}
+
 input,
 select,
 textarea {

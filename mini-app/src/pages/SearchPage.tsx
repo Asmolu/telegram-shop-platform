@@ -1,7 +1,8 @@
 import React from 'react';
-import { getCategories, getTags, toApiErrorMessage, type Category, type Tag } from '../shared/api';
+import { getCategories, getTags, toApiErrorMessage, type Category, type ProductSizeGrid, type Tag } from '../shared/api';
 import { useRouter } from '../shared/router/RouterProvider';
 import { ErrorState, PageLoader, SearchIcon, TopBar } from '../shared/ui';
+import { displaySize, sizesForGrid } from '../shared/utils/sizes';
 
 export function SearchPage() {
   const { navigate } = useRouter();
@@ -12,6 +13,7 @@ export function SearchPage() {
   const [query, setQuery] = React.useState('');
   const [categoryId, setCategoryId] = React.useState('');
   const [tagId, setTagId] = React.useState('');
+  const [sizeGrid, setSizeGrid] = React.useState<ProductSizeGrid>('clothing_alpha');
   const [size, setSize] = React.useState('');
   const [color, setColor] = React.useState('');
   const [priceFrom, setPriceFrom] = React.useState('');
@@ -52,6 +54,7 @@ export function SearchPage() {
     if (query.trim()) params.set('q', query.trim());
     if (categoryId) params.set('category_id', categoryId);
     if (tagId) params.set('tag_id', tagId);
+    params.set('size_grid', sizeGrid);
     if (size.trim()) params.set('size', size.trim());
     if (color.trim()) params.set('color', color.trim());
     if (priceFrom) params.set('price_from', priceFrom);
@@ -95,16 +98,36 @@ export function SearchPage() {
           </section>
 
           <section className="filter-section filter-section--secondary">
+            <h2>Размерная сетка</h2>
+            <div className="segmented-control">
+              <button
+                className={sizeGrid === 'clothing_alpha' ? 'is-selected' : ''}
+                type="button"
+                onClick={() => { setSizeGrid('clothing_alpha'); setSize(''); }}
+              >
+                Одежда
+              </button>
+              <button
+                className={sizeGrid === 'shoes_ru' ? 'is-selected' : ''}
+                type="button"
+                onClick={() => { setSizeGrid('shoes_ru'); setSize(''); }}
+              >
+                Обувь · RU
+              </button>
+            </div>
+          </section>
+
+          <section className="filter-section filter-section--secondary">
             <h2>Размер</h2>
             <div className="chip-row">
-              {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((item) => (
+              {sizesForGrid(sizeGrid).map((item) => (
                 <button
                   className={size === item ? 'is-selected' : ''}
                   key={item}
                   type="button"
                   onClick={() => setSize(size === item ? '' : item)}
                 >
-                  {item}
+                  {displaySize(sizeGrid, item)}
                 </button>
               ))}
             </div>

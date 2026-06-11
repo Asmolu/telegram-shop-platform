@@ -13,6 +13,7 @@ from app.db.models import (
     NotificationChannel,
     Product,
     ProductImage,
+    ProductSizeGrid,
     ProductStatus,
     ProductVariant,
     UserRole,
@@ -23,6 +24,7 @@ from app.modules.notifications.schemas import NotificationList
 from app.modules.notifications.service import NotificationsService
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
 from app.modules.products.search import normalize_search_aliases
+from app.modules.products.size_grids import SizeGridValidationError, normalize_size
 from app.modules.seller_bot.repository import SellerBotRepository
 from app.modules.seller_bot.schemas import (
     SellerBotActionResponse,
@@ -311,6 +313,7 @@ class SellerBotService:
                 old_price=draft.old_price,
                 search_priority=draft.search_priority,
                 search_aliases=draft.search_aliases,
+                size_grid=ProductSizeGrid.CLOTHING_ALPHA,
                 status=ProductStatus.DRAFT,
                 category_id=category_id,
                 tags=tags,
@@ -488,7 +491,13 @@ class SellerBotService:
         if not has_variant_data:
             return []
 
-        sizes = draft.sizes or [QUICK_PRODUCT_SIZE_DEFAULT]
+        try:
+            sizes = [
+                normalize_size(ProductSizeGrid.CLOTHING_ALPHA, size)
+                for size in (draft.sizes or [QUICK_PRODUCT_SIZE_DEFAULT])
+            ]
+        except SizeGridValidationError as exc:
+            raise AppError(str(exc), 400) from exc
         stock = draft.stock if draft.stock is not None else 0
         return [
             ProductVariant(

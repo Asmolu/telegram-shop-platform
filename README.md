@@ -137,6 +137,13 @@ pg_trgm`. Public product responses include `old_price`, `search_priority`, and `
 the Mini App can show crossed-out prices and the Seller Panel can tune search matching. Lower
 numeric `search_priority` values rank first in matching search results; the default is `2`.
 
+Catalog products own a `size_grid`: `clothing_alpha` or `shoes_ru`. Clothing variants support
+`XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, and `ONE_SIZE`. Footwear variants use only Russian whole
+sizes `35` through `46`; EU/US/UK labels and half sizes are outside the MVP. Public product listing
+supports server-side `size_grid`, `size`, and `color` filters against active variants. General
+search matches exact numeric variant sizes and expands common Russian color words and conservative
+typos to the Latin color values stored on variants.
+
 ## Seller Portal auth and bot management
 
 Seller Portal now supports email/password auth through `/api/v1/seller-auth`.

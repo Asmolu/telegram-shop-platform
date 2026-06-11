@@ -258,6 +258,7 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
 
     assert response.status_code == 200
     assert response.json()["items"][0]["is_available"] is True
+    assert response.json()["items"][0]["size_grid"] == "clothing_alpha"
     assert response.json()["items"][0]["variants"][0]["available_quantity"] == 3
 
 
@@ -311,6 +312,7 @@ def _product_response() -> dict[str, object]:
         "slug": "hoodie",
         "description": "Warm",
         "base_price": "59.90",
+        "size_grid": "clothing_alpha",
         "status": "ACTIVE",
         "category_id": None,
         "category": None,

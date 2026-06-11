@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import DEFAULT_JWT_SECRET_KEY, Settings, settings
 from app.core.rate_limit import reset_in_memory_rate_limiter
-from app.db.models import Category, Product, ProductStatus
+from app.db.models import Category, Product, ProductSizeGrid, ProductStatus
 from app.main import create_app
 from app.modules.products.schemas import ProductList, ProductUpdate
 from app.modules.products.service import ProductsService
@@ -117,6 +117,7 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         slug="hoodie",
         description="Warm",
         base_price=Decimal("59.90"),
+        size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
         category_id=1,
         category=Category(

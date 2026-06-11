@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
-from app.db.models import ProductStatus
+from app.db.models import ProductSizeGrid, ProductStatus
 from app.modules.categories.schemas import CategoryRead
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.search import (
@@ -130,6 +130,7 @@ class ProductBase(BaseModel):
         description="Default is 2 (medium). Lower numbers sort first in matching search results.",
     )
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
+    size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
     status: ProductStatus = ProductStatus.DRAFT
     category_id: int | None = None
 
@@ -177,6 +178,7 @@ class ProductUpdate(BaseModel):
     old_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     search_priority: int | None = Field(default=None, ge=1, le=3)
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
+    size_grid: ProductSizeGrid | None = None
     status: ProductStatus | None = None
     category_id: int | None = None
     categories: list[ProductCategoryInput] | None = None

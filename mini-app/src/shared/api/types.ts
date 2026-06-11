@@ -5,6 +5,7 @@ export type PageMeta = {
 };
 
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
+export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
@@ -71,6 +72,7 @@ export type Product = {
   base_price: string;
   old_price?: string | null;
   compare_at_price?: string | null;
+  size_grid: ProductSizeGrid;
   status: ProductStatus;
   category_id?: number | null;
   category?: Category | null;
@@ -131,6 +133,7 @@ export type CartProduct = {
   base_price: string;
   old_price?: string | null;
   compare_at_price?: string | null;
+  size_grid: ProductSizeGrid;
   status: ProductStatus;
 };
 
@@ -192,6 +195,7 @@ export type OrderItem = {
   product_variant_id: number;
   product_name: string;
   variant_size: string;
+  variant_size_grid: ProductSizeGrid;
   variant_color?: string | null;
   variant_sku: string;
   unit_price: string;

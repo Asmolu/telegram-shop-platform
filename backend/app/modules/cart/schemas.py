@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import ProductStatus
+from app.db.models import ProductSizeGrid, ProductStatus
 
 
 class CartItemCreate(BaseModel):
@@ -23,6 +23,7 @@ class CartProductRead(BaseModel):
     name: str
     slug: str
     base_price: Decimal
+    size_grid: ProductSizeGrid
     status: ProductStatus
 
 

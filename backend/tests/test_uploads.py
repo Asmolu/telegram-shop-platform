@@ -14,7 +14,7 @@ from starlette.datastructures import Headers
 from app.common.deps import get_current_user
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Product, ProductStatus, User, UserRole
+from app.db.models import Product, ProductSizeGrid, ProductStatus, User, UserRole
 from app.main import create_app
 from app.modules.uploads.image_profiles import ImageUploadKind
 from app.modules.uploads.router import get_uploads_service
@@ -339,6 +339,7 @@ def _product() -> Product:
         slug="hoodie",
         description="Warm",
         base_price=Decimal("59.90"),
+        size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=ProductStatus.DRAFT,
         category_id=None,
         images=[],

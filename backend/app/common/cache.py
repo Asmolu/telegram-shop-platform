@@ -101,6 +101,9 @@ def public_products_list_key(
     tag_id: int | None,
     status: Any,
     search: str | None,
+    size_grid: Any = None,
+    size: str | None = None,
+    color: str | None = None,
 ) -> str:
     return _stable_key(
         "catalog:products:list",
@@ -111,6 +114,9 @@ def public_products_list_key(
             "tag_id": tag_id,
             "status": _enum_value(status),
             "search": search.strip() if isinstance(search, str) else None,
+            "size_grid": _enum_value(size_grid),
+            "size": size.strip() if isinstance(size, str) else None,
+            "color": color.strip().casefold() if isinstance(color, str) else None,
         },
     )
 

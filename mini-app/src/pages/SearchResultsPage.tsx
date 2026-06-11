@@ -1,5 +1,11 @@
 import React from 'react';
-import { getFavorites, getProducts, toApiErrorMessage, type Product } from '../shared/api';
+import {
+  getFavorites,
+  getProducts,
+  toApiErrorMessage,
+  type Product,
+  type ProductSizeGrid,
+} from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { useRouter } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, SearchIcon, TopBar } from '../shared/ui';
@@ -20,6 +26,7 @@ export function SearchResultsPage() {
   const query = searchParams.get('q') ?? '';
   const categoryId = searchParams.get('category_id');
   const tagId = searchParams.get('tag_id');
+  const sizeGrid = parseSizeGrid(searchParams.get('size_grid'));
   const size = searchParams.get('size') ?? '';
   const color = searchParams.get('color') ?? '';
   const sort = searchParams.get('sort') ?? '';
@@ -42,6 +49,9 @@ export function SearchResultsPage() {
             search: query || undefined,
             category_id: categoryId ? Number(categoryId) : undefined,
             tag_id: tagId ? Number(tagId) : undefined,
+            size_grid: sizeGrid,
+            size: size || undefined,
+            color: color || undefined,
           }),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
         ]);
@@ -65,20 +75,14 @@ export function SearchResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [categoryId, isAuthenticated, query, tagId]);
+  }, [categoryId, color, isAuthenticated, query, size, sizeGrid, tagId]);
 
   const filtered = products
     .filter((product) => {
       const price = Number(product.base_price);
       const matchesPriceFrom = priceFrom ? price >= priceFrom : true;
       const matchesPriceTo = priceTo ? price <= priceTo : true;
-      const matchesSize = size
-        ? product.variants.some((variant) => variant.size.toLowerCase() === size.toLowerCase())
-        : true;
-      const matchesColor = color
-        ? product.variants.some((variant) => variant.color?.toLowerCase().includes(color.toLowerCase()))
-        : true;
-      return matchesPriceFrom && matchesPriceTo && matchesSize && matchesColor;
+      return matchesPriceFrom && matchesPriceTo;
     })
     .sort((left, right) => {
       if (sort === 'price_asc') {
@@ -157,4 +161,8 @@ export function SearchResultsPage() {
       ) : null}
     </div>
   );
+}
+
+function parseSizeGrid(value: string | null): ProductSizeGrid | undefined {
+  return value === 'clothing_alpha' || value === 'shoes_ru' ? value : undefined;
 }

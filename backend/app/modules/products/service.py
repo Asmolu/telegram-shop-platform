@@ -15,7 +15,15 @@ from app.common.cache import (
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Product, ProductCategory, ProductImage, ProductStatus, ProductVariant, Tag
+from app.db.models import (
+    Product,
+    ProductCategory,
+    ProductImage,
+    ProductSizeGrid,
+    ProductStatus,
+    ProductVariant,
+    Tag,
+)
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.categories.repository import CategoriesRepository
@@ -34,6 +42,11 @@ from app.modules.products.schemas import (
     ProductVariantUpdate,
 )
 from app.modules.products.search import sanitize_search_query
+from app.modules.products.size_grids import (
+    SizeGridValidationError,
+    incompatible_sizes,
+    normalize_size,
+)
 from app.modules.tags.repository import TagsRepository
 
 logger = logging.getLogger(__name__)
@@ -46,6 +59,7 @@ PRODUCT_AUDIT_FIELDS = (
     "old_price",
     "search_priority",
     "search_aliases",
+    "size_grid",
     "status",
     "category_id",
 )
@@ -86,12 +100,17 @@ class ProductsService:
         tag_id: int | None = None,
         status: ProductStatus | None = None,
         search: str | None = None,
+        size_grid: ProductSizeGrid | None = None,
+        size: str | None = None,
+        color: str | None = None,
         user_id: int | None = None,
     ) -> ProductList:
         if status is not None and status != ProductStatus.ACTIVE:
             result = ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
             await self._track_search_event(search, user_id=user_id, result_count=0)
             return result
+
+        normalized_size = self._normalize_size_filter(size_grid=size_grid, size=size)
 
         cache_key = public_products_list_key(
             limit=limit,
@@ -100,6 +119,9 @@ class ProductsService:
             tag_id=tag_id,
             status=status,
             search=search,
+            size_grid=size_grid,
+            size=normalized_size,
+            color=color,
         )
         if self.cache is not None:
             cached = await self.cache.get_model(cache_key, ProductList)
@@ -118,6 +140,9 @@ class ProductsService:
             tag_id=tag_id,
             status=ProductStatus.ACTIVE,
             search=search,
+            size_grid=size_grid,
+            size=normalized_size,
+            color=color,
             active_variants_only=True,
         )
         result = ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
@@ -139,6 +164,9 @@ class ProductsService:
         tag_id: int | None = None,
         status: ProductStatus | None = None,
         search: str | None = None,
+        size_grid: ProductSizeGrid | None = None,
+        size: str | None = None,
+        color: str | None = None,
     ) -> ProductList:
         items, total = await self.repository.list(
             limit=limit,
@@ -147,6 +175,9 @@ class ProductsService:
             tag_id=tag_id,
             status=status,
             search=search,
+            size_grid=size_grid,
+            size=self._normalize_size_filter(size_grid=size_grid, size=size),
+            color=color,
         )
         return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
 
@@ -239,6 +270,25 @@ class ProductsService:
         self._validate_price_pair(candidate_base_price, candidate_old_price)
         if data.get("search_priority") is None and "search_priority" in data:
             raise AppError("search_priority must be 1, 2, or 3", status.HTTP_400_BAD_REQUEST)
+        if data.get("size_grid") is None and "size_grid" in data:
+            raise AppError(
+                "size_grid must be clothing_alpha or shoes_ru",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        candidate_size_grid = data.get("size_grid", product.size_grid)
+        if candidate_size_grid != product.size_grid:
+            invalid_sizes = incompatible_sizes(
+                candidate_size_grid,
+                (variant.size for variant in product.variants),
+            )
+            if invalid_sizes:
+                joined = ", ".join(invalid_sizes)
+                raise AppError(
+                    f"Cannot change size_grid to {candidate_size_grid.value}; "
+                    f"incompatible variant sizes: {joined}. Clean variants where safe or create "
+                    "a new product.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
 
         categories_were_provided = "categories" in payload.model_fields_set
         category_id_was_provided = "category_id" in data
@@ -332,10 +382,12 @@ class ProductsService:
         payload: ProductVariantCreate,
         actor_user_id: int | None = None,
     ) -> ProductVariant:
-        await self.get_product(product_id)
+        product = await self.get_product(product_id)
         self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
 
-        variant = ProductVariant(product_id=product_id, **payload.model_dump())
+        variant_data = payload.model_dump()
+        variant_data["size"] = self._normalize_variant_size(product.size_grid, payload.size)
+        variant = ProductVariant(product_id=product_id, **variant_data)
         self.variants_repository.add(variant)
         variant_id = await self._flush_commit_and_get_id(
             variant,
@@ -364,6 +416,9 @@ class ProductsService:
         variant = await self.get_product_variant(variant_id)
         before_data = self.audit_service.snapshot(variant, VARIANT_AUDIT_FIELDS)
         data = payload.model_dump(exclude_unset=True)
+        if "size" in data:
+            product = await self.get_product(variant.product_id)
+            data["size"] = self._normalize_variant_size(product.size_grid, data["size"])
         stock_quantity = data.get("stock_quantity", variant.stock_quantity)
         reserved_quantity = data.get("reserved_quantity", variant.reserved_quantity)
         self._validate_inventory(stock_quantity, reserved_quantity)
@@ -480,6 +535,27 @@ class ProductsService:
             validate_inventory_quantities(stock_quantity, reserved_quantity)
         except InventoryValidationError as exc:
             raise AppError(str(exc), status.HTTP_400_BAD_REQUEST) from exc
+
+    def _normalize_variant_size(self, size_grid: ProductSizeGrid, size: str) -> str:
+        try:
+            return normalize_size(size_grid, size)
+        except SizeGridValidationError as exc:
+            raise AppError(str(exc), status.HTTP_400_BAD_REQUEST) from exc
+
+    def _normalize_size_filter(
+        self,
+        *,
+        size_grid: ProductSizeGrid | None,
+        size: str | None,
+    ) -> str | None:
+        if size is None:
+            return None
+        normalized = size.strip()
+        if not normalized:
+            raise AppError("size filter must not be empty", status.HTTP_400_BAD_REQUEST)
+        if size_grid is None:
+            return normalized.upper() if not normalized.isdigit() else normalized
+        return self._normalize_variant_size(size_grid, normalized)
 
     def _validate_price_pair(
         self,

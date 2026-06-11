@@ -10,6 +10,7 @@ from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
     NotificationStatus,
+    ProductSizeGrid,
     ProductStatus,
     SellerCredential,
     User,
@@ -380,6 +381,7 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     assert product.name == "White Hoodie"
     assert product.base_price == "1990.00" or str(product.base_price) == "1990.00"
     assert product.status == ProductStatus.DRAFT
+    assert product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert product.images[0].file_path == "products/telegram-photo.jpg"
     assert product.images[0].is_primary is True
     assert [variant.size for variant in variant_repository.variants] == ["M", "L"]
@@ -391,6 +393,61 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     assert "https://seller.tsplatform.ru/products/101/edit" in message
     assert storage.saved == [(b"image-bytes", "products", ".jpg")]
     assert audit.records[0]["action"] == "bot_product_draft_created"
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_defaults_missing_size_to_one_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, variant_repository, _, _ = _quick_product_service()
+    caption = "\n".join(
+        (
+            "/new_product",
+            "Название: One Size Hoodie",
+            "Цена: 1990",
+            "Цвет: White",
+            "SKU: HD-ONE",
+            "Остаток: 5",
+        )
+    )
+
+    await service.create_quick_product_draft_command(
+        chat_id=-100,
+        message=_quick_product_message(caption=caption),
+        actor_telegram_user_id=500,
+        actor_username="operator",
+    )
+
+    assert [variant.size for variant in variant_repository.variants] == ["ONE_SIZE"]
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_cannot_bypass_clothing_size_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, variant_repository, _, _ = _quick_product_service()
+    caption = "\n".join(
+        (
+            "/new_product",
+            "Название: Invalid Hoodie",
+            "Цена: 1990",
+            "Размеры: 42",
+            "SKU: HD-42",
+            "Остаток: 5",
+        )
+    )
+
+    with pytest.raises(AppError, match="not valid for clothing_alpha"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(caption=caption),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert variant_repository.variants == []
 
 
 @pytest.mark.asyncio

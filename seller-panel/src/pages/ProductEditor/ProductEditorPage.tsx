@@ -3,6 +3,7 @@ import { api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
   Product,
+  ProductSizeGrid,
   ProductStatus,
   ProductVariantPayload,
   Tag,
@@ -28,6 +29,7 @@ interface ProductFormState {
   oldPrice: string;
   searchPriority: string;
   searchAliases: string;
+  sizeGrid: ProductSizeGrid;
   status: ProductStatus;
   tagIds: number[];
 }
@@ -58,9 +60,17 @@ const initialForm: ProductFormState = {
   oldPrice: '',
   searchPriority: '2',
   searchAliases: '',
+  sizeGrid: 'clothing_alpha',
   status: 'DRAFT',
   tagIds: [],
 };
+
+const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'] as const;
+const SHOE_SIZES_RU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+
+function allowedSizes(sizeGrid: ProductSizeGrid): readonly string[] {
+  return sizeGrid === 'shoes_ru' ? SHOE_SIZES_RU : CLOTHING_SIZES;
+}
 
 function createCategoryAssignmentRow(priority: '1' | '2' | '3' = '1'): CategoryAssignmentRow {
   return {
@@ -124,6 +134,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             oldPrice: loadedProduct.old_price ? String(loadedProduct.old_price) : '',
             searchPriority: String(loadedProduct.search_priority ?? 2),
             searchAliases: loadedProduct.search_aliases ?? '',
+            sizeGrid: loadedProduct.size_grid ?? 'clothing_alpha',
             status: loadedProduct.status,
             tagIds: loadedProduct.tags.map((tag) => tag.id),
           });
@@ -156,6 +167,35 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
   function updateField<Key extends keyof ProductFormState>(key: Key, value: ProductFormState[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function changeSizeGrid(nextGrid: ProductSizeGrid) {
+    const persistedIncompatible = variants
+      .filter((variant) => variant.id && variant.size.trim())
+      .map((variant) => variant.size.trim())
+      .filter((size) => !allowedSizes(nextGrid).includes(size));
+    if (persistedIncompatible.length > 0) {
+      setFormError(
+        t('productEditor.persistedIncompatibleSizes', {
+          sizes: Array.from(new Set(persistedIncompatible)).join(', '),
+        }),
+      );
+      return;
+    }
+    const incompatible = variants
+      .filter((variant) => !variant.remove && variant.size.trim())
+      .map((variant) => variant.size.trim())
+      .filter((size) => !allowedSizes(nextGrid).includes(size));
+    if (incompatible.length > 0) {
+      setFormError(
+        t('productEditor.incompatibleSizes', {
+          sizes: Array.from(new Set(incompatible)).join(', '),
+        }),
+      );
+      return;
+    }
+    setFormError(null);
+    updateField('sizeGrid', nextGrid);
   }
 
   function handleImageSelection(event: ChangeEvent<HTMLInputElement>) {
@@ -272,6 +312,15 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       return;
     }
 
+    const variantKeys = variants
+      .filter((variant) => !variant.remove && variant.size.trim())
+      .map((variant) => `${variant.size.trim()}::${variant.color.trim().toLocaleLowerCase()}`);
+    if (hasDuplicateValues(variantKeys)) {
+      setFormError(t('productEditor.duplicateVariants'));
+      setSaving(false);
+      return;
+    }
+
     const primaryCategoryId =
       [...normalizedCategories].sort((left, right) => left.priority - right.priority)[0]
         ?.category_id ?? null;
@@ -285,6 +334,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         old_price: form.oldPrice.trim() || null,
         search_priority: parseSearchPriority(form.searchPriority),
         search_aliases: normalizeSearchAliases(form.searchAliases),
+        size_grid: form.sizeGrid,
         status: form.status,
         category_id: primaryCategoryId,
         categories: normalizedCategories,
@@ -651,15 +701,35 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             {t('productEditor.addVariant')}
           </button>
         </div>
+        <label className="field field-wide">
+          <span>{t('productEditor.sizeGrid')}</span>
+          <select
+            value={form.sizeGrid}
+            onChange={(event) => changeSizeGrid(event.target.value as ProductSizeGrid)}
+          >
+            <option value="clothing_alpha">{t('productEditor.sizeGridClothing')}</option>
+            <option value="shoes_ru">{t('productEditor.sizeGridShoesRu')}</option>
+          </select>
+        </label>
         <div className="variant-grid">
           {visibleVariants.map((variant) => (
             <div className="variant-row" key={variant.localId}>
               <label>
                 <span>{t('productEditor.size')}</span>
-                <input
+                <select
                   value={variant.size}
                   onChange={(event) => updateVariant(variant.localId, { size: event.target.value })}
-                />
+                >
+                  <option value="">{t('productEditor.selectSize')}</option>
+                  {variant.size && !allowedSizes(form.sizeGrid).includes(variant.size) ? (
+                    <option value={variant.size} disabled>{variant.size}</option>
+                  ) : null}
+                  {allowedSizes(form.sizeGrid).map((size) => (
+                    <option value={size} key={size}>
+                      {size === 'ONE_SIZE' ? t('productEditor.oneSize') : size}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 <span>{t('productEditor.color')}</span>
@@ -714,6 +784,13 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               >
                 {t('common.remove')}
               </button>
+              <div className="variant-summary">
+                <strong>{variant.size === 'ONE_SIZE' ? t('productEditor.oneSize') : variant.size || '—'}</strong>
+                <span>{variant.color || t('common.notProvided')}</span>
+                <span>{Math.max(0, Number(variant.stockQuantity || 0) - Number(variant.reservedQuantity || 0))}/{Number(variant.stockQuantity || 0)} {t('productEditor.stock')}</span>
+                <span>{variant.sku || 'SKU —'}</span>
+                <span>{variant.isActive ? t('common.active') : t('common.inactive')}</span>
+              </div>
             </div>
           ))}
         </div>

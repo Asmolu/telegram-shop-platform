@@ -155,6 +155,21 @@ async def test_order_created_seller_notification_can_send_photo_caption() -> Non
 
 
 @pytest.mark.asyncio
+async def test_order_created_seller_notification_formats_ru_shoe_size() -> None:
+    service, _, _, telegram = _notifications_service()
+    payload = _detailed_order_created_payload()
+    item = payload["items"][0]
+    item["variant_size"] = "39"
+    item["variant_size_grid"] = "shoes_ru"
+
+    notification = await service.create_for_event(name=ORDER_CREATED, payload=payload)
+
+    assert notification is not None
+    assert telegram.photos
+    assert "size=RU 39" in (telegram.photos[0][1] or "")
+
+
+@pytest.mark.asyncio
 async def test_telegram_send_failure_marks_notification_failed() -> None:
     service, repository, session, _ = _notifications_service(
         telegram_error=TelegramDeliveryError("Telegram unavailable"),

@@ -143,6 +143,7 @@ class OrdersService:
                         product_variant=variant,
                         product_name=item.product.name,
                         variant_size=variant.size,
+                        variant_size_grid=item.product.size_grid,
                         variant_color=variant.color,
                         variant_sku=variant.sku,
                         unit_price=item.product.base_price,

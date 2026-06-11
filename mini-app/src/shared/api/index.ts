@@ -13,6 +13,7 @@ import type {
   OrderList,
   Product,
   ProductList,
+  ProductSizeGrid,
   PromoValidation,
   Review,
   ReviewList,
@@ -31,6 +32,9 @@ export type ProductListParams = {
   tag_id?: number;
   status?: string;
   search?: string;
+  size_grid?: ProductSizeGrid;
+  size?: string;
+  color?: string;
 };
 
 export function loginWithTelegram(initData: string) {

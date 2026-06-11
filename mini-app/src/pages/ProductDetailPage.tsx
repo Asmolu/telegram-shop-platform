@@ -18,6 +18,7 @@ import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductImageCarousel, TopBar } from '../shared/ui';
 import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
+import { displaySize, sortVariants } from '../shared/utils/sizes';
 
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
@@ -182,7 +183,10 @@ export function ProductDetailPage() {
     );
   }
 
-  const activeVariants = product.variants.filter((variant) => variant.is_active);
+  const activeVariants = sortVariants(
+    product.variants.filter((variant) => variant.is_active),
+    product.size_grid,
+  );
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
 
@@ -233,13 +237,14 @@ export function ProductDetailPage() {
       </section>
 
       <section className="detail-card">
-        <h2>Размер</h2>
+        <h2>{product.size_grid === 'shoes_ru' ? 'Российский размер' : 'Размер'}</h2>
         {activeVariants.length > 0 ? (
           <div className="variant-grid">
             {activeVariants.map((variant) => (
               <VariantButton
                 key={variant.id}
                 selected={selectedVariantId === variant.id}
+                sizeGrid={product.size_grid}
                 variant={variant}
                 onSelect={() => setSelectedVariantId(variant.id)}
               />
@@ -322,10 +327,12 @@ export function ProductDetailPage() {
 
 function VariantButton({
   variant,
+  sizeGrid,
   selected,
   onSelect,
 }: {
   variant: ProductVariant;
+  sizeGrid: Product['size_grid'];
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -338,7 +345,7 @@ function VariantButton({
       type="button"
       onClick={onSelect}
     >
-      <strong>{variant.color ? `${variant.size} · ${variant.color}` : variant.size}</strong>
+      <strong>{variant.color ? `${displaySize(sizeGrid, variant.size)} · ${variant.color}` : displaySize(sizeGrid, variant.size)}</strong>
       <span>{disabled ? 'нет' : `${variant.available_quantity} шт.`}</span>
     </button>
   );

@@ -106,6 +106,7 @@ def _order_item_payload(item: OrderItem) -> dict[str, object | None]:
         "product_image_url": image_url,
         "variant_id": item.product_variant_id,
         "variant_size": item.variant_size,
+        "variant_size_grid": item.variant_size_grid.value,
         "variant_color": item.variant_color,
         "variant_sku": item.variant_sku,
         "quantity": item.quantity,

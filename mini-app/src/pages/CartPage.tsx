@@ -21,6 +21,7 @@ import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar }
 import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
 import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
+import { displaySize } from '../shared/utils/sizes';
 
 type CartTab = 'favorites' | 'cart' | 'orders';
 
@@ -334,7 +335,7 @@ function CartItemsTab({
               </span>
               <div>
                 <strong>{item.product.name}</strong>
-                <small>{item.product_variant.size}{item.product_variant.color ? ` · ${item.product_variant.color}` : ''}</small>
+                <small>{displaySize(item.product.size_grid, item.product_variant.size, true)}{item.product_variant.color ? ` · ${item.product_variant.color}` : ''}</small>
                 {unavailable ? <em>Проверьте наличие</em> : null}
                 <span>{formatPrice(item.unit_price)}</span>
               </div>
@@ -416,7 +417,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
               {order.items.map((item) => {
                 const thumbnailUrl = normalizeAssetUrl(item.product_thumbnail_url || item.product_thumbnail_path);
                 const variant = [
-                  item.variant_size,
+                  displaySize(item.variant_size_grid, item.variant_size, true),
                   item.variant_color,
                   item.variant_sku ? `SKU ${item.variant_sku}` : '',
                 ].filter(Boolean).join(' · ');
