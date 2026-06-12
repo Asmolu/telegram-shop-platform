@@ -44,6 +44,7 @@ class DummySession:
 class FakeTelegramService:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.parse_modes: list[str | None] = []
         self.reply_markups: list[dict[str, object]] = []
 
     async def send_message(
@@ -51,9 +52,11 @@ class FakeTelegramService:
         chat_id: str,
         message: str,
         *,
+        parse_mode: str | None = None,
         reply_markup: dict[str, object] | None = None,
     ) -> None:
         self.messages.append((chat_id, message))
+        self.parse_modes.append(parse_mode)
         if reply_markup is not None:
             self.reply_markups.append(reply_markup)
 
@@ -282,6 +285,7 @@ async def test_new_product_help_command_is_routed(
     assert "Размеры одежды: XS, S, M" in telegram.messages[0][1]
     assert "российские целые размеры 35-46" in telegram.messages[0][1]
     assert "RU/EU/US/UK" in telegram.messages[0][1]
+    assert telegram.parse_modes == ["HTML"]
 
 
 @pytest.mark.asyncio

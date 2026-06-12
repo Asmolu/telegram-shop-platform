@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from app.db.models import (
     Category,
     NotificationChannel,
     NotificationStatus,
+    ProductImageBadgeType,
     ProductSizeGrid,
     ProductStatus,
     SellerCredential,
@@ -88,6 +90,10 @@ class FakeQuickProductRepository:
     def __init__(self) -> None:
         self.products: list[object] = []
         self.next_id = 101
+        self.existing_ids = {11, 12, 13}
+
+    async def list_existing_ids(self, product_ids: list[int]) -> set[int]:
+        return set(product_ids) & self.existing_ids
 
     def add(self, product: object) -> None:
         product.id = self.next_id
@@ -436,11 +442,168 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     assert [variant.stock_quantity for variant in variant_repository.variants] == [5, 5, 3]
     assert variant_repository.variants[0].sku == "HD-W-M"
     assert prepared_sizes == ["M", "L", "3XL"]
-    assert "ID товара: 101" in message
-    assert "Статус: DRAFT" in message
+    assert "ID: 101" in message
+    assert "Статус: черновик" in message
     assert "https://seller.tsplatform.ru/products/101/edit" in message
     assert storage.saved == [(b"image-bytes", "products", ".jpg")]
     assert audit.records[0]["action"] == "bot_product_draft_created"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("badge_value", "expected_type", "expected_label"),
+    [
+        ("Распродажа", ProductImageBadgeType.SALE, "Распродажа"),
+        ("NEW", ProductImageBadgeType.NEW, "NEW"),
+    ],
+)
+async def test_new_product_command_creates_related_products_and_preset_badge(
+    monkeypatch: pytest.MonkeyPatch,
+    badge_value: str,
+    expected_type: ProductImageBadgeType,
+    expected_label: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, _, _ = _quick_product_service()
+
+    message = await service.create_quick_product_draft_command(
+        chat_id=-100,
+        message=_quick_product_message(
+            caption=_strict_product_caption(
+                title="Related Hoodie",
+                size_grid="одежда",
+                rows=("3XL / Black / 2 / RELATED-3XL",),
+                related_products="11, 12, 13",
+                image_badge=badge_value,
+            )
+        ),
+        actor_telegram_user_id=500,
+        actor_username="operator",
+    )
+
+    product = product_repository.products[0]
+    assert product.related_product_ids == [11, 12, 13]
+    assert product.image_badge_type == expected_type
+    assert product.image_badge_text is None
+    assert f"Виджет фото: {expected_label}" in message
+    assert "Похожие товары: 11, 12, 13" in message
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_creates_custom_badge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, _, _ = _quick_product_service()
+
+    message = await service.create_quick_product_draft_command(
+        chat_id=-100,
+        message=_quick_product_message(
+            caption=_strict_product_caption(
+                title="Custom Badge Hoodie",
+                size_grid="одежда",
+                rows=("M / White / 2 / CUSTOM-M",),
+                image_badge="custom",
+                image_badge_text="-30%",
+            )
+        ),
+        actor_telegram_user_id=500,
+        actor_username="operator",
+    )
+
+    product = product_repository.products[0]
+    assert product.image_badge_type == ProductImageBadgeType.CUSTOM
+    assert product.image_badge_text == "-30%"
+    assert "Виджет фото: custom (-30%)" in message
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_rejects_unknown_related_product(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="похожие товары не найдены: 999"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Unknown Related Hoodie",
+                    size_grid="одежда",
+                    rows=("M / White / 2 / UNKNOWN-M",),
+                    related_products="11, 999",
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.deleted == ["products/telegram-photo.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_rejects_duplicate_related_product(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="повторяющиеся ID"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Duplicate Related Hoodie",
+                    size_grid="одежда",
+                    rows=("M / White / 2 / DUPLICATE-M",),
+                    related_products="11, 12, 11",
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.saved == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("badge_text", "expected"),
+    [
+        (None, "добавь непустое поле"),
+        ("123456789012345678901", "не длиннее 20 символов"),
+        ("<b>sale</b>", "не должно содержать HTML"),
+    ],
+)
+async def test_new_product_command_rejects_invalid_custom_badge_text(
+    monkeypatch: pytest.MonkeyPatch,
+    badge_text: str | None,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match=expected):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Invalid Custom Badge",
+                    size_grid="одежда",
+                    rows=("M / White / 2 / INVALID-CUSTOM-M",),
+                    image_badge="custom",
+                    image_badge_text=badge_text,
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.saved == []
 
 
 @pytest.mark.asyncio
@@ -709,10 +872,20 @@ def test_new_product_help_contains_clothing_and_footwear_examples(
 
     assert "Футболка HERMES" in help_text
     assert "Кроссовки Nike Air Max" in help_text
+    root = ElementTree.fromstring(f"<root>{help_text}</root>")
+    code_blocks = ["".join(block.itertext()) for block in root.findall(".//pre/code")]
+    assert sum(block.startswith("/new_product") for block in code_blocks) == 2
+    assert all("Похожие товары: 11, 12, 13" in block for block in code_blocks[:2])
+    assert "Виджет фото: custom" in code_blocks[2]
     assert "XS, S, M, L, XL, XXL, 3XL, ONE_SIZE" in help_text
     assert "российские целые размеры 35-46" in help_text
-    assert "RU/EU/US/UK и половинные размеры не поддерживаются" in help_text
+    assert "RU/EU/US/UK" in help_text
+    assert "Похожие товары указываются ID через запятую" in help_text
+    assert "Виджет фото: нет, NEW, Распродажа, Хит, Эксклюзив, custom" in help_text
     assert "по умолчанию товар создаётся как черновик" in help_text.lower()
+    assert "Traceback" not in help_text
+    assert "secret" not in help_text.casefold()
+    assert len(help_text) < 4096
 
 
 @pytest.mark.asyncio
@@ -782,22 +955,30 @@ def _strict_product_caption(
     old_price: str = "2490",
     categories: str = "",
     tags: str = "",
+    related_products: str | None = None,
+    image_badge: str | None = None,
+    image_badge_text: str | None = None,
     status: str = "черновик",
 ) -> str:
-    return "\n".join(
-        (
-            "/new_product",
-            f"Название: {title}",
-            f"Цена: {price}",
-            f"Старая цена: {old_price}",
-            f"Категории: {categories}",
-            f"Теги: {tags}",
-            f"Тип размеров: {size_grid}",
-            "Размеры:",
-            *rows,
-            f"Статус: {status}",
-        )
-    )
+    lines = [
+        "/new_product",
+        f"Название: {title}",
+        f"Цена: {price}",
+        f"Старая цена: {old_price}",
+        f"Категории: {categories}",
+        f"Теги: {tags}",
+        f"Тип размеров: {size_grid}",
+        "Размеры:",
+        *rows,
+    ]
+    if related_products is not None:
+        lines.append(f"Похожие товары: {related_products}")
+    if image_badge is not None:
+        lines.append(f"Виджет фото: {image_badge}")
+    if image_badge_text is not None:
+        lines.append(f"Текст виджета фото: {image_badge_text}")
+    lines.append(f"Статус: {status}")
+    return "\n".join(lines)
 
 
 def _quick_product_message(

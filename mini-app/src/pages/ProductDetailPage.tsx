@@ -33,7 +33,7 @@ export function ProductDetailPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
-  const [cartBusy, setCartBusy] = React.useState(false);
+  const [cartAction, setCartAction] = React.useState<'buy' | 'cart' | null>(null);
   const [reviewText, setReviewText] = React.useState('');
   const [reviewRating, setReviewRating] = React.useState(5);
   const [reviewBusy, setReviewBusy] = React.useState(false);
@@ -85,6 +85,9 @@ export function ProductDetailPage() {
   }, [isAuthenticated, productId]);
 
   const selectedVariant = product?.variants.find((variant) => variant.id === selectedVariantId) ?? null;
+  const selectedVariantAvailable = Boolean(
+    selectedVariant?.is_active && selectedVariant.available_quantity > 0,
+  );
   const inCart = Boolean(
     selectedVariant && (
       addedVariantIds.has(selectedVariant.id)
@@ -94,6 +97,11 @@ export function ProductDetailPage() {
   const averageRating = reviews.length
     ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length
     : null;
+  const purchaseActionsDisabled = Boolean(
+    cartAction !== null
+    || !product?.is_available
+    || (selectedVariant !== null && !selectedVariantAvailable),
+  );
 
   async function toggleFavorite() {
     if (!product) return;
@@ -115,31 +123,38 @@ export function ProductDetailPage() {
     }
   }
 
-  async function addSelectedToCart() {
+  async function runCartAction(action: 'buy' | 'cart') {
     if (!product || !selectedVariant) {
       setNotice('Выберите доступный размер.');
+      return;
+    }
+    if (!selectedVariantAvailable || !product.is_available) {
+      setNotice('Выбранный вариант сейчас недоступен.');
       return;
     }
     if (!isAuthenticated) {
       navigate(getAuthPath(currentPath));
       return;
     }
-    if (inCart) {
-      navigate(withReturnTo('/cart?tab=cart', currentPath));
-      return;
-    }
 
     try {
-      setCartBusy(true);
-      const nextCart = await addCartItem(product.id, selectedVariant.id, 1);
-      setCart(nextCart);
-      setAddedVariantIds((current) => new Set(current).add(selectedVariant.id));
-      window.dispatchEvent(new Event('miniapp:cart-updated'));
-      setNotice('Товар добавлен в корзину.');
+      setCartAction(action);
+      if (!inCart) {
+        const nextCart = await addCartItem(product.id, selectedVariant.id, 1);
+        setCart(nextCart);
+        setAddedVariantIds((current) => new Set(current).add(selectedVariant.id));
+        window.dispatchEvent(new Event('miniapp:cart-updated'));
+      }
+
+      if (action === 'buy') {
+        navigate(withReturnTo('/checkout', currentPath));
+        return;
+      }
+      setNotice(inCart ? 'Товар уже в корзине.' : 'Товар добавлен в корзину.');
     } catch (actionError) {
       setNotice(toApiErrorMessage(actionError));
     } finally {
-      setCartBusy(false);
+      setCartAction(null);
     }
   }
 
@@ -328,9 +343,24 @@ export function ProductDetailPage() {
           <strong>{formatPrice(product.base_price)}</strong>
           {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
         </span>
-        <button className="primary-button" type="button" disabled={cartBusy || !selectedVariant} onClick={() => void addSelectedToCart()}>
-          {cartBusy ? 'Добавляем...' : inCart ? 'Перейти в корзину' : 'В корзину'}
-        </button>
+        <div className="detail-cta__actions">
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={purchaseActionsDisabled}
+            onClick={() => void runCartAction('buy')}
+          >
+            {cartAction === 'buy' ? 'Открываем...' : 'Купить сейчас'}
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={purchaseActionsDisabled}
+            onClick={() => void runCartAction('cart')}
+          >
+            {cartAction === 'cart' ? 'Добавляем...' : 'В корзину'}
+          </button>
+        </div>
       </div>
     </div>
   );

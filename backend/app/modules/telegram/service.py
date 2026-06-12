@@ -448,7 +448,11 @@ class SellerBotWebhookService:
                 response_text = self.seller_bot_service.format_new_product_help_command(
                     chat_id=message.chat.id,
                 )
-                await self._send_chat_message(message.chat.id, response_text)
+                await self._send_chat_message(
+                    message.chat.id,
+                    response_text,
+                    parse_mode="HTML",
+                )
                 return self._response(handled=True, result="new_product_help_sent")
 
             if command == "/new_product":
@@ -519,9 +523,19 @@ class SellerBotWebhookService:
             "Проверь формат через /new_product_help. Товар не был сохранён."
         )
 
-    async def _send_chat_message(self, chat_id: int, message: str) -> bool:
+    async def _send_chat_message(
+        self,
+        chat_id: int,
+        message: str,
+        *,
+        parse_mode: str | None = None,
+    ) -> bool:
         try:
-            await self.telegram_service.send_message(str(chat_id), message)
+            await self.telegram_service.send_message(
+                str(chat_id),
+                message,
+                parse_mode=parse_mode,
+            )
         except TelegramDeliveryError:
             return False
         return True

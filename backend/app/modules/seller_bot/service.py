@@ -1,3 +1,4 @@
+import html
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
+    ProductImageBadgeType,
     ProductSizeGrid,
     ProductStatus,
     UserRole,
@@ -62,6 +64,18 @@ QUICK_PRODUCT_ALLOWED_FIELDS = {
     "тип размеров": "size_grid",
     "size_grid": "size_grid",
     "размеры": "variants",
+    "похожие товары": "related_product_ids",
+    "похожие": "related_product_ids",
+    "related products": "related_product_ids",
+    "related_product_ids": "related_product_ids",
+    "виджет фото": "image_badge_type",
+    "бейдж фото": "image_badge_type",
+    "бейдж": "image_badge_type",
+    "image_badge": "image_badge_type",
+    "текст виджета фото": "image_badge_text",
+    "текст бейджа": "image_badge_text",
+    "badge_text": "image_badge_text",
+    "image_badge_text": "image_badge_text",
     "приоритет поиска": "search_priority",
     "псевдонимы поиска": "search_aliases",
     "ключевые слова": "search_aliases",
@@ -79,6 +93,28 @@ QUICK_PRODUCT_STATUS_ALIASES = {
     "активен": ProductStatus.ACTIVE,
     "активный": ProductStatus.ACTIVE,
     ProductStatus.ACTIVE.value.lower(): ProductStatus.ACTIVE,
+}
+QUICK_PRODUCT_BADGE_ALIASES = {
+    "": ProductImageBadgeType.NONE,
+    "нет": ProductImageBadgeType.NONE,
+    "none": ProductImageBadgeType.NONE,
+    "new": ProductImageBadgeType.NEW,
+    "новинка": ProductImageBadgeType.NEW,
+    "распродажа": ProductImageBadgeType.SALE,
+    "sale": ProductImageBadgeType.SALE,
+    "хит": ProductImageBadgeType.HIT,
+    "hit": ProductImageBadgeType.HIT,
+    "эксклюзив": ProductImageBadgeType.EXCLUSIVE,
+    "exclusive": ProductImageBadgeType.EXCLUSIVE,
+    "custom": ProductImageBadgeType.CUSTOM,
+    "свой": ProductImageBadgeType.CUSTOM,
+    "кастом": ProductImageBadgeType.CUSTOM,
+}
+QUICK_PRODUCT_BADGE_LABELS = {
+    ProductImageBadgeType.NEW: "NEW",
+    ProductImageBadgeType.SALE: "Распродажа",
+    ProductImageBadgeType.HIT: "Хит",
+    ProductImageBadgeType.EXCLUSIVE: "Эксклюзив",
 }
 
 
@@ -108,6 +144,9 @@ class QuickProductDraft:
     tags: list[str]
     size_grid: ProductSizeGrid
     variants: list[QuickProductVariantDraft]
+    related_product_ids: list[int]
+    image_badge_type: ProductImageBadgeType
+    image_badge_text: str | None
     search_priority: int
     search_aliases: str | None
     status: ProductStatus
@@ -339,10 +378,13 @@ class SellerBotService:
                 search_priority=draft.search_priority,
                 search_aliases=draft.search_aliases,
                 size_grid=draft.size_grid,
+                image_badge_type=draft.image_badge_type,
+                image_badge_text=draft.image_badge_text,
                 status=draft.status,
                 categories=categories,
                 tag_ids=[tag.id for tag in tags],
                 images=[image.payload],
+                related_product_ids=draft.related_product_ids,
             )
             variant_payloads = self._build_quick_product_variant_payloads(draft)
             product = await self.products_service.stage_product_with_variants(
@@ -363,6 +405,8 @@ class SellerBotService:
                     "name": product.name,
                     "status": product.status.value,
                     "image_count": len(product.images),
+                    "image_badge_type": product.image_badge_type.value,
+                    "related_product_ids": draft.related_product_ids,
                 },
                 metadata={
                     "actor_telegram_user_id": actor_telegram_user_id,
@@ -370,6 +414,8 @@ class SellerBotService:
                     "source": "seller_bot_new_product",
                     "size_grid": draft.size_grid.value,
                     "variant_count": len(variant_payloads),
+                    "image_badge_type": draft.image_badge_type.value,
+                    "related_product_ids": draft.related_product_ids,
                 },
                 commit=False,
             )
@@ -389,12 +435,15 @@ class SellerBotService:
             await self.session.rollback()
             for file_path in saved_paths:
                 self.storage.delete(file_path)
+            error = self._quick_product_domain_error(exc)
             await self._audit_product_post_rejected(
                 actor_telegram_user_id=actor_telegram_user_id,
                 actor_username=actor_username,
-                reason=exc.message,
+                reason=error.message,
             )
-            raise
+            if error is exc:
+                raise
+            raise error from exc
         except IntegrityError as exc:
             await self.session.rollback()
             for file_path in saved_paths:
@@ -505,6 +554,11 @@ class SellerBotService:
                 400,
             )
 
+        image_badge_type, image_badge_text = self._parse_image_badge(
+            values.get("image_badge_type"),
+            values.get("image_badge_text"),
+        )
+
         return QuickProductDraft(
             title=title,
             price=price,
@@ -514,10 +568,71 @@ class SellerBotService:
             tags=self._split_csv(values.get("tags")),
             size_grid=size_grid,
             variants=self._parse_quick_product_variants(variant_rows, size_grid=size_grid),
+            related_product_ids=self._parse_related_product_ids(
+                values.get("related_product_ids")
+            ),
+            image_badge_type=image_badge_type,
+            image_badge_text=image_badge_text,
             search_priority=search_priority,
             search_aliases=normalize_search_aliases(values.get("search_aliases")),
             status=status,
         )
+
+    def _parse_related_product_ids(self, value: str | None) -> list[int]:
+        normalized = self._optional_text(value)
+        if normalized is None:
+            return []
+
+        raw_ids = [part for part in re.split(r"[,\s]+", normalized) if part]
+        related_product_ids: list[int] = []
+        for raw_id in raw_ids:
+            if re.fullmatch(r"\d+", raw_id) is None:
+                raise AppError(
+                    "поле `Похожие товары` должно содержать ID через запятую, "
+                    "например: `11, 12, 13`.",
+                    400,
+                )
+            related_product_ids.append(
+                self._parse_int(
+                    raw_id,
+                    field="Похожие товары",
+                    minimum=1,
+                    maximum=POSTGRES_INT32_MAX,
+                )
+            )
+
+        if len(related_product_ids) != len(set(related_product_ids)):
+            raise AppError("поле `Похожие товары` содержит повторяющиеся ID.", 400)
+        return related_product_ids
+
+    def _parse_image_badge(
+        self,
+        badge_value: str | None,
+        text_value: str | None,
+    ) -> tuple[ProductImageBadgeType, str | None]:
+        normalized_badge = (badge_value or "").strip().casefold()
+        badge_type = QUICK_PRODUCT_BADGE_ALIASES.get(normalized_badge)
+        if badge_type is None:
+            raise AppError(
+                "поле `Виджет фото` должно быть одним из: нет, NEW, Распродажа, "
+                "Хит, Эксклюзив, custom.",
+                400,
+            )
+
+        badge_text = self._optional_text(text_value)
+        if badge_type != ProductImageBadgeType.CUSTOM:
+            return badge_type, None
+        if badge_text is None:
+            raise AppError(
+                "для `Виджет фото: custom` добавь непустое поле "
+                "`Текст виджета фото`.",
+                400,
+            )
+        if len(badge_text) > 20:
+            raise AppError("поле `Текст виджета фото` должно быть не длиннее 20 символов.", 400)
+        if "<" in badge_text or ">" in badge_text:
+            raise AppError("поле `Текст виджета фото` не должно содержать HTML.", 400)
+        return badge_type, badge_text
 
     def _parse_size_grid(self, value: str) -> ProductSizeGrid:
         size_grid = QUICK_PRODUCT_SIZE_GRID_ALIASES.get(value.strip().casefold())
@@ -711,23 +826,30 @@ class SellerBotService:
         product_id: int,
         draft: QuickProductDraft,
     ) -> str:
-        return "\n".join(
+        lines = [
+            "Товар создан.",
+            "",
+            f"ID: {product_id}",
+            f"Статус: {self._quick_product_status_label(draft.status)}",
+            f"Тип размеров: {self._quick_product_size_grid_label(draft.size_grid)}",
+            f"Вариантов: {len(draft.variants)}",
+        ]
+        if draft.image_badge_type != ProductImageBadgeType.NONE:
+            lines.append(f"Виджет фото: {self._quick_product_badge_label(draft)}")
+        if draft.related_product_ids:
+            lines.append(
+                f"Похожие товары: {', '.join(str(item) for item in draft.related_product_ids)}"
+            )
+        lines.extend(
             (
-                "Товар создан.",
-                f"ID товара: {product_id}",
-                f"Название: {draft.title}",
-                f"Статус: {draft.status.value}",
-                f"Тип размеров: {draft.size_grid.value}",
-                f"Вариантов: {len(draft.variants)}",
+                "",
                 f"Редактировать: {SELLER_PANEL_PRODUCT_EDIT_URL.format(product_id=product_id)}",
             )
         )
+        return "\n".join(lines)
 
     def _new_product_help_text(self) -> str:
-        return """Создание товара: отправь одну фотографию с подписью в строгом формате.
-
-Одежда:
-/new_product
+        clothing_example = """/new_product
 
 Название: Футболка HERMES
 Описание: Бюджетные футболки, весна/лето
@@ -741,11 +863,11 @@ M / White / 10 / HERMES-M-W
 L / White / 8 / HERMES-L-W
 XL / Black / 5 / HERMES-XL-B
 3XL / Black / 3 / HERMES-3XL-B
+Похожие товары: 11, 12, 13
+Виджет фото: Распродажа
 Псевдонимы поиска: футболка, фудболка, футбалка
-Статус: черновик
-
-Обувь:
-/new_product
+Статус: черновик"""
+        footwear_example = """/new_product
 
 Название: Кроссовки Nike Air Max
 Описание: Лёгкие кроссовки, качество люкс
@@ -758,18 +880,60 @@ XL / Black / 5 / HERMES-XL-B
 39 / White / 3 / SKU-NIKE-39-W
 40 / White / 2 / SKU-NIKE-40-W
 41 / Black / 4 / SKU-NIKE-41-B
+Похожие товары: 11, 12, 13
+Виджет фото: NEW
 Псевдонимы поиска: найк, кросовки, кроссовки
-Статус: черновик
+Статус: черновик"""
+        custom_badge_example = """Виджет фото: custom
+Текст виджета фото: -30%"""
+        return "\n\n".join(
+            (
+                "Отправь фото товара с подписью в одном из форматов ниже.",
+                f"<b>Одежда:</b>\n<pre><code>{html.escape(clothing_example)}</code></pre>",
+                f"<b>Обувь:</b>\n<pre><code>{html.escape(footwear_example)}</code></pre>",
+                (
+                    "<b>Свой виджет:</b>\n"
+                    f"<pre><code>{html.escape(custom_badge_example)}</code></pre>"
+                ),
+                "\n".join(
+                    (
+                        "Формат варианта: размер / цвет / остаток / SKU.",
+                        "SKU можно оставить пустым, тогда Bot 2 создаст безопасное значение.",
+                        "Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.",
+                        "Размеры обуви: только российские целые размеры 35-46 без "
+                        "RU/EU/US/UK и без половинных размеров.",
+                        "Похожие товары указываются ID через запятую.",
+                        "Виджет фото: нет, NEW, Распродажа, Хит, Эксклюзив, custom.",
+                        "Для custom добавь: Текст виджета фото: ...",
+                        "Категории и теги должны уже существовать.",
+                        "По умолчанию товар создаётся как черновик.",
+                    )
+                ),
+            )
+        )
 
-Формат варианта: размер / цвет / остаток / SKU.
-SKU можно оставить пустым, тогда Bot 2 создаст безопасное значение.
+    def _quick_product_domain_error(self, exc: AppError) -> AppError:
+        unknown_prefix = "Unknown related product IDs:"
+        if exc.message.startswith(unknown_prefix):
+            product_ids = exc.message.removeprefix(unknown_prefix).strip()
+            return AppError(
+                f"похожие товары не найдены: {product_ids}. Проверь ID товаров.",
+                exc.status_code,
+            )
+        if exc.message == "A product cannot be related to itself":
+            return AppError("товар нельзя указать похожим на самого себя.", exc.status_code)
+        return exc
 
-Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.
-Размеры обуви: только российские целые размеры 35-46 без префикса.
-RU/EU/US/UK и половинные размеры не поддерживаются.
+    def _quick_product_badge_label(self, draft: QuickProductDraft) -> str:
+        if draft.image_badge_type == ProductImageBadgeType.CUSTOM:
+            return f"custom ({draft.image_badge_text})"
+        return QUICK_PRODUCT_BADGE_LABELS[draft.image_badge_type]
 
-Категории и теги должны уже существовать.
-По умолчанию товар создаётся как черновик; его можно отредактировать в Seller Panel."""
+    def _quick_product_status_label(self, status_value: ProductStatus) -> str:
+        return "черновик" if status_value == ProductStatus.DRAFT else "активен"
+
+    def _quick_product_size_grid_label(self, size_grid: ProductSizeGrid) -> str:
+        return "обувь" if size_grid == ProductSizeGrid.SHOES_RU else "одежда"
 
     def _format_product_validation_error(self, exc: ValidationError) -> str:
         error = exc.errors(include_url=False)[0]
@@ -783,6 +947,9 @@ RU/EU/US/UK и половинные размеры не поддерживают
             "color": "Цвет",
             "sku": "SKU",
             "stock_quantity": "Остаток",
+            "image_badge_text": "Текст виджета фото",
+            "image_badge_type": "Виджет фото",
+            "related_product_ids": "Похожие товары",
         }
         return f"поле `{labels.get(field, field)}` не прошло проверку: {error['msg']}."
 

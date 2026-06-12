@@ -152,7 +152,7 @@ label {
 }
 
 .page--detail {
-  padding-bottom: calc(162px + env(safe-area-inset-bottom));
+  padding-bottom: calc(196px + env(safe-area-inset-bottom));
 }
 
 .top-bar {
@@ -1463,9 +1463,7 @@ label {
   left: 50%;
   bottom: calc(76px + env(safe-area-inset-bottom));
   z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   width: min(calc(100vw - 24px), 406px);
   min-width: 0;
   max-width: 100%;
@@ -1481,7 +1479,9 @@ label {
 }
 
 .detail-cta__price {
-  display: grid;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 3px;
   min-width: 0;
 }
@@ -1492,11 +1492,20 @@ label {
   white-space: nowrap;
 }
 
-.detail-cta .primary-button {
-  flex: 1 1 170px;
+.detail-cta__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-cta .primary-button,
+.detail-cta .secondary-button {
+  width: 100%;
   min-width: 0;
   min-height: 50px;
   border-radius: 999px;
+  padding-inline: 12px;
 }
 
 .cart-layout,
