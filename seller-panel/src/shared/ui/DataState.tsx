@@ -50,9 +50,14 @@ export function ErrorState({
   const { t } = useI18n();
   const isApiError = error instanceof ApiError;
   const isAuthError = isApiError && (error.status === 401 || error.status === 403);
+  const isNetworkError = isApiError && error.status === 0;
   const title = isAuthError ? t('common.accessDenied') : t('common.requestFailed');
   const message =
-    error instanceof Error ? error.message : t('common.unexpectedBackendError');
+    isNetworkError
+      ? t('common.networkError')
+      : error instanceof Error
+        ? error.message
+        : t('common.unexpectedBackendError');
 
   return (
     <div className="state-panel state-panel-error" role="alert">

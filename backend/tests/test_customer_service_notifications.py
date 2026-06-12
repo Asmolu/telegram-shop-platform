@@ -243,6 +243,26 @@ async def test_order_status_update_creates_customer_status_notification_when_eli
 
 
 @pytest.mark.asyncio
+async def test_order_status_update_skips_when_customer_subscription_is_missing() -> None:
+    service, _, sender, _ = _delivery_service(subscription=None)
+
+    delivery = await service.notify_order_status_changed(
+        {
+            "order_id": 1,
+            "order_number": "ORD-00000001",
+            "user_id": 1,
+            "previous_status": OrderStatus.NEW.value,
+            "new_status": OrderStatus.PROCESSING.value,
+        }
+    )
+
+    assert delivery is not None
+    assert delivery.status == CustomerServiceNotificationDeliveryStatus.SKIPPED
+    assert delivery.error_code == "subscription_missing"
+    assert sender.messages == []
+
+
+@pytest.mark.asyncio
 async def test_customer_order_notification_delivery_audits_sent_and_failed() -> None:
     sent_audit = FakeAuditService()
     service, _, _, _ = _delivery_service(

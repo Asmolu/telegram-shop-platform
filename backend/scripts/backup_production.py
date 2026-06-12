@@ -259,35 +259,58 @@ class YandexDiskClient:
     def upload_file(self, local_path: Path, remote_path: str) -> dict[str, Any]:
         token = self._require_access_token()
         self.ensure_directory(remote_parent(remote_path))
-        params = urlencode({"path": remote_path, "overwrite": "true"})
-        upload_info = self._request_json(
-            "GET",
-            f"{self.api_base_url}/resources/upload?{params}",
-            token=token,
-            expected_statuses={200},
-        )
-        href = str(upload_info.get("href") or "")
-        if not href:
-            raise YandexDiskError("Yandex Disk did not return an upload href.")
-
-        with local_path.open("rb") as file_obj:
-            self._request(
-                "PUT",
-                href,
-                content=file_obj,
-                headers={"Authorization": f"OAuth {token}"},
-                expected_statuses={201, 202},
-                include_auth=False,
-            )
-
-        metadata = self.get_metadata(remote_path)
-        remote_size = int(metadata.get("size") or 0)
         local_size = local_path.stat().st_size
-        if remote_size != local_size:
-            raise YandexDiskError(
-                f"Yandex Disk size verification failed: local={local_size} remote={remote_size}"
-            )
-        return metadata
+        last_error: YandexDiskError | None = None
+
+        for attempt in range(1, self.retries + 1):
+            try:
+                params = urlencode({"path": remote_path, "overwrite": "true"})
+                upload_info = self._request_json(
+                    "GET",
+                    f"{self.api_base_url}/resources/upload?{params}",
+                    token=token,
+                    expected_statuses={200},
+                )
+                href = str(upload_info.get("href") or "")
+                if not href:
+                    raise YandexDiskError("Yandex Disk did not return an upload href.")
+
+                with local_path.open("rb") as file_obj:
+                    self._request(
+                        "PUT",
+                        href,
+                        content=file_obj,
+                        headers={
+                            "Authorization": f"OAuth {token}",
+                            "Content-Length": str(local_size),
+                            "Content-Type": "application/gzip",
+                        },
+                        expected_statuses={201, 202},
+                        include_auth=False,
+                        max_attempts=1,
+                    )
+
+                if local_path.stat().st_size != local_size:
+                    raise YandexDiskError("Local backup archive changed during upload.")
+
+                metadata = self.get_metadata(remote_path)
+                remote_size = int(metadata.get("size") or 0)
+                if remote_size != local_size:
+                    raise YandexDiskError(
+                        "Yandex Disk size verification failed: "
+                        f"local={local_size} remote={remote_size}"
+                    )
+                return metadata
+            except YandexDiskError as exc:
+                last_error = exc
+                if attempt < self.retries:
+                    time.sleep(min(attempt * 2, 5))
+                    continue
+
+        detail = sanitize_text(str(last_error), configured_secret_values())
+        raise YandexDiskError(
+            f"Yandex Disk upload failed after {self.retries} attempt(s): {detail}"
+        ) from last_error
 
     def ensure_directory(self, remote_dir: str) -> None:
         token = self._require_access_token()
@@ -391,6 +414,7 @@ class YandexDiskClient:
         data: dict[str, str] | None = None,
         content: Any | None = None,
         headers: dict[str, str] | None = None,
+        max_attempts: int | None = None,
     ) -> httpx.Response:
         request_headers = dict(headers or {})
         request_data: Any = data
@@ -398,7 +422,8 @@ class YandexDiskClient:
             request_data = urlencode(data)
 
         last_error: Exception | None = None
-        for attempt in range(1, self.retries + 1):
+        attempts = self.retries if max_attempts is None else max_attempts
+        for attempt in range(1, attempts + 1):
             try:
                 response = self.client.request(
                     method,
@@ -409,14 +434,14 @@ class YandexDiskClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                if attempt < self.retries:
+                if attempt < attempts:
                     time.sleep(min(attempt * 2, 5))
                     continue
                 raise YandexDiskError(sanitize_text(str(exc), configured_secret_values())) from exc
 
             if response.status_code in expected_statuses:
                 return response
-            if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < self.retries:
+            if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < attempts:
                 time.sleep(min(attempt * 2, 5))
                 continue
             message = sanitize_text(response.text[:500], configured_secret_values())
@@ -988,6 +1013,18 @@ def cleanup_remote_retention(
     return f"deleted {len(to_delete)} remote archive(s)"
 
 
+def upload_backup_archive(
+    client: YandexDiskClient,
+    archive_path: Path,
+    remote_path: str,
+) -> dict[str, Any]:
+    try:
+        return client.upload_file(archive_path, remote_path)
+    except YandexDiskError as exc:
+        message = sanitize_text(str(exc), configured_secret_values())
+        raise BackupError("yandex_upload", message) from exc
+
+
 def build_notification_message(result: BackupRunResult) -> str:
     lines = [
         "Telegram Shop Platform backup",
@@ -1108,7 +1145,7 @@ def run_backup(args: argparse.Namespace) -> int:
                 client_secret=config.yandex_client_secret or "",
                 refresh_token=config.yandex_refresh_token or "",
             )
-            client.upload_file(archive_path, remote_path)
+            upload_backup_archive(client, archive_path, remote_path)
             result.remote_retention_result = cleanup_remote_retention(
                 client,
                 config,

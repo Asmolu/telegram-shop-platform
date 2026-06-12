@@ -109,6 +109,7 @@ const dictionaries: Record<Language, Record<string, string>> = {
     'common.waitingBackend': 'Ждем ответ backend.',
     'common.accessDenied': 'Доступ запрещен',
     'common.requestFailed': 'Запрос не выполнен',
+    'common.networkError': 'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.',
     'common.unexpectedBackendError': 'Backend вернул неожиданную ошибку.',
     'common.goToTokenScreen': 'Перейти к экрану токена',
 
@@ -695,6 +696,7 @@ const enCommon: Record<string, string> = {
   'common.waitingBackend': 'Waiting for the backend response.',
   'common.accessDenied': 'Access denied',
   'common.requestFailed': 'Request failed',
+  'common.networkError': 'Unable to reach the server. Check the connection and try again.',
   'common.unexpectedBackendError': 'The backend returned an unexpected error.',
   'common.goToTokenScreen': 'Go to token screen',
 };

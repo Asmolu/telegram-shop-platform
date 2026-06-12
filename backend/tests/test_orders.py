@@ -671,6 +671,59 @@ async def test_order_status_update_does_not_fail_when_seller_notification_fails(
 
 
 @pytest.mark.asyncio
+async def test_order_status_update_does_not_fail_when_customer_publisher_raises() -> None:
+    service, repository, session, _ = _orders_service()
+    seller_events = FakeOrderEventPublisher(session)
+    service.event_publisher = InternalOrderEventPublisher(
+        session,
+        notifications_publisher=seller_events,
+        customer_notifications_publisher=FailingOrderEventPublisher(),
+    )
+    repository.orders[10] = _order(order_id=10, user_id=1)
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.DELIVERED),
+    )
+
+    assert updated.status == OrderStatus.DELIVERED
+    assert seller_events.events[0][0] == ORDER_STATUS_CHANGED
+    assert session.committed is True
+    assert session.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_order_status_update_isolates_direct_post_commit_publisher_failure() -> None:
+    service, repository, session, _ = _orders_service()
+    service.event_publisher = FailingOrderEventPublisher()
+    repository.orders[10] = _order(order_id=10, user_id=1)
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.PROCESSING),
+    )
+
+    assert updated.status == OrderStatus.PROCESSING
+    assert session.committed is True
+    assert session.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_order_status_update_returns_legacy_item_size_grid_fallback() -> None:
+    service, repository, _, _ = _orders_service()
+    order = _order(order_id=10, user_id=1)
+    order.items[0].variant_size_grid = None
+    repository.orders[10] = order
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.PROCESSING),
+    )
+
+    assert updated.items[0].variant_size_grid == ProductSizeGrid.CLOTHING_ALPHA
+
+
+@pytest.mark.asyncio
 async def test_order_status_update_records_audit_log() -> None:
     audit_service = FakeAuditService()
     service, repository, _, _ = _orders_service(audit_service=audit_service)
@@ -736,6 +789,7 @@ def test_order_admin_routes_allow_seller_to_update_status() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "PROCESSING"
+    assert response.json()["items"][0]["variant_size_grid"] == "clothing_alpha"
 
 
 def _orders_service(

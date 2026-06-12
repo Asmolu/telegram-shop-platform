@@ -292,22 +292,20 @@ class ProductsService:
 
         categories_were_provided = "categories" in payload.model_fields_set
         category_id_was_provided = "category_id" in data
+        resolved_tags = None
+        if "tag_ids" in payload.model_fields_set and payload.tag_ids is not None:
+            resolved_tags = await self._resolve_tags(payload.tag_ids)
+
         if categories_were_provided or category_id_was_provided:
             category_assignments = await self._resolve_category_assignments(
                 category_id=data.get("category_id", product.category_id),
                 categories=payload.categories if categories_were_provided else None,
             )
-            product.product_categories = [
-                ProductCategory(
-                    category_id=assignment.category_id,
-                    priority=assignment.priority,
-                )
-                for assignment in category_assignments
-            ]
+            await self._sync_category_assignments(product, category_assignments)
             data["category_id"] = self._primary_category_id(category_assignments)
 
-        if "tag_ids" in payload.model_fields_set and payload.tag_ids is not None:
-            product.tags = await self._resolve_tags(payload.tag_ids)
+        if resolved_tags is not None:
+            self._sync_tags(product, resolved_tags)
 
         if "images" in payload.model_fields_set and payload.images is not None:
             self._validate_images(payload.images)
@@ -522,8 +520,41 @@ class ProductsService:
         unique_tag_ids = list(dict.fromkeys(tag_ids))
         tags = await self.tags_repository.list_by_ids(unique_tag_ids)
         if len(tags) != len(unique_tag_ids):
-            raise AppError("Tag not found", status.HTTP_404_NOT_FOUND)
+            found_ids = {tag.id for tag in tags}
+            missing_ids = sorted(set(unique_tag_ids) - found_ids)
+            joined = ", ".join(str(tag_id) for tag_id in missing_ids)
+            raise AppError(f"Unknown tag_ids: {joined}", status.HTTP_400_BAD_REQUEST)
         return tags
+
+    async def _sync_category_assignments(
+        self,
+        product: Product,
+        assignments: list[ProductCategoryInput],
+    ) -> None:
+        current = sorted(
+            (assignment.category_id, assignment.priority)
+            for assignment in product.product_categories
+        )
+        desired = sorted(
+            (assignment.category_id, assignment.priority) for assignment in assignments
+        )
+        if current == desired:
+            return
+
+        product.product_categories.clear()
+        await self.session.flush()
+        product.product_categories.extend(
+            ProductCategory(
+                category_id=assignment.category_id,
+                priority=assignment.priority,
+            )
+            for assignment in assignments
+        )
+
+    def _sync_tags(self, product: Product, tags: list[Tag]) -> None:
+        if {tag.id for tag in product.tags} == {tag.id for tag in tags}:
+            return
+        product.tags = tags
 
     def _validate_images(self, images: list[ProductImageCreate]) -> None:
         primary_count = sum(1 for image in images if image.is_primary)

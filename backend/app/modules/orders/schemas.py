@@ -50,7 +50,7 @@ class OrderItemRead(BaseModel):
     product_variant_id: int
     product_name: str
     variant_size: str
-    variant_size_grid: ProductSizeGrid
+    variant_size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
     variant_color: str | None = None
     variant_sku: str
     unit_price: Decimal
@@ -79,7 +79,9 @@ class OrderItemRead(BaseModel):
             "product_variant_id": _read_attr(data, "product_variant_id"),
             "product_name": _read_attr(data, "product_name"),
             "variant_size": _read_attr(data, "variant_size"),
-            "variant_size_grid": _read_attr(data, "variant_size_grid"),
+            "variant_size_grid": (
+                _read_attr(data, "variant_size_grid") or ProductSizeGrid.CLOTHING_ALPHA
+            ),
             "variant_color": variant_color,
             "variant_sku": _read_attr(data, "variant_sku"),
             "unit_price": _read_attr(data, "unit_price"),

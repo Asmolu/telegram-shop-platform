@@ -50,6 +50,7 @@ class DummySession:
     def __init__(self) -> None:
         self.committed = False
         self.deleted = False
+        self.flush_count = 0
 
     async def commit(self) -> None:
         self.committed = True
@@ -61,7 +62,7 @@ class DummySession:
         return None
 
     async def flush(self) -> None:
-        return None
+        self.flush_count += 1
 
     async def delete(self, _: object) -> None:
         self.deleted = True
@@ -540,6 +541,60 @@ async def test_product_update_can_set_prioritized_categories() -> None:
     ] == [(2, 1), (3, 3)]
 
 
+@pytest.mark.asyncio
+async def test_product_update_adds_tags_without_rewriting_existing_categories() -> None:
+    product = _product(size_grid=ProductSizeGrid.SHOES_RU)
+    original_categories = list(product.product_categories)
+    session = DummySession()
+    service = ProductsService(session)
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.categories_repository.get_by_id = AsyncMock(return_value=_category())
+    service.tags_repository.list_by_ids = AsyncMock(
+        return_value=[_tag(), _tag(tag_id=2, name="Footwear", slug="footwear")]
+    )
+
+    updated = await service.update_product(
+        1,
+        ProductUpdate(
+            category_id=1,
+            categories=[{"category_id": 1, "priority": 1}],
+            size_grid=ProductSizeGrid.SHOES_RU,
+            tag_ids=[1, 2],
+        ),
+    )
+
+    assert [tag.id for tag in updated.tags] == [1, 2]
+    assert updated.product_categories == original_categories
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_product_update_removes_tags() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+
+    updated = await service.update_product(1, ProductUpdate(tag_ids=[]))
+
+    assert updated.tags == []
+
+
+@pytest.mark.asyncio
+async def test_product_update_rejects_unknown_tag_id_as_bad_request() -> None:
+    product = _product()
+    session = DummySession()
+    service = ProductsService(session)
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+
+    with pytest.raises(AppError, match="Unknown tag_ids: 999") as error:
+        await service.update_product(1, ProductUpdate(tag_ids=[999]))
+
+    assert error.value.status_code == 400
+    assert session.committed is False
+
+
 def test_product_search_aliases_are_normalized() -> None:
     assert normalize_search_aliases(" футболки, футболка\nфутболки ") == "футболки\nфутболка"
 
@@ -643,11 +698,16 @@ def _category() -> Category:
     )
 
 
-def _tag() -> Tag:
+def _tag(
+    *,
+    tag_id: int = 1,
+    name: str = "Premium",
+    slug: str = "premium",
+) -> Tag:
     return Tag(
-        id=1,
-        name="Premium",
-        slug="premium",
+        id=tag_id,
+        name=name,
+        slug=slug,
         created_at=datetime(2026, 5, 27, tzinfo=UTC),
         updated_at=datetime(2026, 5, 27, tzinfo=UTC),
     )

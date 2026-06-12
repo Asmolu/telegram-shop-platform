@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 
 from scripts.backup_production import (
     BackupConfig,
+    BackupError,
     BackupObject,
     BackupRunResult,
+    YandexDiskClient,
+    YandexDiskError,
     build_notification_message,
     build_yandex_remote_path,
     create_backup_metadata,
     generate_backup_id,
     sanitize_text,
     select_retention_deletes,
+    upload_backup_archive,
 )
 
 
@@ -159,3 +166,103 @@ def test_sanitize_text_redacts_extra_secrets() -> None:
 
     assert "secret-value" not in message
     assert "OAuth abcdefghijklmnopqrstuvwxyz123456" not in message
+
+
+def test_yandex_upload_retry_uses_fresh_stream_and_exact_content_length(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path = tmp_path / "backup.tar.gz"
+    archive_bytes = b"complete-backup-archive"
+    archive_path.write_bytes(archive_bytes)
+    http_client = RecordingUploadClient(expected_size=len(archive_bytes))
+    client = YandexDiskClient(
+        client_id="client-id",
+        client_secret="client-secret",
+        refresh_token="refresh-token",
+        retries=2,
+        client=http_client,
+    )
+    client._access_token = "access-token"
+    monkeypatch.setattr("scripts.backup_production.time.sleep", lambda _: None)
+
+    metadata = client.upload_file(
+        archive_path,
+        "/TelegramShopPlatform/storage/backup.tar.gz",
+    )
+
+    assert metadata["size"] == len(archive_bytes)
+    assert http_client.upload_hrefs == 2
+    assert http_client.upload_bodies == [archive_bytes, archive_bytes]
+    assert http_client.declared_lengths == [len(archive_bytes), len(archive_bytes)]
+    assert http_client.upload_streams[0] is not http_client.upload_streams[1]
+
+
+def test_upload_backup_archive_reports_precise_sanitized_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "refresh-token-secret-value"
+    monkeypatch.setenv("YANDEX_REFRESH_TOKEN", secret)
+    archive_path = tmp_path / "backup.tar.gz"
+    archive_path.write_bytes(b"backup")
+
+    class FailingClient:
+        def upload_file(self, _: Path, __: str) -> dict[str, Any]:
+            raise YandexDiskError(f"upload failed with {secret}")
+
+    with pytest.raises(BackupError) as error:
+        upload_backup_archive(FailingClient(), archive_path, "/remote/backup.tar.gz")
+
+    assert error.value.step == "yandex_upload"
+    assert secret not in str(error.value)
+    assert "<redacted>" in str(error.value)
+
+
+class RecordingUploadClient:
+    def __init__(self, *, expected_size: int) -> None:
+        self.expected_size = expected_size
+        self.upload_hrefs = 0
+        self.upload_bodies: list[bytes] = []
+        self.declared_lengths: list[int] = []
+        self.upload_streams: list[Any] = []
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        data: Any = None,
+        content: Any = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        del data
+        request = httpx.Request(method, url)
+        if "/resources/upload?" in url:
+            self.upload_hrefs += 1
+            return httpx.Response(
+                200,
+                json={"href": f"https://upload.example/{self.upload_hrefs}"},
+                request=request,
+            )
+        if url.startswith("https://upload.example/"):
+            assert content is not None
+            self.upload_streams.append(content)
+            body = content.read()
+            self.upload_bodies.append(body)
+            self.declared_lengths.append(int((headers or {})["Content-Length"]))
+            if len(self.upload_bodies) == 1:
+                raise httpx.WriteError(
+                    "Too little data for declared Content-Length",
+                    request=request,
+                )
+            return httpx.Response(201, request=request)
+        if method == "GET" and "/resources?" in url:
+            return httpx.Response(
+                200,
+                json={"size": self.expected_size},
+                request=request,
+            )
+        if method == "PUT" and "/resources?" in url:
+            return httpx.Response(201, request=request)
+        raise AssertionError(f"Unexpected request: {method} {url}")

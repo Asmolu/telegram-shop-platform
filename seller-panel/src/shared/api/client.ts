@@ -146,11 +146,18 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(buildUrl(path, options.query), {
-    method: options.method ?? 'GET',
-    headers,
-    body,
-  });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, options.query), {
+      method: options.method ?? 'GET',
+      headers,
+      body,
+    });
+  } catch (error) {
+    throw new ApiError('Network request failed', 0, {
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const rawText = await response.text();
   const payload = rawText ? safeJson(rawText) : undefined;

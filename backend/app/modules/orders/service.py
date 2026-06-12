@@ -50,6 +50,7 @@ class InternalOrderEventPublisher:
         notifications_publisher: OrderEventPublisher | None = None,
         customer_notifications_publisher: OrderEventPublisher | None = None,
     ) -> None:
+        self.session = session
         self.notifications_publisher = notifications_publisher or NotificationsEventPublisher(
             session
         )
@@ -71,6 +72,18 @@ class InternalOrderEventPublisher:
                     name,
                     exc_info=True,
                 )
+                await self._rollback_failed_publisher(publisher_name, name)
+
+    async def _rollback_failed_publisher(self, publisher_name: str, event_name: str) -> None:
+        try:
+            await self.session.rollback()
+        except Exception:
+            logger.warning(
+                "Failed to reset session after %s post-commit order event %s",
+                publisher_name,
+                event_name,
+                exc_info=True,
+            )
 
 
 class OrdersService:
@@ -206,7 +219,7 @@ class OrdersService:
             raise
 
         for event_name, event_payload in post_commit_events:
-            await self.event_publisher.emit(event_name, event_payload)
+            await self._emit_post_commit_event(event_name, event_payload)
         for event_name, event_payload in post_commit_analytics:
             await self._track_event(
                 event_name,
@@ -270,6 +283,7 @@ class OrdersService:
         previous_status = order.status
         before_data = self.audit_service.snapshot(order, ("status",))
         order.status = payload.status
+        post_commit_events: list[tuple[str, dict[str, object]]] = []
         if previous_status != order.status:
             await self.audit_service.record_action(
                 actor_user_id=actor_user_id,
@@ -279,22 +293,48 @@ class OrdersService:
                 before_data=before_data,
                 after_data=self.audit_service.snapshot(order, ("status",)),
             )
+            post_commit_events.append(
+                (
+                    ORDER_STATUS_CHANGED,
+                    order_status_changed_payload(order, previous_status=previous_status),
+                )
+            )
+            if order.status == OrderStatus.SHIPPED:
+                post_commit_events.append((ORDER_SHIPPED, order_shipped_payload(order)))
+
+        response = OrderRead.model_validate(order)
         try:
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
             raise AppError("Order update failed", status.HTTP_409_CONFLICT) from exc
 
-        response = OrderRead.model_validate(order)
-        if previous_status != order.status:
-            await self.event_publisher.emit(
-                ORDER_STATUS_CHANGED,
-                order_status_changed_payload(order, previous_status=previous_status),
-            )
-            if order.status == OrderStatus.SHIPPED:
-                await self.event_publisher.emit(ORDER_SHIPPED, order_shipped_payload(order))
+        for event_name, event_payload in post_commit_events:
+            await self._emit_post_commit_event(event_name, event_payload)
 
         return response
+
+    async def _emit_post_commit_event(
+        self,
+        event_name: str,
+        event_payload: Mapping[str, object],
+    ) -> None:
+        try:
+            await self.event_publisher.emit(event_name, event_payload)
+        except Exception:
+            logger.warning(
+                "Failed to process post-commit order event %s",
+                event_name,
+                exc_info=True,
+            )
+            try:
+                await self.session.rollback()
+            except Exception:
+                logger.warning(
+                    "Failed to reset session after post-commit order event %s",
+                    event_name,
+                    exc_info=True,
+                )
 
     async def _track_event(
         self,
