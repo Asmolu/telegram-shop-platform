@@ -109,6 +109,26 @@ List remote Yandex Disk backups:
 python backend/scripts/backup_production.py list-remote
 ```
 
+## Operational Safety
+
+The mutating `run` command holds an exclusive Linux `flock` on
+`BACKUP_LOCAL_DIR/.backup_production.lock`. A systemd-triggered run and a manual
+run therefore cannot overlap. Lock contention exits non-zero before dump,
+archive, upload, or retention work starts. The lock file may remain on disk;
+the kernel lock is released automatically when the process exits.
+
+Yandex API and upload requests use bounded HTTP timeouts: 20 seconds to
+connect, 120 seconds to read, 300 seconds to write, and 20 seconds to acquire a
+connection from the pool. Uploads use at most three attempts with short
+backoff. Every attempt obtains a new signed upload URL, stats the closed local
+archive, opens a new stream at byte zero, and sends an exact `Content-Length`.
+
+After a timeout or transient transport failure, the script checks only the
+current backup's exact remote path. An exact remote size is accepted as a
+completed upload; a missing or mismatched object is overwritten on the next
+attempt. Failed uploads keep the verified local archive and skip both local
+and remote retention.
+
 ## Restore Verification
 
 Every normal backup is restore-verified before it is marked successful or

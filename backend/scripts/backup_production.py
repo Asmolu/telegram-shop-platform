@@ -10,14 +10,20 @@ import subprocess
 import sys
 import tarfile
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import urlencode
 
 import httpx
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - production runs on Linux
+    fcntl = None
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ROOT_DIR = BACKEND_DIR.parent
@@ -31,6 +37,7 @@ RESTORE_DB_RE = re.compile(r"^telegram_shop_restore_check_[a-z0-9_]+$")
 TELEGRAM_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")
 BEARER_TOKEN_RE = re.compile(r"\b(?:OAuth|Bearer)\s+[A-Za-z0-9._~+/=-]{12,}\b", re.I)
 LONG_SECRET_RE = re.compile(r"\b[A-Za-z0-9_-]{32,}\b")
+HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
 SECRET_KEY_HINTS = (
     "TOKEN",
     "SECRET",
@@ -44,6 +51,8 @@ SECRET_KEY_HINTS = (
 )
 TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 CHECKSUM_FILENAMES = ("postgres.dump", "uploads.tar.gz", "backup_metadata.json")
+BACKUP_LOCK_FILENAME = ".backup_production.lock"
+DEFAULT_YANDEX_TIMEOUT = httpx.Timeout(connect=20.0, read=120.0, write=300.0, pool=20.0)
 KEY_TABLES = (
     "alembic_version",
     "users",
@@ -76,7 +85,46 @@ class BackupError(Exception):
 
 
 class YandexDiskError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        timed_out: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.timed_out = timed_out
+
+
+class ExactSizeFileStream(httpx.SyncByteStream):
+    def __init__(self, file_obj: BinaryIO, expected_size: int) -> None:
+        self.file_obj = file_obj
+        self.expected_size = expected_size
+        self.bytes_sent = 0
+
+    def __iter__(self) -> Iterator[bytes]:
+        while self.bytes_sent < self.expected_size:
+            chunk = self.file_obj.read(min(1024 * 1024, self.expected_size - self.bytes_sent))
+            if not chunk:
+                raise YandexDiskError(
+                    "Local backup archive ended before its declared Content-Length."
+                )
+            self.bytes_sent += len(chunk)
+            yield chunk
+
+        if self.file_obj.read(1):
+            raise YandexDiskError(
+                "Local backup archive exceeded its declared Content-Length."
+            )
+
+    def verify_complete(self) -> None:
+        if self.bytes_sent != self.expected_size:
+            raise YandexDiskError(
+                "Yandex upload sent a different byte count than the declared Content-Length."
+            )
 
 
 @dataclass(frozen=True)
@@ -208,6 +256,7 @@ class BackupRunResult:
     restore_verification_status: str = "pending"
     remote_path: str | None = None
     archive_size: int = 0
+    local_archive_verified: bool = False
     local_retention_result: str = "not_run"
     remote_retention_result: str = "not_run"
 
@@ -222,16 +271,16 @@ class YandexDiskClient:
         client_id: str,
         client_secret: str,
         refresh_token: str,
-        timeout_seconds: float = 60.0,
+        timeout: httpx.Timeout | None = None,
         retries: int = 3,
         client: httpx.Client | None = None,
     ) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
-        self.timeout_seconds = timeout_seconds
+        self.timeout = timeout or DEFAULT_YANDEX_TIMEOUT
         self.retries = retries
-        self.client = client or httpx.Client(timeout=timeout_seconds, follow_redirects=True)
+        self.client = client or httpx.Client(timeout=self.timeout, follow_redirects=True)
         self._access_token: str | None = None
 
     def refresh_access_token(self) -> str:
@@ -259,29 +308,39 @@ class YandexDiskClient:
     def upload_file(self, local_path: Path, remote_path: str) -> dict[str, Any]:
         token = self._require_access_token()
         self.ensure_directory(remote_parent(remote_path))
-        local_size = local_path.stat().st_size
+        try:
+            expected_size = local_path.stat().st_size
+        except OSError as exc:
+            raise YandexDiskError("Local backup archive is unavailable for upload.") from exc
         last_error: YandexDiskError | None = None
+        attempts_made = 0
 
         for attempt in range(1, self.retries + 1):
+            attempts_made = attempt
             try:
+                local_size = local_path.stat().st_size
+                if local_size != expected_size:
+                    raise YandexDiskError("Local backup archive changed before upload.")
+
                 params = urlencode({"path": remote_path, "overwrite": "true"})
                 upload_info = self._request_json(
                     "GET",
                     f"{self.api_base_url}/resources/upload?{params}",
                     token=token,
                     expected_statuses={200},
+                    max_attempts=1,
                 )
                 href = str(upload_info.get("href") or "")
                 if not href:
                     raise YandexDiskError("Yandex Disk did not return an upload href.")
 
                 with local_path.open("rb") as file_obj:
+                    stream = ExactSizeFileStream(file_obj, local_size)
                     self._request(
                         "PUT",
                         href,
-                        content=file_obj,
+                        content=stream,
                         headers={
-                            "Authorization": f"OAuth {token}",
                             "Content-Length": str(local_size),
                             "Content-Type": "application/gzip",
                         },
@@ -289,28 +348,67 @@ class YandexDiskClient:
                         include_auth=False,
                         max_attempts=1,
                     )
+                    stream.verify_complete()
 
                 if local_path.stat().st_size != local_size:
                     raise YandexDiskError("Local backup archive changed during upload.")
 
-                metadata = self.get_metadata(remote_path)
+                metadata = self.get_metadata(remote_path, max_attempts=1)
                 remote_size = int(metadata.get("size") or 0)
                 if remote_size != local_size:
                     raise YandexDiskError(
                         "Yandex Disk size verification failed: "
-                        f"local={local_size} remote={remote_size}"
+                        f"local={local_size} remote={remote_size}",
+                        retryable=True,
                     )
                 return metadata
             except YandexDiskError as exc:
                 last_error = exc
-                if attempt < self.retries:
+                if exc.retryable:
+                    completed_metadata = self._completed_upload_metadata(
+                        remote_path,
+                        expected_size,
+                    )
+                    if completed_metadata is not None:
+                        return completed_metadata
+
+                detail = sanitize_text(str(exc), self._secret_values())
+                print(
+                    f"warning: Yandex upload attempt {attempt}/{self.retries} failed: {detail}",
+                    file=sys.stderr,
+                )
+                if exc.retryable and attempt < self.retries:
                     time.sleep(min(attempt * 2, 5))
                     continue
+                break
+            except OSError as exc:
+                last_error = YandexDiskError("Local backup archive could not be read.")
+                raise last_error from exc
 
-        detail = sanitize_text(str(last_error), configured_secret_values())
+        detail = sanitize_text(str(last_error), self._secret_values())
         raise YandexDiskError(
-            f"Yandex Disk upload failed after {self.retries} attempt(s): {detail}"
+            f"Yandex Disk upload failed after {attempts_made} attempt(s): {detail}",
+            timed_out=bool(last_error and last_error.timed_out),
         ) from last_error
+
+    def _completed_upload_metadata(
+        self,
+        remote_path: str,
+        expected_size: int,
+    ) -> dict[str, Any] | None:
+        try:
+            metadata = self.get_metadata_if_exists(remote_path)
+        except YandexDiskError:
+            return None
+        if metadata is None:
+            return None
+        try:
+            remote_size = int(metadata.get("size") or 0)
+        except (TypeError, ValueError):
+            return None
+        if remote_size == expected_size:
+            return metadata
+        return None
 
     def ensure_directory(self, remote_dir: str) -> None:
         token = self._require_access_token()
@@ -372,7 +470,12 @@ class YandexDiskClient:
             include_auth=False,
         )
 
-    def get_metadata(self, remote_path: str) -> dict[str, Any]:
+    def get_metadata(
+        self,
+        remote_path: str,
+        *,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any]:
         token = self._require_access_token()
         params = urlencode({"path": remote_path, "fields": "name,path,size,created,modified"})
         return self._request_json(
@@ -380,7 +483,16 @@ class YandexDiskClient:
             f"{self.api_base_url}/resources?{params}",
             token=token,
             expected_statuses={200},
+            max_attempts=max_attempts,
         )
+
+    def get_metadata_if_exists(self, remote_path: str) -> dict[str, Any] | None:
+        try:
+            return self.get_metadata(remote_path, max_attempts=1)
+        except YandexDiskError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
 
     def _require_access_token(self) -> str:
         return self._access_token or self.refresh_access_token()
@@ -392,6 +504,7 @@ class YandexDiskClient:
         *,
         token: str,
         expected_statuses: set[int],
+        max_attempts: int | None = None,
     ) -> dict[str, Any]:
         response = self._request(
             method,
@@ -399,10 +512,17 @@ class YandexDiskClient:
             headers={"Authorization": f"OAuth {token}"},
             expected_statuses=expected_statuses,
             include_auth=False,
+            max_attempts=max_attempts,
         )
         if not response.content:
             return {}
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise YandexDiskError(
+                "Yandex Disk returned an invalid JSON response.",
+                retryable=True,
+            ) from exc
 
     def _request(
         self,
@@ -431,23 +551,61 @@ class YandexDiskClient:
                     data=request_data,
                     content=content,
                     headers=request_headers if include_auth or request_headers else None,
+                    timeout=self.timeout,
                 )
-            except httpx.HTTPError as exc:
-                last_error = exc
+            except httpx.TimeoutException as exc:
+                last_error = YandexDiskError(
+                    f"Yandex Disk request timed out ({type(exc).__name__}).",
+                    retryable=True,
+                    timed_out=True,
+                )
                 if attempt < attempts:
                     time.sleep(min(attempt * 2, 5))
                     continue
-                raise YandexDiskError(sanitize_text(str(exc), configured_secret_values())) from exc
+                raise last_error from exc
+            except httpx.TransportError as exc:
+                detail = sanitize_text(str(exc), self._secret_values())
+                last_error = YandexDiskError(
+                    f"Yandex Disk transport error ({type(exc).__name__}): {detail}",
+                    retryable=True,
+                )
+                if attempt < attempts:
+                    time.sleep(min(attempt * 2, 5))
+                    continue
+                raise last_error from exc
 
             if response.status_code in expected_statuses:
                 return response
-            if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < attempts:
-                time.sleep(min(attempt * 2, 5))
-                continue
-            message = sanitize_text(response.text[:500], configured_secret_values())
-            raise YandexDiskError(f"Yandex Disk API returned {response.status_code}: {message}")
+            message = sanitize_text(response.text[:500], self._secret_values())
+            if response.status_code in TRANSIENT_HTTP_STATUSES:
+                last_error = YandexDiskError(
+                    f"Yandex Disk API returned transient HTTP {response.status_code}: {message}",
+                    retryable=True,
+                    status_code=response.status_code,
+                )
+                if attempt < attempts:
+                    time.sleep(min(attempt * 2, 5))
+                    continue
+                raise last_error
+            raise YandexDiskError(
+                f"Yandex Disk API returned HTTP {response.status_code}: {message}",
+                status_code=response.status_code,
+            )
 
-        raise YandexDiskError(sanitize_text(str(last_error), configured_secret_values()))
+        if isinstance(last_error, YandexDiskError):
+            raise last_error
+        raise YandexDiskError("Yandex Disk request failed without a response.")
+
+    def _secret_values(self) -> list[str]:
+        return [
+            value
+            for value in (
+                self.client_secret,
+                self.refresh_token,
+                self._access_token,
+            )
+            if value
+        ]
 
 
 class TelegramNotifier:
@@ -545,6 +703,38 @@ def remote_parent(remote_path: str) -> str:
     return parent or "/"
 
 
+@contextmanager
+def backup_run_lock(lock_path: Path) -> Iterator[None]:
+    if fcntl is None:
+        raise BackupError(
+            "single_instance_lock",
+            "Backup locking requires Linux fcntl support.",
+        )
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_file = lock_path.open("a+", encoding="utf-8")
+    except OSError as exc:
+        raise BackupError(
+            "single_instance_lock",
+            "Backup lock file could not be opened.",
+        ) from exc
+    try:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise BackupError(
+                "single_instance_lock",
+                "Another backup run is already in progress.",
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
+
+
 def configured_secret_values(env: dict[str, str] | None = None) -> list[str]:
     source = env or os.environ
     secrets: list[str] = []
@@ -563,8 +753,10 @@ def sanitize_text(text: str, extra_secrets: Iterable[str] = ()) -> str:
             sanitized = sanitized.replace(secret, "<redacted>")
     sanitized = TELEGRAM_TOKEN_RE.sub("<redacted>", sanitized)
     sanitized = BEARER_TOKEN_RE.sub("<redacted>", sanitized)
+    sanitized = HTTP_URL_RE.sub("<redacted-url>", sanitized)
     sanitized = LONG_SECRET_RE.sub(lambda match: _redact_long_secret(match.group(0)), sanitized)
-    sanitized = sanitized.replace(str(DEFAULT_ENV_FILE), "backend/.env.production")
+    sanitized = sanitized.replace(str(DEFAULT_ENV_FILE), "<redacted-env-file>")
+    sanitized = sanitized.replace(".env.production", "<redacted-env-file>")
     return sanitized[:3500]
 
 
@@ -1023,6 +1215,9 @@ def upload_backup_archive(
     except YandexDiskError as exc:
         message = sanitize_text(str(exc), configured_secret_values())
         raise BackupError("yandex_upload", message) from exc
+    except Exception as exc:
+        message = sanitize_text(str(exc), configured_secret_values())
+        raise BackupError("yandex_upload", message or "Yandex Disk upload failed.") from exc
 
 
 def build_notification_message(result: BackupRunResult) -> str:
@@ -1091,6 +1286,23 @@ def run_backup(args: argparse.Namespace) -> int:
         notify(config, result)
         return 1
 
+    try:
+        config.local_dir.mkdir(parents=True, exist_ok=True)
+        with backup_run_lock(config.local_dir / BACKUP_LOCK_FILENAME):
+            return _run_backup_locked(args, env, config)
+    except BackupError as exc:
+        if exc.step != "single_instance_lock":
+            raise
+        print(f"Backup cannot start: {exc}", file=sys.stderr)
+        print("failed_step: single_instance_lock", file=sys.stderr)
+        return 1
+
+
+def _run_backup_locked(
+    args: argparse.Namespace,
+    env: dict[str, str],
+    config: BackupConfig,
+) -> int:
     created_at = datetime.now(UTC).replace(microsecond=0)
     backup_id = generate_backup_id(created_at, config.environment)
     work_dir = config.local_dir / backup_id
@@ -1103,7 +1315,6 @@ def run_backup(args: argparse.Namespace) -> int:
     )
 
     try:
-        config.local_dir.mkdir(parents=True, exist_ok=True)
         if work_dir.exists() or archive_path.exists():
             raise BackupError("backup_id", f"Backup already exists: {backup_id}")
         work_dir.mkdir(parents=True)
@@ -1135,6 +1346,7 @@ def run_backup(args: argparse.Namespace) -> int:
         verify_checksums(work_dir)
         create_final_archive(work_dir, archive_path)
         result.archive_size = archive_path.stat().st_size
+        result.local_archive_verified = True
 
         if args.skip_remote_upload:
             result.status = "warning_local_verified_only"
@@ -1184,6 +1396,12 @@ def package_failed_backup(
     created_at: datetime,
     remote_path: str,
 ) -> None:
+    if result.local_archive_verified and archive_path.is_file():
+        try:
+            result.archive_size = archive_path.stat().st_size
+        except OSError:
+            pass
+        return
     if not work_dir.exists():
         return
     try:
@@ -1312,18 +1530,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command == "run":
-        return run_backup(args)
-    if args.command == "validate-config":
-        return run_validate_config(args)
-    if args.command == "verify-archive":
-        return run_verify_archive(args)
-    if args.command == "list-remote":
-        return run_list_remote(args)
-    parser.error(f"Unknown command: {args.command}")
-    return 2
+    try:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        if args.command == "run":
+            return run_backup(args)
+        if args.command == "validate-config":
+            return run_validate_config(args)
+        if args.command == "verify-archive":
+            return run_verify_archive(args)
+        if args.command == "list-remote":
+            return run_list_remote(args)
+        parser.error(f"Unknown command: {args.command}")
+        return 2
+    except KeyboardInterrupt:
+        print("Backup interrupted by operator", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":
