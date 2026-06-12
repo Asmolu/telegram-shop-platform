@@ -1,10 +1,23 @@
-export function formatPrice(value: string | number | null | undefined) {
+const priceFormatter = new Intl.NumberFormat('ru-RU', {
+  style: 'currency',
+  currency: 'RUB',
+  maximumFractionDigits: 0,
+});
+
+function normalizePrice(value: string | number | null | undefined) {
   const amount = Number(value ?? 0);
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: 'RUB',
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(amount) ? amount : 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+export function formatPrice(value: string | number | null | undefined) {
+  return priceFormatter.format(normalizePrice(value));
+}
+
+export function formatCompactPrice(value: string | number | null | undefined) {
+  return priceFormatter
+    .formatToParts(normalizePrice(value))
+    .map((part) => (part.type === 'group' ? '\u202f' : part.value))
+    .join('');
 }
 
 export function getDisplayOldPrice(price: string | number | null | undefined, oldPrice?: string | number | null, compareAtPrice?: string | number | null) {

@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
-import { formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../utils/format';
+import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge } from '../utils/images';
 import { displaySize, sortVariants } from '../utils/sizes';
 import { ProductImageCarousel } from './ProductImageCarousel';
@@ -58,8 +58,8 @@ export function ProductCard({
       </button>
       <Link className="product-card__body" to={`/product/${product.id}`}>
         <span className="product-card__price-row">
-          <strong className="product-card__price">{formatPrice(product.base_price)}</strong>
-          {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
+          <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
+          {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
         </span>
         <span className="product-card__title">{product.name}</span>
         <span className="product-card__meta">

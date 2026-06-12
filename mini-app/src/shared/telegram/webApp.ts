@@ -27,6 +27,7 @@ export type TelegramWebApp = {
   offEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
   ready?: () => void;
   expand?: () => void;
+  disableVerticalSwipes?: () => void;
   close?: () => void;
   openTelegramLink?: (url: string) => void;
 };
@@ -105,6 +106,9 @@ export function initTelegramApp() {
   try {
     webApp?.ready?.();
     webApp?.expand?.();
+    if (typeof webApp?.disableVerticalSwipes === 'function') {
+      webApp.disableVerticalSwipes();
+    }
   } catch {
     // Telegram WebApp methods can be unavailable in ordinary browsers.
   }
