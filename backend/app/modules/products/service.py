@@ -19,6 +19,8 @@ from app.db.models import (
     Product,
     ProductCategory,
     ProductImage,
+    ProductImageBadgeType,
+    ProductRelatedProduct,
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
@@ -32,6 +34,7 @@ from app.modules.products.repository import ProductsRepository, ProductVariantsR
 from app.modules.products.schemas import (
     ProductCategoryInput,
     ProductCreate,
+    ProductDetailRead,
     ProductImageCreate,
     ProductList,
     ProductRead,
@@ -60,6 +63,8 @@ PRODUCT_AUDIT_FIELDS = (
     "search_priority",
     "search_aliases",
     "size_grid",
+    "image_badge_type",
+    "image_badge_text",
     "status",
     "category_id",
 )
@@ -185,10 +190,10 @@ class ProductsService:
         self,
         product_id: int,
         user_id: int | None = None,
-    ) -> Product | ProductRead:
+    ) -> ProductDetailRead:
         cache_key = public_product_detail_key(product_id)
         if self.cache is not None:
-            cached = await self.cache.get_model(cache_key, ProductRead)
+            cached = await self.cache.get_model(cache_key, ProductDetailRead)
             if cached is not None:
                 await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
                 return cached
@@ -196,7 +201,19 @@ class ProductsService:
         product = await self.repository.get_active_by_id(product_id)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
-        result = ProductRead.model_validate(product)
+        active_related_products = [
+            related_product
+            for related_product in product.related_products
+            if related_product.status == ProductStatus.ACTIVE
+        ]
+        result = ProductDetailRead.model_validate(product).model_copy(
+            update={
+                "related_product_ids": [item.id for item in active_related_products],
+                "related_products": [
+                    ProductRead.model_validate(item) for item in active_related_products
+                ],
+            }
+        )
         if self.cache is not None:
             await self.cache.set_model(
                 cache_key,
@@ -242,13 +259,18 @@ class ProductsService:
     ) -> Product:
         """Validate and stage a product graph without committing the transaction."""
         tags = await self._resolve_tags(payload.tag_ids)
+        related_product_ids = await self._resolve_related_product_ids(
+            payload.related_product_ids,
+        )
         category_assignments = await self._resolve_category_assignments(
             category_id=payload.category_id,
             categories=payload.categories,
         )
         self._validate_images(payload.images)
 
-        product_data = payload.model_dump(exclude={"tag_ids", "images", "categories"})
+        product_data = payload.model_dump(
+            exclude={"tag_ids", "images", "categories", "related_product_ids"}
+        )
         product_data["category_id"] = self._primary_category_id(category_assignments)
         product = Product(
             **product_data,
@@ -270,6 +292,12 @@ class ProductsService:
                 "Product slug or variant SKU already exists",
                 status.HTTP_409_CONFLICT,
             ) from exc
+
+        self._validate_related_product_self_reference(product.id, related_product_ids)
+        product.related_product_links.extend(
+            ProductRelatedProduct(related_product_id=related_product_id, position=position)
+            for position, related_product_id in enumerate(related_product_ids)
+        )
 
         combinations: set[tuple[str, str | None]] = set()
         for variant_payload in variants:
@@ -301,7 +329,10 @@ class ProductsService:
     ) -> Product:
         product = await self.get_product(product_id)
         before_data = self.audit_service.snapshot(product, PRODUCT_AUDIT_FIELDS)
-        data = payload.model_dump(exclude_unset=True, exclude={"tag_ids", "images", "categories"})
+        data = payload.model_dump(
+            exclude_unset=True,
+            exclude={"tag_ids", "images", "categories", "related_product_ids"},
+        )
         candidate_base_price = data.get("base_price", product.base_price)
         candidate_old_price = data.get("old_price", product.old_price)
         self._validate_price_pair(candidate_base_price, candidate_old_price)
@@ -327,6 +358,16 @@ class ProductsService:
                     status.HTTP_400_BAD_REQUEST,
                 )
 
+        candidate_badge_type = data.get("image_badge_type", product.image_badge_type)
+        candidate_badge_text = data.get("image_badge_text", product.image_badge_text)
+        if candidate_badge_type == ProductImageBadgeType.CUSTOM and not candidate_badge_text:
+            raise AppError(
+                "image_badge_text is required for a custom badge",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if candidate_badge_type != ProductImageBadgeType.CUSTOM:
+            data["image_badge_text"] = None
+
         categories_were_provided = "categories" in payload.model_fields_set
         category_id_was_provided = "category_id" in data
         resolved_tags = None
@@ -343,6 +384,16 @@ class ProductsService:
 
         if resolved_tags is not None:
             self._sync_tags(product, resolved_tags)
+
+        if (
+            "related_product_ids" in payload.model_fields_set
+            and payload.related_product_ids is not None
+        ):
+            related_product_ids = await self._resolve_related_product_ids(
+                payload.related_product_ids,
+                product_id=product.id,
+            )
+            await self._sync_related_products(product, related_product_ids)
 
         if "images" in payload.model_fields_set and payload.images is not None:
             self._validate_images(payload.images)
@@ -575,6 +626,44 @@ class ProductsService:
             raise AppError(f"Unknown tag_ids: {joined}", status.HTTP_400_BAD_REQUEST)
         return tags
 
+    async def _resolve_related_product_ids(
+        self,
+        related_product_ids: list[int],
+        *,
+        product_id: int | None = None,
+    ) -> list[int]:
+        if not related_product_ids:
+            return []
+        unique_ids = list(dict.fromkeys(related_product_ids))
+        if len(unique_ids) != len(related_product_ids):
+            raise AppError(
+                "Duplicate related product IDs are not allowed",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if product_id is not None:
+            self._validate_related_product_self_reference(product_id, unique_ids)
+
+        found_ids = await self.repository.list_existing_ids(unique_ids)
+        if len(found_ids) != len(unique_ids):
+            missing_ids = sorted(set(unique_ids) - found_ids)
+            joined = ", ".join(str(related_id) for related_id in missing_ids)
+            raise AppError(
+                f"Unknown related product IDs: {joined}",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        return unique_ids
+
+    def _validate_related_product_self_reference(
+        self,
+        product_id: int,
+        related_product_ids: list[int],
+    ) -> None:
+        if product_id in related_product_ids:
+            raise AppError(
+                "A product cannot be related to itself",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
     async def _sync_category_assignments(
         self,
         product: Product,
@@ -604,6 +693,20 @@ class ProductsService:
         if {tag.id for tag in product.tags} == {tag.id for tag in tags}:
             return
         product.tags = tags
+
+    async def _sync_related_products(
+        self,
+        product: Product,
+        related_product_ids: list[int],
+    ) -> None:
+        if product.related_product_ids == related_product_ids:
+            return
+        product.related_product_links.clear()
+        await self.session.flush()
+        product.related_product_links.extend(
+            ProductRelatedProduct(related_product_id=related_product_id, position=position)
+            for position, related_product_id in enumerate(related_product_ids)
+        )
 
     def _validate_images(self, images: list[ProductImageCreate]) -> None:
         primary_count = sum(1 for image in images if image.is_primary)

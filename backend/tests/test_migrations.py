@@ -20,6 +20,8 @@ from app.db.models import (
     PendingSellerRegistration,
     Product,
     ProductCategory,
+    ProductImageBadgeType,
+    ProductRelatedProduct,
     ProductSizeGrid,
     ProductVariant,
     SellerRegistrationStatus,
@@ -545,3 +547,40 @@ def test_product_size_grid_migration_and_model_contract() -> None:
     assert order_item_table.c.variant_size_grid.nullable is False
     assert order_item_table.c.variant_size_grid.default.arg == ProductSizeGrid.CLOTHING_ALPHA
     assert "ix_product_variants_size_active_product" in variant_index_names
+
+
+def test_related_products_and_image_badges_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260612_0023_add_related_products_and_image_badges.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "add_related_products_and_image_badges",
+        migration_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+    related_table = ProductRelatedProduct.__table__
+    constraint_names = {constraint.name for constraint in related_table.constraints}
+    index_names = {index.name for index in related_table.indexes}
+
+    assert migration.PRODUCT_IMAGE_BADGE_TYPE_ENUM.enums == [
+        "none",
+        "new",
+        "sale",
+        "hit",
+        "exclusive",
+        "custom",
+    ]
+    assert "product_related_products" in content
+    assert Product.__table__.c.image_badge_type.default.arg == ProductImageBadgeType.NONE
+    assert Product.__table__.c.image_badge_text.type.length == 20
+    assert "ck_product_related_products_not_self" in constraint_names
+    assert "uq_product_related_products_pair" in constraint_names
+    assert "uq_product_related_products_position" in constraint_names
+    assert "ix_product_related_products_product_position" in index_names

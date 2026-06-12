@@ -407,12 +407,15 @@ Seller Panel становится рабочим интерфейсом упра
 
 - Catalog UX improvements.
 - Product page UX.
+- Horizontal size selector and manually managed related-products carousel.
+- Configurable product image badges.
 - Cart UX.
 - Checkout flow.
 - Promo code UI.
 - Favorites UI.
 - Reviews UI.
 - Profile/orders page.
+- Shared gradient headers for feed, cart, and profile plus aligned five-item footer icons.
 - Telegram theme adaptation.
 
 ## Frontend modules

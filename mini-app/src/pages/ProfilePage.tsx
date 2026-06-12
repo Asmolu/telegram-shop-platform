@@ -107,8 +107,8 @@ export function ProfilePage() {
   }
 
   return (
-    <div className="page profile-page">
-      <TopBar title="Личный кабинет" />
+    <div className="page profile-page page--gradient-header">
+      <TopBar title="Личный кабинет" variant="marketplace" />
 
       {!isAuthenticated && status !== 'development' ? (
         <EmptyState

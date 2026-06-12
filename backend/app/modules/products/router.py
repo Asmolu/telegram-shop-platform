@@ -11,8 +11,8 @@ from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.audit.service import AuditService
 from app.modules.products.schemas import (
     ProductCreate,
+    ProductDetailRead,
     ProductList,
-    ProductRead,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -89,7 +89,7 @@ async def list_products(
     )
 
 
-@router.get("/admin/{product_id}", response_model=ProductRead)
+@router.get("/admin/{product_id}", response_model=ProductDetailRead)
 async def get_product(
     product_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
@@ -158,7 +158,7 @@ async def delete_product_variant(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/{product_id}/status", response_model=ProductRead)
+@router.patch("/{product_id}/status", response_model=ProductDetailRead)
 async def update_product_status(
     product_id: int,
     payload: ProductStatusUpdate,
@@ -172,7 +172,7 @@ async def update_product_status(
     )
 
 
-@router.patch("/{product_id}/archive", response_model=ProductRead)
+@router.patch("/{product_id}/archive", response_model=ProductDetailRead)
 async def archive_product(
     product_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
@@ -181,7 +181,7 @@ async def archive_product(
     return await service.archive_product(product_id, actor_user_id=current_user.id)
 
 
-@router.get("/{product_id}", response_model=ProductRead)
+@router.get("/{product_id}", response_model=ProductDetailRead)
 async def get_public_product(
     product_id: int,
     service: Annotated[ProductsService, Depends(get_products_service)],
@@ -193,7 +193,7 @@ async def get_public_product(
     )
 
 
-@router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProductDetailRead, status_code=status.HTTP_201_CREATED)
 async def create_product(
     payload: ProductCreate,
     service: Annotated[ProductsService, Depends(get_products_service)],
@@ -202,7 +202,7 @@ async def create_product(
     return await service.create_product(payload, actor_user_id=current_user.id)
 
 
-@router.patch("/{product_id}", response_model=ProductRead)
+@router.patch("/{product_id}", response_model=ProductDetailRead)
 async def update_product(
     product_id: int,
     payload: ProductUpdate,

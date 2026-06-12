@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
-from app.db.models import ProductSizeGrid, ProductStatus
+from app.db.models import ProductImageBadgeType, ProductSizeGrid, ProductStatus
 from app.modules.categories.schemas import CategoryRead
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.search import (
@@ -117,6 +117,25 @@ def _validate_category_assignments(
     return categories
 
 
+def _validate_related_product_ids(product_ids: list[int] | None) -> list[int] | None:
+    if product_ids is None:
+        return None
+    if len(product_ids) != len(set(product_ids)):
+        raise ValueError("duplicate related product IDs are not allowed")
+    return product_ids
+
+
+def _normalize_badge_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if "<" in normalized or ">" in normalized:
+        raise ValueError("image_badge_text must not contain HTML")
+    return normalized
+
+
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -131,6 +150,8 @@ class ProductBase(BaseModel):
     )
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = Field(default=None, max_length=20)
     status: ProductStatus = ProductStatus.DRAFT
     category_id: int | None = None
 
@@ -144,10 +165,27 @@ class ProductBase(BaseModel):
     def default_search_priority(cls, value: int | None) -> int:
         return SEARCH_PRIORITY_DEFAULT if value is None else value
 
+    @field_validator("image_badge_type", mode="before")
+    @classmethod
+    def default_image_badge_type(
+        cls,
+        value: ProductImageBadgeType | None,
+    ) -> ProductImageBadgeType:
+        return ProductImageBadgeType.NONE if value is None else value
+
+    @field_validator("image_badge_text")
+    @classmethod
+    def normalize_badge_text(cls, value: str | None) -> str | None:
+        return _normalize_badge_text(value)
+
     @model_validator(mode="after")
     def validate_old_price(self) -> "ProductBase":
         if self.old_price is not None and self.old_price <= self.base_price:
             raise ValueError("old_price must be greater than base_price")
+        if self.image_badge_type == ProductImageBadgeType.CUSTOM and not self.image_badge_text:
+            raise ValueError("image_badge_text is required for a custom badge")
+        if self.image_badge_type != ProductImageBadgeType.CUSTOM:
+            self.image_badge_text = None
         return self
 
 
@@ -155,6 +193,7 @@ class ProductCreate(ProductBase):
     categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] = Field(default_factory=list)
     images: list[ProductImageCreate] = Field(default_factory=list)
+    related_product_ids: list[int] = Field(default_factory=list)
 
     @field_validator("categories")
     @classmethod
@@ -163,6 +202,11 @@ class ProductCreate(ProductBase):
         value: list[ProductCategoryInput] | None,
     ) -> list[ProductCategoryInput] | None:
         return _validate_category_assignments(value)
+
+    @field_validator("related_product_ids")
+    @classmethod
+    def validate_related_product_ids(cls, value: list[int]) -> list[int]:
+        return _validate_related_product_ids(value) or []
 
 
 class ProductUpdate(BaseModel):
@@ -179,16 +223,24 @@ class ProductUpdate(BaseModel):
     search_priority: int | None = Field(default=None, ge=1, le=3)
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     size_grid: ProductSizeGrid | None = None
+    image_badge_type: ProductImageBadgeType | None = None
+    image_badge_text: str | None = Field(default=None, max_length=20)
     status: ProductStatus | None = None
     category_id: int | None = None
     categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] | None = None
     images: list[ProductImageCreate] | None = None
+    related_product_ids: list[int] | None = None
 
     @field_validator("search_aliases")
     @classmethod
     def normalize_aliases(cls, value: str | None) -> str | None:
         return normalize_search_aliases(value)
+
+    @field_validator("image_badge_text")
+    @classmethod
+    def normalize_badge_text(cls, value: str | None) -> str | None:
+        return _normalize_badge_text(value)
 
     @field_validator("categories")
     @classmethod
@@ -198,6 +250,11 @@ class ProductUpdate(BaseModel):
     ) -> list[ProductCategoryInput] | None:
         return _validate_category_assignments(value)
 
+    @field_validator("related_product_ids")
+    @classmethod
+    def validate_related_product_ids(cls, value: list[int] | None) -> list[int] | None:
+        return _validate_related_product_ids(value)
+
     @model_validator(mode="after")
     def validate_old_price_when_complete(self) -> "ProductUpdate":
         if (
@@ -206,6 +263,12 @@ class ProductUpdate(BaseModel):
             and self.old_price <= self.base_price
         ):
             raise ValueError("old_price must be greater than base_price")
+        if (
+            self.image_badge_type == ProductImageBadgeType.CUSTOM
+            and "image_badge_text" in self.model_fields_set
+            and not self.image_badge_text
+        ):
+            raise ValueError("image_badge_text is required for a custom badge")
         return self
 
 
@@ -225,6 +288,11 @@ class ProductRead(ProductBase):
     is_available: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class ProductDetailRead(ProductRead):
+    related_product_ids: list[int] = Field(default_factory=list)
+    related_products: list[ProductRead] = Field(default_factory=list)
 
 
 class ProductList(BaseModel):

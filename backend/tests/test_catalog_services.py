@@ -12,6 +12,8 @@ from app.db.models import (
     Category,
     Product,
     ProductCategory,
+    ProductImageBadgeType,
+    ProductRelatedProduct,
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
@@ -234,6 +236,34 @@ async def test_public_product_detail_tracks_product_view() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_product_detail_returns_only_active_related_products() -> None:
+    active_related = _product(product_id=2, status=ProductStatus.ACTIVE)
+    inactive_related = _product(product_id=3, status=ProductStatus.DRAFT)
+    product = _product(status=ProductStatus.ACTIVE)
+    product.related_product_links = [
+        ProductRelatedProduct(
+            product_id=product.id,
+            related_product_id=active_related.id,
+            position=0,
+            related_product=active_related,
+        ),
+        ProductRelatedProduct(
+            product_id=product.id,
+            related_product_id=inactive_related.id,
+            position=1,
+            related_product=inactive_related,
+        ),
+    ]
+    service = ProductsService(DummySession())
+    service.repository.get_active_by_id = AsyncMock(return_value=product)
+
+    result = await service.get_public_product(product.id)
+
+    assert result.related_product_ids == [2]
+    assert [item.id for item in result.related_products] == [2]
+
+
+@pytest.mark.asyncio
 async def test_product_service_rejects_multiple_primary_images() -> None:
     service = ProductsService(DummySession())
     service.categories_repository.get_by_id = AsyncMock(return_value=None)
@@ -430,6 +460,134 @@ def test_product_create_defaults_search_priority_to_medium() -> None:
 
     assert product.search_priority == SEARCH_PRIORITY_DEFAULT == 2
     assert product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
+    assert product.image_badge_type == ProductImageBadgeType.NONE
+    assert product.image_badge_text is None
+
+
+def test_product_create_rejects_duplicate_related_product_ids() -> None:
+    with pytest.raises(ValidationError, match="duplicate related product"):
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie",
+            base_price=Decimal("59.90"),
+            related_product_ids=[2, 2],
+        )
+
+
+def test_product_custom_badge_requires_safe_bounded_text() -> None:
+    with pytest.raises(ValidationError, match="required for a custom badge"):
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie",
+            base_price=Decimal("59.90"),
+            image_badge_type=ProductImageBadgeType.CUSTOM,
+        )
+
+    with pytest.raises(ValidationError, match="must not contain HTML"):
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie-html",
+            base_price=Decimal("59.90"),
+            image_badge_type=ProductImageBadgeType.CUSTOM,
+            image_badge_text="<b>HOT</b>",
+        )
+
+
+@pytest.mark.asyncio
+async def test_product_update_rejects_unknown_related_product_ids() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.repository.list_existing_ids = AsyncMock(return_value={2})
+
+    with pytest.raises(AppError, match="Unknown related product IDs: 999") as error:
+        await service.update_product(
+            product.id,
+            ProductUpdate(related_product_ids=[2, 999]),
+        )
+
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_product_create_rejects_unknown_related_product_ids() -> None:
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_existing_ids = AsyncMock(return_value=set())
+
+    with pytest.raises(AppError, match="Unknown related product IDs: 999") as error:
+        await service.create_product(
+            ProductCreate(
+                name="Hoodie",
+                slug="hoodie-related",
+                base_price=Decimal("59.90"),
+                related_product_ids=[999],
+            )
+        )
+
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_product_create_persists_related_product_order() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_existing_ids = AsyncMock(return_value={2, 3})
+
+    def capture_product(product: Product) -> None:
+        product.id = 10
+        captured["product"] = product
+
+    service.repository.add = capture_product
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie-related",
+            base_price=Decimal("59.90"),
+            related_product_ids=[3, 2],
+        )
+    )
+
+    assert created.related_product_ids == [3, 2]
+
+
+@pytest.mark.asyncio
+async def test_product_update_rejects_self_related_product() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    with pytest.raises(AppError, match="cannot be related to itself") as error:
+        await service.update_product(
+            product.id,
+            ProductUpdate(related_product_ids=[product.id]),
+        )
+
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_product_update_persists_related_product_order_and_badge() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.repository.list_existing_ids = AsyncMock(return_value={2, 3})
+
+    updated = await service.update_product(
+        product.id,
+        ProductUpdate(
+            related_product_ids=[3, 2],
+            image_badge_type=ProductImageBadgeType.CUSTOM,
+            image_badge_text=" Только сегодня ",
+        ),
+    )
+
+    assert updated.related_product_ids == [3, 2]
+    assert updated.image_badge_type == ProductImageBadgeType.CUSTOM
+    assert updated.image_badge_text == "Только сегодня"
 
 
 def test_product_create_rejects_old_price_not_above_base_price() -> None:
@@ -714,13 +872,14 @@ def _tag(
 
 
 def _product(
+    product_id: int = 1,
     status: ProductStatus = ProductStatus.DRAFT,
     variants: list[ProductVariant] | None = None,
     old_price: Decimal | None = None,
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA,
 ) -> Product:
     return Product(
-        id=1,
+        id=product_id,
         name="Hoodie",
         slug="hoodie",
         description="Warm",
@@ -729,6 +888,8 @@ def _product(
         search_priority=SEARCH_PRIORITY_DEFAULT,
         search_aliases=None,
         size_grid=size_grid,
+        image_badge_type=ProductImageBadgeType.NONE,
+        image_badge_text=None,
         status=status,
         category_id=1,
         category=_category(),

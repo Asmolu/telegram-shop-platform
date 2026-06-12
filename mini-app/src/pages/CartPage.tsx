@@ -186,16 +186,16 @@ export function CartPage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="page">
-        <TopBar title="Покупки" />
+      <div className="page page--gradient-header">
+        <TopBar title="Покупки" variant="marketplace" />
         <UnauthorizedBlock onAuth={() => navigate(getAuthPath(currentPath))} />
       </div>
     );
   }
 
   return (
-    <div className="page">
-      <TopBar title="Покупки" />
+    <div className="page page--gradient-header">
+      <TopBar title="Покупки" variant="marketplace" />
       <div className="tab-row cart-tabs">
         {tabs.map(([value, label]) => (
           <button

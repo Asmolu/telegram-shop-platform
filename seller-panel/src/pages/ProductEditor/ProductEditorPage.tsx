@@ -3,6 +3,7 @@ import { api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
   Product,
+  ProductImageBadgeType,
   ProductSizeGrid,
   ProductStatus,
   ProductVariantPayload,
@@ -30,6 +31,8 @@ interface ProductFormState {
   searchPriority: string;
   searchAliases: string;
   sizeGrid: ProductSizeGrid;
+  imageBadgeType: ProductImageBadgeType;
+  imageBadgeText: string;
   status: ProductStatus;
   tagIds: number[];
 }
@@ -61,6 +64,8 @@ const initialForm: ProductFormState = {
   searchPriority: '2',
   searchAliases: '',
   sizeGrid: 'clothing_alpha',
+  imageBadgeType: 'none',
+  imageBadgeText: '',
   status: 'DRAFT',
   tagIds: [],
 };
@@ -101,6 +106,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [variants, setVariants] = useState<VariantRow[]>([createVariantRow()]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const [relatedProductIds, setRelatedProductIds] = useState<string[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [pendingCropFiles, setPendingCropFiles] = useState<File[]>([]);
@@ -118,11 +125,13 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     Promise.all([
       api.categories.list(),
       api.tags.list(),
+      api.products.listAdmin({ limit: 200, offset: 0 }),
       mode === 'edit' && productId ? api.products.getAdmin(productId) : Promise.resolve(null),
     ])
-      .then(([categoryList, tagList, loadedProduct]) => {
+      .then(([categoryList, tagList, productList, loadedProduct]) => {
         setCategories(categoryList);
         setTags(tagList);
+        setAvailableProducts(productList.items);
 
         if (loadedProduct) {
           setProduct(loadedProduct);
@@ -135,10 +144,15 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             searchPriority: String(loadedProduct.search_priority ?? 2),
             searchAliases: loadedProduct.search_aliases ?? '',
             sizeGrid: loadedProduct.size_grid ?? 'clothing_alpha',
+            imageBadgeType: loadedProduct.image_badge_type ?? 'none',
+            imageBadgeText: loadedProduct.image_badge_text ?? '',
             status: loadedProduct.status,
             tagIds: loadedProduct.tags.map((tag) => tag.id),
           });
           setCategoryAssignments(getCategoryRowsFromProduct(loadedProduct));
+          setRelatedProductIds(
+            (loadedProduct.related_product_ids ?? []).map((relatedId) => String(relatedId)),
+          );
           setVariants(
             loadedProduct.variants.length > 0
               ? loadedProduct.variants.map((variant) => ({
@@ -155,6 +169,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           );
         } else {
           setCategoryAssignments([createCategoryAssignmentRow()]);
+          setRelatedProductIds([]);
         }
       })
       .catch(setError)
@@ -255,6 +270,30 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     });
   }
 
+  function addRelatedProduct() {
+    setRelatedProductIds((current) => [...current, '']);
+  }
+
+  function updateRelatedProduct(index: number, value: string) {
+    setRelatedProductIds((current) =>
+      current.map((relatedId, currentIndex) => currentIndex === index ? value : relatedId),
+    );
+  }
+
+  function removeRelatedProduct(index: number) {
+    setRelatedProductIds((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function moveRelatedProduct(index: number, direction: -1 | 1) {
+    setRelatedProductIds((current) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  }
+
   function updateVariant(localId: number, patch: Partial<VariantRow>) {
     setVariants((current) =>
       current.map((variant) => (variant.localId === localId ? { ...variant, ...patch } : variant)),
@@ -312,6 +351,30 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       return;
     }
 
+    const normalizedRelatedProductIds = relatedProductIds
+      .map((relatedId) => Number(relatedId))
+      .filter((relatedId) => Number.isInteger(relatedId) && relatedId > 0);
+    if (normalizedRelatedProductIds.length !== relatedProductIds.filter(Boolean).length) {
+      setFormError(t('productEditor.relatedInvalid'));
+      setSaving(false);
+      return;
+    }
+    if (hasDuplicateValues(normalizedRelatedProductIds)) {
+      setFormError(t('productEditor.relatedDuplicate'));
+      setSaving(false);
+      return;
+    }
+    if (productId && normalizedRelatedProductIds.includes(productId)) {
+      setFormError(t('productEditor.relatedSelf'));
+      setSaving(false);
+      return;
+    }
+    if (form.imageBadgeType === 'custom' && !form.imageBadgeText.trim()) {
+      setFormError(t('productEditor.badgeCustomRequired'));
+      setSaving(false);
+      return;
+    }
+
     const variantKeys = variants
       .filter((variant) => !variant.remove && variant.size.trim())
       .map((variant) => `${variant.size.trim()}::${variant.color.trim().toLocaleLowerCase()}`);
@@ -335,10 +398,13 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         search_priority: parseSearchPriority(form.searchPriority),
         search_aliases: normalizeSearchAliases(form.searchAliases),
         size_grid: form.sizeGrid,
+        image_badge_type: form.imageBadgeType,
+        image_badge_text: form.imageBadgeType === 'custom' ? form.imageBadgeText.trim() : null,
         status: form.status,
         category_id: primaryCategoryId,
         categories: normalizedCategories,
         tag_ids: form.tagIds,
+        related_product_ids: normalizedRelatedProductIds,
       };
 
       const savedProduct =
@@ -645,7 +711,116 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       </section>
 
       <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>{t('productEditor.relatedProducts')}</h2>
+            <p className="muted-text">{t('productEditor.relatedProductsHint')}</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={addRelatedProduct}>
+            {t('productEditor.addRelatedProduct')}
+          </button>
+        </div>
+        <datalist id="related-product-options">
+          {availableProducts
+            .filter((candidate) => candidate.id !== productId)
+            .map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+            ))}
+        </datalist>
+        {relatedProductIds.length > 0 ? (
+          <div className="related-product-list">
+            {relatedProductIds.map((relatedId, index) => {
+              const selectedProduct = availableProducts.find(
+                (candidate) => candidate.id === Number(relatedId),
+              );
+              return (
+                <div className="related-product-row" key={`${index}-${relatedId}`}>
+                  <span className="related-product-position">{index + 1}</span>
+                  <label className="field">
+                    <span>{t('productEditor.relatedProductId')}</span>
+                    <input
+                      list="related-product-options"
+                      min="1"
+                      type="number"
+                      value={relatedId}
+                      onChange={(event) => updateRelatedProduct(index, event.target.value)}
+                    />
+                    <small className="field-hint">
+                      {selectedProduct?.name ?? t('productEditor.relatedProductUnknown')}
+                    </small>
+                  </label>
+                  <div className="related-product-actions">
+                    <button
+                      className="button button-secondary button-compact"
+                      disabled={index === 0}
+                      type="button"
+                      onClick={() => moveRelatedProduct(index, -1)}
+                      aria-label={t('productEditor.moveRelatedUp')}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      className="button button-secondary button-compact"
+                      disabled={index === relatedProductIds.length - 1}
+                      type="button"
+                      onClick={() => moveRelatedProduct(index, 1)}
+                      aria-label={t('productEditor.moveRelatedDown')}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      className="text-button danger-text"
+                      type="button"
+                      onClick={() => removeRelatedProduct(index)}
+                    >
+                      {t('common.remove')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="muted-text">{t('productEditor.noRelatedProducts')}</p>
+        )}
+      </section>
+
+      <section className="panel">
         <h2>{t('productEditor.images')}</h2>
+        <div className="badge-editor">
+          <label className="field">
+            <span>{t('productEditor.imageBadge')}</span>
+            <select
+              value={form.imageBadgeType}
+              onChange={(event) =>
+                updateField('imageBadgeType', event.target.value as ProductImageBadgeType)
+              }
+            >
+              <option value="none">{t('productEditor.badgeNone')}</option>
+              <option value="new">NEW</option>
+              <option value="sale">{t('productEditor.badgeSale')}</option>
+              <option value="hit">{t('productEditor.badgeHit')}</option>
+              <option value="exclusive">{t('productEditor.badgeExclusive')}</option>
+              <option value="custom">{t('productEditor.badgeCustom')}</option>
+            </select>
+          </label>
+          {form.imageBadgeType === 'custom' ? (
+            <label className="field">
+              <span>{t('productEditor.badgeText')}</span>
+              <input
+                maxLength={20}
+                value={form.imageBadgeText}
+                onChange={(event) => updateField('imageBadgeText', event.target.value)}
+              />
+              <small className="field-hint">{form.imageBadgeText.length}/20</small>
+            </label>
+          ) : null}
+          {form.imageBadgeType !== 'none' ? (
+            <div className={`image-badge-preview image-badge-preview--${form.imageBadgeType}`}>
+              {getBadgePreviewText(form.imageBadgeType, form.imageBadgeText, t)}
+            </div>
+          ) : null}
+        </div>
         {product && product.images.length > 0 ? (
           <div className="image-strip">
             {product.images.map((image) => (
@@ -818,6 +993,18 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       ) : null}
     </form>
   );
+}
+
+function getBadgePreviewText(
+  badgeType: ProductImageBadgeType,
+  customText: string,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  if (badgeType === 'new') return 'NEW';
+  if (badgeType === 'sale') return t('productEditor.badgeSale');
+  if (badgeType === 'hit') return t('productEditor.badgeHit');
+  if (badgeType === 'exclusive') return t('productEditor.badgeExclusive');
+  return customText.trim() || t('productEditor.badgeCustom');
 }
 
 function getCategoryRowsFromProduct(product: Product): CategoryAssignmentRow[] {

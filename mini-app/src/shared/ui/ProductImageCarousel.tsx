@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Product } from '../api';
-import { getProductImageItems } from '../utils/images';
+import { getProductImageBadge, getProductImageItems } from '../utils/images';
 
 type ProductImageCarouselVariant = 'card' | 'detail';
 
@@ -17,6 +17,7 @@ export function ProductImageCarousel({
   const slides = images.length > 0 ? images : [{ id: 'fallback', url: null, alt: product.name }];
   const fallbackLetter = product.name.slice(0, 1).toUpperCase();
   const hasMultipleImages = slides.length > 1;
+  const imageBadge = variant === 'detail' ? getProductImageBadge(product) : null;
 
   React.useEffect(() => {
     setActiveIndex(0);
@@ -91,6 +92,11 @@ export function ProductImageCarousel({
             </span>
           ) : null}
         </>
+      ) : null}
+      {imageBadge ? (
+        <span className={`product-image-badge product-image-badge--${product.image_badge_type}`}>
+          {imageBadge}
+        </span>
       ) : null}
     </div>
   );

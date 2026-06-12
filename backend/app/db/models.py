@@ -58,6 +58,15 @@ class ProductSizeGrid(StrEnum):
     SHOES_RU = "shoes_ru"
 
 
+class ProductImageBadgeType(StrEnum):
+    NONE = "none"
+    NEW = "new"
+    SALE = "sale"
+    HIT = "hit"
+    EXCLUSIVE = "exclusive"
+    CUSTOM = "custom"
+
+
 class OrderStatus(StrEnum):
     NEW = "NEW"
     PROCESSING = "PROCESSING"
@@ -505,6 +514,68 @@ class ProductCategory(Base):
     category: Mapped[Category] = relationship(back_populates="product_categories")
 
 
+class ProductRelatedProduct(Base):
+    __tablename__ = "product_related_products"
+    __table_args__ = (
+        CheckConstraint(
+            "product_id <> related_product_id",
+            name="ck_product_related_products_not_self",
+        ),
+        CheckConstraint(
+            "position >= 0",
+            name="ck_product_related_products_position_non_negative",
+        ),
+        UniqueConstraint(
+            "product_id",
+            "related_product_id",
+            name="uq_product_related_products_pair",
+        ),
+        UniqueConstraint(
+            "product_id",
+            "position",
+            name="uq_product_related_products_position",
+        ),
+        Index(
+            "ix_product_related_products_product_position",
+            "product_id",
+            "position",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    related_product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product: Mapped["Product"] = relationship(
+        back_populates="related_product_links",
+        foreign_keys=[product_id],
+    )
+    related_product: Mapped["Product"] = relationship(
+        back_populates="related_from_links",
+        foreign_keys=[related_product_id],
+    )
+
+
 class Product(Base):
     __tablename__ = "products"
     __table_args__ = (
@@ -538,6 +609,17 @@ class Product(Base):
         default=ProductSizeGrid.CLOTHING_ALPHA,
         server_default=ProductSizeGrid.CLOTHING_ALPHA.value,
     )
+    image_badge_type: Mapped[ProductImageBadgeType] = mapped_column(
+        Enum(
+            ProductImageBadgeType,
+            name="product_image_badge_type",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=ProductImageBadgeType.NONE,
+        server_default=ProductImageBadgeType.NONE.value,
+    )
+    image_badge_text: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[ProductStatus] = mapped_column(
         Enum(ProductStatus, name="product_status", values_callable=_enum_values),
         nullable=False,
@@ -583,6 +665,17 @@ class Product(Base):
         cascade="all, delete-orphan",
         order_by="ProductVariant.id",
     )
+    related_product_links: Mapped[list[ProductRelatedProduct]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        foreign_keys="ProductRelatedProduct.product_id",
+        order_by="ProductRelatedProduct.position",
+    )
+    related_from_links: Mapped[list[ProductRelatedProduct]] = relationship(
+        back_populates="related_product",
+        cascade="all, delete-orphan",
+        foreign_keys="ProductRelatedProduct.related_product_id",
+    )
     cart_items: Mapped[list["CartItem"]] = relationship(back_populates="product")
     order_items: Mapped[list["OrderItem"]] = relationship(back_populates="product")
     reviews: Mapped[list["Review"]] = relationship(
@@ -605,6 +698,14 @@ class Product(Base):
     @property
     def categories(self) -> list[ProductCategory]:
         return self.product_categories
+
+    @property
+    def related_product_ids(self) -> list[int]:
+        return [link.related_product_id for link in self.related_product_links]
+
+    @property
+    def related_products(self) -> list["Product"]:
+        return [link.related_product for link in self.related_product_links]
 
 
 class ProductVariant(Base):

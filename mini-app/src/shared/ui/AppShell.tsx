@@ -5,7 +5,6 @@ import { Link, useRouter } from '../router/RouterProvider';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
-import { SearchIcon } from './Icons';
 
 const navItems = [
   { to: '/main', label: 'Лента', icon: 'home', match: ['/main', '/'] },
@@ -359,7 +358,8 @@ function NavIcon({ name }: { name: (typeof navItems)[number]['icon'] }) {
   if (name === 'home') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3.8 10.8 12 4l8.2 6.8v8.1a1.6 1.6 0 0 1-1.6 1.6h-4.1v-5.8h-5v5.8H5.4a1.6 1.6 0 0 1-1.6-1.6v-8.1Z" />
+        <path d="M3.5 10.2 12 3l8.5 7.2v8.1a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2v-8.1Z" />
+        <path d="M7.2 11h1.7M11.2 11h5.6M7.2 14.5h1.7M11.2 14.5h5.6M8.2 18h7.6" />
       </svg>
     );
   }
@@ -367,26 +367,38 @@ function NavIcon({ name }: { name: (typeof navItems)[number]['icon'] }) {
   if (name === 'grid') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h4v6H4.5V5.5Zm9.5-1.5h4a1.5 1.5 0 0 1 1.5 1.5V10H14V4ZM4.5 14H10v6H6a1.5 1.5 0 0 1-1.5-1.5V14Zm9.5 0h5.5v4.5A1.5 1.5 0 0 1 18 20h-4v-6Z" />
+        <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+        <rect x="7" y="7" width="3" height="3" rx=".6" />
+        <rect x="14" y="7" width="3" height="3" rx=".6" />
+        <rect x="7" y="14" width="3" height="3" rx=".6" />
+        <rect x="14" y="14" width="3" height="3" rx=".6" />
       </svg>
     );
   }
 
   if (name === 'search') {
-    return <SearchIcon />;
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.4" />
+        <path d="m15.3 15.3 4.5 4.5" />
+      </svg>
+    );
   }
 
   if (name === 'cart') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5.1 4H3V2h3.5l1 3h12.7l-1.6 8.1a2.3 2.3 0 0 1-2.2 1.9H9.7a2.3 2.3 0 0 1-2.2-1.7L5.1 4Zm4.8 16.5a1.8 1.8 0 1 1 0-3.6 1.8 1.8 0 0 1 0 3.6Zm6.8 0a1.8 1.8 0 1 1 0-3.6 1.8 1.8 0 0 1 0 3.6Z" />
+        <path d="M3.2 4h2.6l2 10.1a2 2 0 0 0 2 1.6h6.7a2 2 0 0 0 1.9-1.5L20.7 7H6.4" />
+        <circle cx="10" cy="19.3" r="1.2" />
+        <circle cx="17" cy="19.3" r="1.2" />
       </svg>
     );
   }
 
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2Zm0 2.1c-4 0-7.2 2.1-7.2 4.8V20h14.4v-.9c0-2.7-3.2-4.8-7.2-4.8Z" />
+      <circle cx="12" cy="8.2" r="4" />
+      <path d="M4.8 20c.4-4 3.1-6.3 7.2-6.3s6.8 2.3 7.2 6.3" />
     </svg>
   );
 }

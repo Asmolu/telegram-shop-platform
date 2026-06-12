@@ -16,7 +16,7 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductImageCarousel, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
 import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { displaySize, sortVariants } from '../shared/utils/sizes';
 
@@ -239,7 +239,7 @@ export function ProductDetailPage() {
       <section className="detail-card">
         <h2>{product.size_grid === 'shoes_ru' ? 'Российский размер' : 'Размер'}</h2>
         {activeVariants.length > 0 ? (
-          <div className="variant-grid">
+          <div className="variant-carousel" aria-label="Доступные размеры">
             {activeVariants.map((variant) => (
               <VariantButton
                 key={variant.id}
@@ -254,6 +254,17 @@ export function ProductDetailPage() {
           <p className="muted-text">Доступных вариантов сейчас нет.</p>
         )}
       </section>
+
+      {product.related_products && product.related_products.length > 0 ? (
+        <section className="detail-card related-products-section">
+          <h2>Похожие товары</h2>
+          <div className="related-products-carousel">
+            {product.related_products.map((relatedProduct) => (
+              <ProductCard key={relatedProduct.id} product={relatedProduct} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {product.description ? (
         <section className="detail-card">

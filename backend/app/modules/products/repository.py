@@ -10,6 +10,7 @@ from app.db.models import (
     Category,
     Product,
     ProductCategory,
+    ProductRelatedProduct,
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
@@ -98,6 +99,22 @@ class ProductsRepository:
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 variants_loader,
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.category),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.product_categories)
+                .selectinload(ProductCategory.category),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.tags),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.images),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.variants),
             )
             .where(Product.id == product_id)
         )
@@ -112,10 +129,36 @@ class ProductsRepository:
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.category),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.product_categories)
+                .selectinload(ProductCategory.category),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.tags),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(Product.images),
+                selectinload(Product.related_product_links)
+                .selectinload(ProductRelatedProduct.related_product)
+                .selectinload(
+                    Product.variants.and_(ProductVariant.is_active.is_(True))
+                ),
             )
             .where(Product.id == product_id, Product.status == ProductStatus.ACTIVE)
         )
         return result.scalar_one_or_none()
+
+    async def list_existing_ids(self, product_ids: list[int]) -> set[int]:
+        if not product_ids:
+            return set()
+        result = await self.session.execute(
+            select(Product.id).where(Product.id.in_(product_ids))
+        )
+        return set(result.scalars().all())
 
     def add(self, product: Product) -> None:
         self.session.add(product)

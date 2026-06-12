@@ -6,6 +6,7 @@ export type PageMeta = {
 
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
+export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
@@ -73,6 +74,8 @@ export type Product = {
   old_price?: string | null;
   compare_at_price?: string | null;
   size_grid: ProductSizeGrid;
+  image_badge_type: ProductImageBadgeType;
+  image_badge_text?: string | null;
   status: ProductStatus;
   category_id?: number | null;
   category?: Category | null;
@@ -80,6 +83,8 @@ export type Product = {
   tags: Tag[];
   images: ProductImage[];
   variants: ProductVariant[];
+  related_product_ids?: number[];
+  related_products?: Product[];
   is_available: boolean;
   created_at: string;
   updated_at: string;

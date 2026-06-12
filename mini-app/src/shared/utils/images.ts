@@ -46,6 +46,11 @@ export function getProductImageItems(product: Product) {
 }
 
 export function getProductBadge(product: Product) {
+  const configuredBadge = getProductImageBadge(product);
+  if (configuredBadge) {
+    return configuredBadge;
+  }
+
   const tags = product.tags.map((tag) => `${tag.slug} ${tag.name}`.toLowerCase());
 
   if (tags.some((tag) => tag.includes('sale') || tag.includes('скид'))) {
@@ -60,5 +65,14 @@ export function getProductBadge(product: Product) {
     return 'NEW';
   }
 
+  return null;
+}
+
+export function getProductImageBadge(product: Product) {
+  if (product.image_badge_type === 'new') return 'NEW';
+  if (product.image_badge_type === 'sale') return 'Распродажа';
+  if (product.image_badge_type === 'hit') return 'Хит';
+  if (product.image_badge_type === 'exclusive') return 'Эксклюзив';
+  if (product.image_badge_type === 'custom') return product.image_badge_text?.trim() || null;
   return null;
 }

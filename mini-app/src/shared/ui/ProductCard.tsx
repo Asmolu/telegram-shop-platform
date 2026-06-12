@@ -44,18 +44,26 @@ export function ProductCard({
     <article className="product-card">
       <Link className="product-card__media" to={`/product/${product.id}`}>
         <ProductImageCarousel product={product} variant="card" />
-        {badge ? <span className={`product-badge product-badge--${badge.toLowerCase()}`}>{badge}</span> : null}
+        {badge ? (
+          <span
+            className={`product-badge product-badge--${product.image_badge_type !== 'none' ? product.image_badge_type : badge.toLowerCase()}`}
+          >
+            {badge}
+          </span>
+        ) : null}
         {discount ? <span className="product-discount-badge">{discount}</span> : null}
       </Link>
-      <button
-        className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
-        type="button"
-        aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
-        disabled={busyAction !== null}
-        onClick={() => void runAction('favorite', onFavoriteToggle)}
-      >
-        {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
-      </button>
+      {onFavoriteToggle ? (
+        <button
+          className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
+          type="button"
+          aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+          disabled={busyAction !== null}
+          onClick={() => void runAction('favorite', onFavoriteToggle)}
+        >
+          {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
+        </button>
+      ) : null}
       <Link className="product-card__body" to={`/product/${product.id}`}>
         <span className="product-card__price-row">
           <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
