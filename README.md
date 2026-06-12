@@ -174,6 +174,17 @@ In the seller group, Bot 2 also supports `/sellers`,
 visibility and safe deactivation. `/sellers` shows `Seller ID for commands`;
 use that internal ID, not the Telegram user id or chat id.
 
+Bot 2 product creation uses one strict, stateless photo-caption flow. Send one
+photo with `/new_product`, Russian field labels, `Тип размеров: одежда` or
+`Тип размеров: обувь`, and one variant per line in the form
+`размер / цвет / остаток / SKU`. SKU may be blank and receives a safe generated
+value. Categories and tags must already exist; Bot 2 never creates or silently
+ignores taxonomy. Products default to `DRAFT` and the reply includes the Seller
+Panel edit link. `/new_product_help` returns complete clothing and footwear
+examples. Clothing accepts `XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, and
+`ONE_SIZE`; footwear accepts only plain Russian whole-size strings `35` through
+`46`, without RU/EU/US/UK prefixes or half sizes.
+
 Set the production webhook with:
 
 ```bash

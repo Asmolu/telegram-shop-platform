@@ -8,11 +8,13 @@ from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
+    Category,
     NotificationChannel,
     NotificationStatus,
     ProductSizeGrid,
     ProductStatus,
     SellerCredential,
+    Tag,
     User,
     UserRole,
 )
@@ -102,13 +104,46 @@ class FakeQuickVariantRepository:
 
 
 class FakeQuickCategoryRepository:
-    async def get_by_name_or_slug(self, _: str) -> None:
-        return None
+    def __init__(self) -> None:
+        self.categories = [
+            Category(id=1, name="Hoodies", slug="hoodies", description=None),
+            Category(id=2, name="Футболки", slug="t-shirts", description=None),
+            Category(id=3, name="Обувь", slug="shoes", description=None),
+        ]
+
+    async def get_by_name_or_slug(self, value: str) -> Category | None:
+        normalized = value.strip().casefold()
+        return next(
+            (
+                category
+                for category in self.categories
+                if category.name.casefold() == normalized or category.slug == normalized
+            ),
+            None,
+        )
+
+    async def get_by_id(self, category_id: int) -> Category | None:
+        return next(
+            (category for category in self.categories if category.id == category_id),
+            None,
+        )
 
 
 class FakeQuickTagsRepository:
-    async def list_by_names_or_slugs(self, _: list[str]) -> list[object]:
-        return []
+    def __init__(self) -> None:
+        names = ("hoodie", "winter", "футболка", "hermes", "кроссовки", "nike", "premium")
+        self.tags = [Tag(id=index, name=name, slug=name) for index, name in enumerate(names, 1)]
+
+    async def list_by_names_or_slugs(self, values: list[str]) -> list[Tag]:
+        normalized = {value.strip().casefold() for value in values}
+        return [
+            tag
+            for tag in self.tags
+            if tag.name.casefold() in normalized or tag.slug.casefold() in normalized
+        ]
+
+    async def list_by_ids(self, tag_ids: list[int]) -> list[Tag]:
+        return [tag for tag in self.tags if tag.id in tag_ids]
 
 
 class FakeQuickStorage:
@@ -369,6 +404,14 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, product_repository, variant_repository, storage, audit = _quick_product_service()
+    prepared_sizes: list[str] = []
+    prepare_variant = service.products_service.prepare_product_variant
+
+    def track_prepared_variant(**kwargs):
+        prepared_sizes.append(kwargs["payload"].size)
+        return prepare_variant(**kwargs)
+
+    monkeypatch.setattr(service.products_service, "prepare_product_variant", track_prepared_variant)
 
     message = await service.create_quick_product_draft_command(
         chat_id=-100,
@@ -384,70 +427,124 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     assert product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert product.images[0].file_path == "products/telegram-photo.jpg"
     assert product.images[0].is_primary is True
-    assert [variant.size for variant in variant_repository.variants] == ["M", "L"]
-    assert [variant.color for variant in variant_repository.variants] == ["White", "White"]
-    assert [variant.stock_quantity for variant in variant_repository.variants] == [5, 5]
+    assert [variant.size for variant in variant_repository.variants] == ["M", "L", "3XL"]
+    assert [variant.color for variant in variant_repository.variants] == [
+        "White",
+        "White",
+        "Black",
+    ]
+    assert [variant.stock_quantity for variant in variant_repository.variants] == [5, 5, 3]
     assert variant_repository.variants[0].sku == "HD-W-M"
-    assert "Product ID: 101" in message
-    assert "Status: DRAFT" in message
+    assert prepared_sizes == ["M", "L", "3XL"]
+    assert "ID товара: 101" in message
+    assert "Статус: DRAFT" in message
     assert "https://seller.tsplatform.ru/products/101/edit" in message
     assert storage.saved == [(b"image-bytes", "products", ".jpg")]
     assert audit.records[0]["action"] == "bot_product_draft_created"
 
 
 @pytest.mark.asyncio
-async def test_new_product_command_defaults_missing_size_to_one_size(
+async def test_new_product_command_creates_footwear_with_boundary_sizes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
-    service, _, variant_repository, _, _ = _quick_product_service()
-    caption = "\n".join(
-        (
-            "/new_product",
-            "Название: One Size Hoodie",
-            "Цена: 1990",
-            "Цвет: White",
-            "SKU: HD-ONE",
-            "Остаток: 5",
-        )
-    )
+    service, product_repository, variant_repository, _, _ = _quick_product_service()
 
     await service.create_quick_product_draft_command(
         chat_id=-100,
-        message=_quick_product_message(caption=caption),
+        message=_quick_product_message(
+            caption=_strict_product_caption(
+                title="Boundary Shoes",
+                size_grid="обувь",
+                rows=("35 / White / 2 / SHOE-35", "46 / Black / 1 / SHOE-46"),
+                categories="Обувь",
+                tags="кроссовки, nike",
+            )
+        ),
         actor_telegram_user_id=500,
         actor_username="operator",
     )
 
-    assert [variant.size for variant in variant_repository.variants] == ["ONE_SIZE"]
+    assert product_repository.products[0].size_grid == ProductSizeGrid.SHOES_RU
+    assert [variant.size for variant in variant_repository.variants] == ["35", "46"]
 
 
 @pytest.mark.asyncio
-async def test_new_product_command_cannot_bypass_clothing_size_validation(
+@pytest.mark.parametrize("invalid_size", ["M", "RU 39", "39.5", "47"])
+async def test_new_product_command_rejects_invalid_footwear_sizes(
     monkeypatch: pytest.MonkeyPatch,
+    invalid_size: str,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, _, variant_repository, _, _ = _quick_product_service()
-    caption = "\n".join(
-        (
-            "/new_product",
-            "Название: Invalid Hoodie",
-            "Цена: 1990",
-            "Размеры: 42",
-            "SKU: HD-42",
-            "Остаток: 5",
-        )
-    )
 
-    with pytest.raises(AppError, match="not valid for clothing_alpha"):
+    with pytest.raises(AppError, match="недопустим для обуви"):
         await service.create_quick_product_draft_command(
             chat_id=-100,
-            message=_quick_product_message(caption=caption),
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Invalid Shoes",
+                    size_grid="обувь",
+                    rows=(f"{invalid_size} / White / 2 / BAD-SHOE",),
+                )
+            ),
             actor_telegram_user_id=500,
             actor_username="operator",
         )
 
     assert variant_repository.variants == []
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_rejects_numeric_clothing_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, variant_repository, _, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="недопустим для одежды"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Invalid Shirt",
+                    size_grid="одежда",
+                    rows=("42 / White / 2 / SHIRT-42",),
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert variant_repository.variants == []
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_rejects_duplicate_size_color(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="дубликат комбинации"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Duplicate Shirt",
+                    size_grid="одежда",
+                    rows=(
+                        "M / White / 2 / SHIRT-M-W-1",
+                        "m / white / 3 / SHIRT-M-W-2",
+                    ),
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.saved == []
 
 
 @pytest.mark.asyncio
@@ -457,7 +554,7 @@ async def test_new_product_command_rejects_missing_photo(
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, product_repository, _, _, audit = _quick_product_service()
 
-    with pytest.raises(AppError, match="Attach one product photo"):
+    with pytest.raises(AppError, match="Фото"):
         await service.create_quick_product_draft_command(
             chat_id=-100,
             message=_quick_product_message(photo=False),
@@ -476,7 +573,7 @@ async def test_new_product_command_rejects_missing_required_fields(
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, product_repository, _, _, audit = _quick_product_service()
 
-    with pytest.raises(AppError, match="Missing required field"):
+    with pytest.raises(AppError, match="Название"):
         await service.create_quick_product_draft_command(
             chat_id=-100,
             message=_quick_product_message(caption="/new_product\nЦена: 100"),
@@ -489,17 +586,23 @@ async def test_new_product_command_rejects_missing_required_fields(
 
 
 @pytest.mark.asyncio
-async def test_new_product_command_rejects_invalid_price(
+async def test_new_product_command_rejects_old_price_not_above_price(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, product_repository, _, _, audit = _quick_product_service()
 
-    with pytest.raises(AppError, match="valid price"):
+    with pytest.raises(AppError, match="Старая цена"):
         await service.create_quick_product_draft_command(
             chat_id=-100,
             message=_quick_product_message(
-                caption="/new_product\nНазвание: Hoodie\nЦена: nope",
+                caption=_strict_product_caption(
+                    title="Hoodie",
+                    size_grid="одежда",
+                    rows=("M / White / 1 / HOODIE-M",),
+                    price="100",
+                    old_price="100",
+                ),
             ),
             actor_telegram_user_id=500,
             actor_username="operator",
@@ -507,6 +610,109 @@ async def test_new_product_command_rejects_invalid_price(
 
     assert product_repository.products == []
     assert audit.records[0]["action"] == "bot_product_post_rejected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", ["0", "-10", "nope"])
+async def test_new_product_command_rejects_invalid_price(
+    monkeypatch: pytest.MonkeyPatch,
+    price: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, _, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="положительным числом"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Invalid Price",
+                    size_grid="одежда",
+                    rows=("M / White / 1 / PRICE-M",),
+                    price=price,
+                    old_price="",
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+
+
+@pytest.mark.asyncio
+async def test_new_product_command_rejects_negative_stock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, _, _ = _quick_product_service()
+
+    with pytest.raises(AppError, match="не меньше 0"):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(
+                    title="Invalid Stock",
+                    size_grid="одежда",
+                    rows=("M / White / -1 / STOCK-M",),
+                )
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "expected"),
+    [
+        ("Категории", "Unknown Category", "категория `Unknown Category` не найдена"),
+        ("Теги", "unknown-tag", "теги не найдены: `unknown-tag`"),
+    ],
+)
+async def test_new_product_command_rejects_unknown_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    field_value: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+    caption = _strict_product_caption(
+        title="Taxonomy Test",
+        size_grid="одежда",
+        rows=("M / White / 1 / TAX-M",),
+    )
+    caption = caption.replace(f"{field_name}:", f"{field_name}: {field_value}")
+
+    with pytest.raises(AppError, match=expected):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(caption=caption),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.saved == []
+
+
+def test_new_product_help_contains_clothing_and_footwear_examples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _, _, _ = _quick_product_service()
+
+    help_text = service.format_new_product_help_command(chat_id=-100)
+
+    assert "Футболка HERMES" in help_text
+    assert "Кроссовки Nike Air Max" in help_text
+    assert "XS, S, M, L, XL, XXL, 3XL, ONE_SIZE" in help_text
+    assert "российские целые размеры 35-46" in help_text
+    assert "RU/EU/US/UK и половинные размеры не поддерживаются" in help_text
+    assert "по умолчанию товар создаётся как черновик" in help_text.lower()
 
 
 @pytest.mark.asyncio
@@ -552,15 +758,46 @@ def _quick_product_service() -> tuple[
     service = SellerBotService(DummySession(), telegram_service=telegram)
     product_repository = FakeQuickProductRepository()
     variant_repository = FakeQuickVariantRepository()
+    category_repository = FakeQuickCategoryRepository()
+    tags_repository = FakeQuickTagsRepository()
     storage = FakeQuickStorage()
     audit = FakeAuditService()
-    service.products_repository = product_repository
-    service.variants_repository = variant_repository
-    service.categories_repository = FakeQuickCategoryRepository()
-    service.tags_repository = FakeQuickTagsRepository()
+    service.products_service.repository = product_repository
+    service.products_service.variants_repository = variant_repository
+    service.products_service.categories_repository = category_repository
+    service.products_service.tags_repository = tags_repository
+    service.categories_repository = category_repository
+    service.tags_repository = tags_repository
     service.storage = storage
     service.audit_service = audit
     return service, product_repository, variant_repository, storage, audit
+
+
+def _strict_product_caption(
+    *,
+    title: str,
+    size_grid: str,
+    rows: tuple[str, ...],
+    price: str = "1990",
+    old_price: str = "2490",
+    categories: str = "",
+    tags: str = "",
+    status: str = "черновик",
+) -> str:
+    return "\n".join(
+        (
+            "/new_product",
+            f"Название: {title}",
+            f"Цена: {price}",
+            f"Старая цена: {old_price}",
+            f"Категории: {categories}",
+            f"Теги: {tags}",
+            f"Тип размеров: {size_grid}",
+            "Размеры:",
+            *rows,
+            f"Статус: {status}",
+        )
+    )
 
 
 def _quick_product_message(
@@ -580,15 +817,16 @@ def _quick_product_message(
                 "Цена: 1990",
                 "Старая цена: 2490",
                 "Описание: Warm cotton hoodie",
-                "Категория: Hoodies",
+                "Категории: Hoodies",
                 "Теги: hoodie, winter",
-                "Размеры: M,L",
-                "Цвет: White",
-                "SKU: HD-W",
-                "Остаток: 5",
+                "Тип размеров: одежда",
+                "Размеры:",
+                "M / White / 5 / HD-W-M",
+                "L / White / 5 / HD-W-L",
+                "3XL / Black / 3 / HD-B-3XL",
                 "Приоритет поиска: 1",
-                "Ключевые слова: hoodie, white hoodie",
-                "Статус: DRAFT",
+                "Псевдонимы поиска: hoodie, white hoodie",
+                "Статус: черновик",
             )
         ),
         "chat": {"id": -100, "type": "supergroup"},

@@ -780,6 +780,15 @@ that labels `Seller ID for commands`, plus `/block_seller <Seller ID>` and
 preserving orders and audit history. The command ID is the internal Seller ID
 shown by `/sellers`, not the Telegram user id or chat id.
 
+Seller group product draft creation uses a stateless `/new_product` photo
+caption and `/new_product_help`. The backend resolves only existing categories
+and tags, stores the uploaded photo as the primary product image, and creates
+the product plus validated variants in one transaction. Clothing uses
+`clothing_alpha`; footwear uses `shoes_ru` with plain Russian whole-size strings
+`35` through `46`. Prefixes such as RU/EU/US/UK, half sizes, invalid size-grid
+combinations, duplicate size/color rows, and invalid price or stock values are
+rejected with seller-facing messages.
+
 ---
 
 ## 19. Customer Notifications MVP Phase 1

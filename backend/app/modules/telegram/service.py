@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import re
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ PRIVATE_CHAT_REQUIRED_MESSAGE = (
     "Откройте Bot 2 в личном чате и отправьте команду регистрации из Seller Panel."
 )
 MISSING_USER_MESSAGE = "Не удалось прочитать Telegram аккаунт. Откройте Bot 2 заново."
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -332,7 +335,13 @@ class SellerBotWebhookService:
         if command_match is not None:
             command = command_match.group("command").lower()
             args = (command_match.group("args") or "").strip()
-            if command in {"/sellers", "/block_seller", "/unblock_seller", "/new_product"}:
+            if command in {
+                "/sellers",
+                "/block_seller",
+                "/unblock_seller",
+                "/new_product",
+                "/new_product_help",
+            }:
                 return await self._handle_seller_group_command(
                     command=command,
                     args=args,
@@ -435,6 +444,13 @@ class SellerBotWebhookService:
                 return self._response(handled=True, result="sellers_list_sent")
 
             actor_user = message.from_user
+            if command == "/new_product_help":
+                response_text = self.seller_bot_service.format_new_product_help_command(
+                    chat_id=message.chat.id,
+                )
+                await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="new_product_help_sent")
+
             if command == "/new_product":
                 response_text = await self.seller_bot_service.create_quick_product_draft_command(
                     chat_id=message.chat.id,
@@ -465,13 +481,29 @@ class SellerBotWebhookService:
             await self._send_chat_message(message.chat.id, response_text)
             return self._response(handled=True, result="seller_unblocked")
         except AppError as exc:
-            await self._send_chat_message(message.chat.id, exc.message)
+            error_message = (
+                self._product_creation_error_message(exc.message)
+                if command == "/new_product"
+                else exc.message
+            )
+            await self._send_chat_message(message.chat.id, error_message)
             result = (
                 "bot_product_post_rejected"
                 if command == "/new_product"
                 else "seller_command_error"
             )
             return self._response(handled=True, result=result)
+        except Exception:
+            if command != "/new_product":
+                raise
+            logger.exception("Unexpected Bot 2 product creation failure")
+            await self._send_chat_message(
+                message.chat.id,
+                self._product_creation_error_message(
+                    "внутренняя ошибка. Товар не создан; повтори попытку позже.",
+                ),
+            )
+            return self._response(handled=True, result="bot_product_post_rejected")
 
     def _extract_start_payload(self, text: str) -> str | None:
         match = START_COMMAND_RE.match(text.strip())
@@ -479,6 +511,13 @@ class SellerBotWebhookService:
             return None
         payload = match.group("payload")
         return payload.strip() if payload else ""
+
+    def _product_creation_error_message(self, detail: str) -> str:
+        return (
+            "Не удалось создать товар.\n\n"
+            f"Ошибка: {detail}\n\n"
+            "Проверь формат через /new_product_help. Товар не был сохранён."
+        )
 
     async def _send_chat_message(self, chat_id: int, message: str) -> bool:
         try:

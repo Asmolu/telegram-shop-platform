@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from secrets import token_hex
 
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,19 +12,22 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
-    Product,
-    ProductImage,
     ProductSizeGrid,
     ProductStatus,
-    ProductVariant,
     UserRole,
 )
 from app.modules.audit.service import AuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.notifications.schemas import NotificationList
 from app.modules.notifications.service import NotificationsService
-from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
+from app.modules.products.schemas import (
+    ProductCategoryInput,
+    ProductCreate,
+    ProductImageCreate,
+    ProductVariantCreate,
+)
 from app.modules.products.search import normalize_search_aliases
+from app.modules.products.service import ProductsService
 from app.modules.products.size_grids import SizeGridValidationError, normalize_size
 from app.modules.seller_bot.repository import SellerBotRepository
 from app.modules.seller_bot.schemas import (
@@ -47,22 +51,51 @@ SELLER_BOT_COMMAND_LIMIT = 20
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
 POSTGRES_INT32_MAX = 2_147_483_647
 SELLER_PANEL_PRODUCT_EDIT_URL = "https://seller.tsplatform.ru/products/{product_id}/edit"
-QUICK_PRODUCT_SIZE_DEFAULT = "ONE_SIZE"
 QUICK_PRODUCT_ALLOWED_FIELDS = {
-    "Название": "title",
-    "Цена": "price",
-    "Старая цена": "old_price",
-    "Описание": "description",
-    "Категория": "category",
-    "Теги": "tags",
-    "Размеры": "sizes",
-    "Цвет": "color",
-    "SKU": "sku",
-    "Остаток": "stock",
-    "Приоритет поиска": "search_priority",
-    "Ключевые слова": "search_aliases",
-    "Статус": "status",
+    "название": "title",
+    "цена": "price",
+    "старая цена": "old_price",
+    "описание": "description",
+    "категория": "categories",
+    "категории": "categories",
+    "теги": "tags",
+    "тип размеров": "size_grid",
+    "size_grid": "size_grid",
+    "размеры": "variants",
+    "приоритет поиска": "search_priority",
+    "псевдонимы поиска": "search_aliases",
+    "ключевые слова": "search_aliases",
+    "статус": "status",
 }
+QUICK_PRODUCT_SIZE_GRID_ALIASES = {
+    "одежда": ProductSizeGrid.CLOTHING_ALPHA,
+    ProductSizeGrid.CLOTHING_ALPHA.value: ProductSizeGrid.CLOTHING_ALPHA,
+    "обувь": ProductSizeGrid.SHOES_RU,
+    ProductSizeGrid.SHOES_RU.value: ProductSizeGrid.SHOES_RU,
+}
+QUICK_PRODUCT_STATUS_ALIASES = {
+    "черновик": ProductStatus.DRAFT,
+    ProductStatus.DRAFT.value.lower(): ProductStatus.DRAFT,
+    "активен": ProductStatus.ACTIVE,
+    "активный": ProductStatus.ACTIVE,
+    ProductStatus.ACTIVE.value.lower(): ProductStatus.ACTIVE,
+}
+
+
+@dataclass(frozen=True)
+class QuickProductVariantDraft:
+    size: str
+    color: str | None
+    stock: int
+    sku: str | None
+
+
+@dataclass(frozen=True)
+class QuickProductImageDraft:
+    payload: ProductImageCreate
+    original_filename: str
+    mime_type: str | None
+    size_bytes: int
 
 
 @dataclass(frozen=True)
@@ -71,12 +104,10 @@ class QuickProductDraft:
     price: Decimal
     old_price: Decimal | None
     description: str | None
-    category: str | None
+    categories: list[str]
     tags: list[str]
-    sizes: list[str]
-    color: str | None
-    sku: str | None
-    stock: int | None
+    size_grid: ProductSizeGrid
+    variants: list[QuickProductVariantDraft]
     search_priority: int
     search_aliases: str | None
     status: ProductStatus
@@ -95,8 +126,6 @@ class SellerBotService:
     ) -> None:
         self.session = session
         self.repository = SellerBotRepository(session)
-        self.products_repository = ProductsRepository(session)
-        self.variants_repository = ProductVariantsRepository(session)
         self.categories_repository = CategoriesRepository(session)
         self.tags_repository = TagsRepository(session)
         self.telegram_service = telegram_service or TelegramService()
@@ -106,6 +135,10 @@ class SellerBotService:
             telegram_service=self.telegram_service,
         )
         self.audit_service = audit_service or AuditService(session)
+        self.products_service = ProductsService(
+            session,
+            audit_service=self.audit_service,
+        )
 
     async def get_status(self) -> SellerBotStatusResponse:
         configured = bool(settings.telegram_bot_token)
@@ -276,36 +309,28 @@ class SellerBotService:
         actor_username: str | None,
     ) -> str:
         self._require_seller_group(chat_id)
+        saved_paths: list[str] = []
         try:
             draft = self._parse_quick_product_message(message)
             photo = self._select_largest_photo(message.photo)
             if message.media_group_id:
                 raise AppError(
-                    "Media groups are not supported yet. Send one photo with /new_product in "
-                    "the caption.",
+                    "медиагруппы пока не поддерживаются. Отправь одну фотографию с подписью "
+                    "/new_product.",
                     400,
                 )
             if photo is None:
                 raise AppError(
-                    "Attach one product photo and put /new_product fields in the caption.",
+                    "поле `Фото` обязательно. Отправь одну фотографию товара с форматом "
+                    "/new_product в подписи.",
                     400,
                 )
-        except AppError as exc:
-            await self._audit_product_post_rejected(
-                actor_telegram_user_id=actor_telegram_user_id,
-                actor_username=actor_username,
-                reason=exc.message,
-            )
-            raise
 
-        saved_paths: list[str] = []
-        warnings: list[str] = []
-        try:
-            category_id = await self._resolve_quick_product_category(draft, warnings)
-            tags = await self._resolve_quick_product_tags(draft, warnings)
+            categories = await self._resolve_quick_product_categories(draft)
+            tags = await self._resolve_quick_product_tags(draft)
             image = await self._store_quick_product_photo(photo, title=draft.title)
-            saved_paths.append(image.file_path)
-            product = Product(
+            saved_paths.append(image.payload.file_path)
+            product_payload = ProductCreate(
                 name=draft.title,
                 slug=self._quick_product_slug(draft.title),
                 description=draft.description,
@@ -313,16 +338,20 @@ class SellerBotService:
                 old_price=draft.old_price,
                 search_priority=draft.search_priority,
                 search_aliases=draft.search_aliases,
-                size_grid=ProductSizeGrid.CLOTHING_ALPHA,
-                status=ProductStatus.DRAFT,
-                category_id=category_id,
-                tags=tags,
-                images=[image],
+                size_grid=draft.size_grid,
+                status=draft.status,
+                categories=categories,
+                tag_ids=[tag.id for tag in tags],
+                images=[image.payload],
             )
-            self.products_repository.add(product)
-            await self.session.flush()
-            for variant in self._build_quick_product_variants(product.id, draft):
-                self.variants_repository.add(variant)
+            variant_payloads = self._build_quick_product_variant_payloads(draft)
+            product = await self.products_service.stage_product_with_variants(
+                product_payload,
+                variant_payloads,
+            )
+            product.images[0].original_filename = image.original_filename
+            product.images[0].mime_type = image.mime_type
+            product.images[0].size_bytes = image.size_bytes
 
             await self.audit_service.record_action(
                 actor_user_id=None,
@@ -339,11 +368,33 @@ class SellerBotService:
                     "actor_telegram_user_id": actor_telegram_user_id,
                     "actor_username": actor_username,
                     "source": "seller_bot_new_product",
-                    "warnings": warnings,
+                    "size_grid": draft.size_grid.value,
+                    "variant_count": len(variant_payloads),
                 },
                 commit=False,
             )
             await self.session.commit()
+        except ValidationError as exc:
+            await self.session.rollback()
+            for file_path in saved_paths:
+                self.storage.delete(file_path)
+            error = AppError(self._format_product_validation_error(exc), 400)
+            await self._audit_product_post_rejected(
+                actor_telegram_user_id=actor_telegram_user_id,
+                actor_username=actor_username,
+                reason=error.message,
+            )
+            raise error from exc
+        except AppError as exc:
+            await self.session.rollback()
+            for file_path in saved_paths:
+                self.storage.delete(file_path)
+            await self._audit_product_post_rejected(
+                actor_telegram_user_id=actor_telegram_user_id,
+                actor_username=actor_username,
+                reason=exc.message,
+            )
+            raise
         except IntegrityError as exc:
             await self.session.rollback()
             for file_path in saved_paths:
@@ -363,40 +414,82 @@ class SellerBotService:
         return self._quick_product_confirmation(
             product_id=product.id,
             draft=draft,
-            warnings=warnings,
         )
+
+    def format_new_product_help_command(self, *, chat_id: int) -> str:
+        self._require_seller_group(chat_id)
+        return self._new_product_help_text()
 
     def _parse_quick_product_message(self, message: TelegramMessage) -> QuickProductDraft:
         text = (message.text or message.caption or "").strip()
         if not text:
-            raise AppError("Use /new_product with strict field lines in the message caption.", 400)
+            raise AppError(
+                "подпись пуста. Добавь /new_product и поля товара в подпись к фото.",
+                400,
+            )
         lines = text.splitlines()
-        if not lines or not lines[0].strip().lower().startswith("/new_product"):
-            raise AppError("Product draft message must start with /new_product.", 400)
+        command = lines[0].strip().split(maxsplit=1)[0].lower()
+        if re.fullmatch(r"/new_product(?:@[a-z0-9_]+)?", command) is None:
+            raise AppError("первая строка должна быть `/new_product`.", 400)
 
         values: dict[str, str] = {}
+        variant_rows: list[str] = []
+        current_block: str | None = None
         for raw_line in lines[1:]:
             line = raw_line.strip()
             if not line:
                 continue
-            if ":" not in line:
-                raise AppError(f"Invalid product field line: {line}", 400)
-            raw_label, raw_value = line.split(":", 1)
-            label = raw_label.strip()
-            value = raw_value.strip()
-            field = QUICK_PRODUCT_ALLOWED_FIELDS.get(label)
-            if field is None:
-                allowed = ", ".join(QUICK_PRODUCT_ALLOWED_FIELDS)
-                raise AppError(f"Unknown field: {label}. Allowed fields: {allowed}.", 400)
-            if field in values:
-                raise AppError(f"Duplicate field: {label}", 400)
-            values[field] = value
+            field: str | None = None
+            label = ""
+            value = ""
+            if ":" in line:
+                raw_label, raw_value = line.split(":", 1)
+                label = " ".join(raw_label.split())
+                value = raw_value.strip()
+                field = QUICK_PRODUCT_ALLOWED_FIELDS.get(label.casefold())
+
+            if field is not None:
+                if field in values:
+                    raise AppError(f"поле `{label}` указано больше одного раза.", 400)
+                values[field] = value
+                current_block = field if field == "variants" else None
+                if field == "variants" and value:
+                    variant_rows.append(value)
+                continue
+
+            if current_block == "variants" and (":" not in line or "/" in line):
+                variant_rows.append(line)
+                continue
+
+            if ":" in line:
+                raise AppError(
+                    f"неизвестное поле `{label}`. Открой /new_product_help для списка полей.",
+                    400,
+                )
+            raise AppError(
+                f"строка `{line}` не относится к полю. Формат поля: `Название: ...`.",
+                400,
+            )
 
         title = self._required_text(values, "title", "Название")
         price = self._parse_money(self._required_text(values, "price", "Цена"), field="Цена")
         old_price = self._parse_optional_money(values.get("old_price"), field="Старая цена")
         if old_price is not None and old_price <= price:
-            raise AppError("Старая цена must be greater than Цена.", 400)
+            raise AppError(
+                "поле `Старая цена` должно быть больше поля `Цена`. "
+                "Пример: `Цена: 4990`, `Старая цена: 6990`.",
+                400,
+            )
+
+        size_grid = self._parse_size_grid(
+            self._required_text(values, "size_grid", "Тип размеров"),
+        )
+        if not variant_rows:
+            raise AppError(
+                "поле `Размеры` обязательно. Добавь хотя бы строку "
+                "`M / White / 10 / HERMES-M-W`.",
+                400,
+            )
 
         search_priority = self._parse_int(
             values.get("search_priority") or "2",
@@ -404,47 +497,142 @@ class SellerBotService:
             minimum=1,
             maximum=3,
         )
-        stock = None
-        if values.get("stock"):
-            stock = self._parse_int(values["stock"], field="Остаток", minimum=0)
-
-        status_value = (values.get("status") or ProductStatus.DRAFT.value).strip().upper()
-        if status_value != ProductStatus.DRAFT.value:
-            raise AppError("Статус can only be DRAFT for Bot 2 quick product posts.", 400)
+        status_value = self._optional_text(values.get("status")) or "черновик"
+        status = QUICK_PRODUCT_STATUS_ALIASES.get(status_value.casefold())
+        if status is None:
+            raise AppError(
+                "поле `Статус` должно быть `черновик` или `активен`.",
+                400,
+            )
 
         return QuickProductDraft(
             title=title,
             price=price,
             old_price=old_price,
             description=self._optional_text(values.get("description")),
-            category=self._optional_text(values.get("category")),
+            categories=self._split_csv(values.get("categories")),
             tags=self._split_csv(values.get("tags")),
-            sizes=self._split_csv(values.get("sizes")),
-            color=self._optional_text(values.get("color")),
-            sku=self._optional_text(values.get("sku")),
-            stock=stock,
+            size_grid=size_grid,
+            variants=self._parse_quick_product_variants(variant_rows, size_grid=size_grid),
             search_priority=search_priority,
             search_aliases=normalize_search_aliases(values.get("search_aliases")),
-            status=ProductStatus.DRAFT,
+            status=status,
         )
 
-    async def _resolve_quick_product_category(
+    def _parse_size_grid(self, value: str) -> ProductSizeGrid:
+        size_grid = QUICK_PRODUCT_SIZE_GRID_ALIASES.get(value.strip().casefold())
+        if size_grid is None:
+            raise AppError(
+                "поле `Тип размеров` должно быть `одежда`, `обувь`, "
+                "`clothing_alpha` или `shoes_ru`.",
+                400,
+            )
+        return size_grid
+
+    def _parse_quick_product_variants(
+        self,
+        rows: list[str],
+        *,
+        size_grid: ProductSizeGrid,
+    ) -> list[QuickProductVariantDraft]:
+        variants: list[QuickProductVariantDraft] = []
+        combinations: set[tuple[str, str | None]] = set()
+        skus: set[str] = set()
+        for index, row in enumerate(rows, start=1):
+            parts = [part.strip() for part in row.split("/")]
+            if len(parts) not in {3, 4}:
+                raise AppError(
+                    f"строка {index} поля `Размеры` имеет неверный формат: `{row}`. "
+                    "Используй `размер / цвет / остаток / SKU`; SKU можно оставить пустым.",
+                    400,
+                )
+            raw_size, raw_color, raw_stock = parts[:3]
+            raw_sku = parts[3] if len(parts) == 4 else ""
+            if not raw_size:
+                raise AppError(f"строка {index}: размер не указан.", 400)
+            try:
+                size = normalize_size(size_grid, raw_size)
+            except SizeGridValidationError as exc:
+                raise AppError(self._invalid_size_message(size_grid, raw_size), 400) from exc
+
+            color = self._optional_text(raw_color)
+            stock = self._parse_int(
+                raw_stock,
+                field=f"Остаток в строке {index} поля Размеры",
+                minimum=0,
+            )
+            sku = self._optional_text(raw_sku)
+            combination = (size, color.casefold() if color else None)
+            if combination in combinations:
+                color_label = color or "без цвета"
+                raise AppError(
+                    f"дубликат комбинации размера `{size}` и цвета `{color_label}`.",
+                    400,
+                )
+            combinations.add(combination)
+            if sku:
+                normalized_sku = sku.casefold()
+                if normalized_sku in skus:
+                    raise AppError(f"SKU `{sku}` указан больше одного раза.", 400)
+                skus.add(normalized_sku)
+            variants.append(
+                QuickProductVariantDraft(
+                    size=size,
+                    color=color,
+                    stock=stock,
+                    sku=sku,
+                )
+            )
+        return variants
+
+    def _invalid_size_message(self, size_grid: ProductSizeGrid, value: str) -> str:
+        if size_grid == ProductSizeGrid.SHOES_RU:
+            prefix_match = re.fullmatch(r"(?:RU|EU|US|UK)\s*(\d+)", value, re.IGNORECASE)
+            if prefix_match and 35 <= int(prefix_match.group(1)) <= 46:
+                return (
+                    f"размер `{value}` недопустим для обуви. Используй российский размер без "
+                    f"префикса: `{prefix_match.group(1)}`. Разрешены размеры обуви: "
+                    "35, 36, ..., 46."
+                )
+            if "." in value or "," in value:
+                return (
+                    f"размер `{value}` недопустим для обуви: половинные размеры не "
+                    "поддерживаются. Разрешены целые российские размеры 35-46."
+                )
+            return (
+                f"размер `{value}` недопустим для обуви. Разрешены только российские "
+                "целые размеры: 35, 36, ..., 46."
+            )
+        return (
+            f"размер `{value}` недопустим для одежды. Разрешены размеры: "
+            "XS, S, M, L, XL, XXL, 3XL, ONE_SIZE."
+        )
+
+    async def _resolve_quick_product_categories(
         self,
         draft: QuickProductDraft,
-        warnings: list[str],
-    ) -> int | None:
-        if draft.category is None:
-            return None
-        category = await self.categories_repository.get_by_name_or_slug(draft.category)
-        if category is None:
-            warnings.append(f"Category ignored: {draft.category}")
-            return None
-        return category.id
+    ) -> list[ProductCategoryInput]:
+        if len(draft.categories) > 3:
+            raise AppError("поле `Категории` поддерживает не более трех категорий.", 400)
+        assignments: list[ProductCategoryInput] = []
+        category_ids: set[int] = set()
+        for priority, value in enumerate(draft.categories, start=1):
+            category = await self.categories_repository.get_by_name_or_slug(value)
+            if category is None:
+                raise AppError(
+                    f"категория `{value}` не найдена. Сначала создай ее в Seller Panel "
+                    "или укажи существующее название.",
+                    400,
+                )
+            if category.id in category_ids:
+                raise AppError(f"категория `{value}` указана больше одного раза.", 400)
+            category_ids.add(category.id)
+            assignments.append(ProductCategoryInput(category_id=category.id, priority=priority))
+        return assignments
 
     async def _resolve_quick_product_tags(
         self,
         draft: QuickProductDraft,
-        warnings: list[str],
     ) -> list:
         if not draft.tags:
             return []
@@ -457,7 +645,11 @@ class SellerBotService:
             if tag.strip().lower() not in found_names and tag.strip().lower() not in found_slugs
         ]
         if missing:
-            warnings.append(f"Tags ignored: {', '.join(missing)}")
+            raise AppError(
+                f"теги не найдены: {', '.join(f'`{tag}`' for tag in missing)}. "
+                "Сначала создай их в Seller Panel или укажи существующие теги.",
+                400,
+            )
         return tags
 
     async def _store_quick_product_photo(
@@ -465,84 +657,134 @@ class SellerBotService:
         photo: TelegramPhotoSize,
         *,
         title: str,
-    ) -> ProductImage:
+    ) -> QuickProductImageDraft:
         downloaded = await self.telegram_service.download_file(photo.file_id)
         file_path = self.storage.save_bytes(
             downloaded.content,
             folder="products",
             suffix=downloaded.extension,
         )
-        return ProductImage(
-            file_path=file_path,
+        return QuickProductImageDraft(
+            payload=ProductImageCreate(
+                file_path=file_path,
+                alt_text=title[:255],
+                position=0,
+                is_primary=True,
+            ),
             original_filename=downloaded.original_filename,
             mime_type=downloaded.mime_type,
             size_bytes=len(downloaded.content),
-            alt_text=title[:255],
-            position=0,
-            is_primary=True,
         )
 
-    def _build_quick_product_variants(
+    def _build_quick_product_variant_payloads(
         self,
-        product_id: int,
         draft: QuickProductDraft,
-    ) -> list[ProductVariant]:
-        has_variant_data = bool(draft.sizes or draft.color or draft.sku or draft.stock is not None)
-        if not has_variant_data:
-            return []
-
-        try:
-            sizes = [
-                normalize_size(ProductSizeGrid.CLOTHING_ALPHA, size)
-                for size in (draft.sizes or [QUICK_PRODUCT_SIZE_DEFAULT])
-            ]
-        except SizeGridValidationError as exc:
-            raise AppError(str(exc), 400) from exc
-        stock = draft.stock if draft.stock is not None else 0
+    ) -> list[ProductVariantCreate]:
         return [
-            ProductVariant(
-                product_id=product_id,
-                size=size,
-                color=draft.color,
-                sku=self._variant_sku(draft, size=size, index=index, multiple=len(sizes) > 1),
-                stock_quantity=stock,
+            ProductVariantCreate(
+                size=variant.size,
+                color=variant.color,
+                sku=variant.sku or self._variant_sku(draft, variant=variant, index=index),
+                stock_quantity=variant.stock,
                 reserved_quantity=0,
                 is_active=True,
             )
-            for index, size in enumerate(sizes, start=1)
+            for index, variant in enumerate(draft.variants, start=1)
         ]
 
     def _variant_sku(
         self,
         draft: QuickProductDraft,
         *,
-        size: str,
+        variant: QuickProductVariantDraft,
         index: int,
-        multiple: bool,
     ) -> str:
-        if draft.sku:
-            return f"{draft.sku}-{self._sku_part(size)}"[:100] if multiple else draft.sku[:100]
         base = self._sku_part(draft.title) or "BOT"
-        suffix = self._sku_part(size) if multiple else str(index)
-        return f"BOT-{base[:40]}-{suffix}-{token_hex(3).upper()}"[:100]
+        size = self._sku_part(variant.size) or str(index)
+        color = self._sku_part(variant.color or "")[:16]
+        detail = "-".join(part for part in (size, color) if part)
+        return f"BOT-{base[:40]}-{detail}-{token_hex(3).upper()}"[:100]
 
     def _quick_product_confirmation(
         self,
         *,
         product_id: int,
         draft: QuickProductDraft,
-        warnings: list[str],
     ) -> str:
-        lines = [
-            "Product draft created.",
-            f"Product ID: {product_id}",
-            f"Title: {draft.title}",
-            f"Status: {draft.status.value}",
-            f"Seller Panel: {SELLER_PANEL_PRODUCT_EDIT_URL.format(product_id=product_id)}",
-        ]
-        if warnings:
-            lines.append(f"Warnings: {'; '.join(warnings)}")
-        return "\n".join(lines)
+        return "\n".join(
+            (
+                "Товар создан.",
+                f"ID товара: {product_id}",
+                f"Название: {draft.title}",
+                f"Статус: {draft.status.value}",
+                f"Тип размеров: {draft.size_grid.value}",
+                f"Вариантов: {len(draft.variants)}",
+                f"Редактировать: {SELLER_PANEL_PRODUCT_EDIT_URL.format(product_id=product_id)}",
+            )
+        )
+
+    def _new_product_help_text(self) -> str:
+        return """Создание товара: отправь одну фотографию с подписью в строгом формате.
+
+Одежда:
+/new_product
+
+Название: Футболка HERMES
+Описание: Бюджетные футболки, весна/лето
+Цена: 700
+Старая цена:
+Категории: Футболки
+Теги: футболка, hermes
+Тип размеров: одежда
+Размеры:
+M / White / 10 / HERMES-M-W
+L / White / 8 / HERMES-L-W
+XL / Black / 5 / HERMES-XL-B
+3XL / Black / 3 / HERMES-3XL-B
+Псевдонимы поиска: футболка, фудболка, футбалка
+Статус: черновик
+
+Обувь:
+/new_product
+
+Название: Кроссовки Nike Air Max
+Описание: Лёгкие кроссовки, качество люкс
+Цена: 4990
+Старая цена: 6990
+Категории: Обувь
+Теги: кроссовки, nike, premium
+Тип размеров: обувь
+Размеры:
+39 / White / 3 / SKU-NIKE-39-W
+40 / White / 2 / SKU-NIKE-40-W
+41 / Black / 4 / SKU-NIKE-41-B
+Псевдонимы поиска: найк, кросовки, кроссовки
+Статус: черновик
+
+Формат варианта: размер / цвет / остаток / SKU.
+SKU можно оставить пустым, тогда Bot 2 создаст безопасное значение.
+
+Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.
+Размеры обуви: только российские целые размеры 35-46 без префикса.
+RU/EU/US/UK и половинные размеры не поддерживаются.
+
+Категории и теги должны уже существовать.
+По умолчанию товар создаётся как черновик; его можно отредактировать в Seller Panel."""
+
+    def _format_product_validation_error(self, exc: ValidationError) -> str:
+        error = exc.errors(include_url=False)[0]
+        field = str(error.get("loc", ("товар",))[-1])
+        labels = {
+            "name": "Название",
+            "base_price": "Цена",
+            "old_price": "Старая цена",
+            "search_aliases": "Псевдонимы поиска",
+            "size": "Размеры",
+            "color": "Цвет",
+            "sku": "SKU",
+            "stock_quantity": "Остаток",
+        }
+        return f"поле `{labels.get(field, field)}` не прошло проверку: {error['msg']}."
 
     async def _audit_product_post_rejected(
         self,
@@ -577,7 +819,10 @@ class SellerBotService:
     def _required_text(self, values: dict[str, str], field: str, label: str) -> str:
         value = self._optional_text(values.get(field))
         if value is None:
-            raise AppError(f"Missing required field: {label}", 400)
+            raise AppError(
+                f"обязательное поле `{label}` не заполнено. Пример: `{label}: значение`.",
+                400,
+            )
         return value
 
     def _optional_text(self, value: str | None) -> str | None:
@@ -589,11 +834,14 @@ class SellerBotService:
     def _parse_money(self, value: str, *, field: str) -> Decimal:
         try:
             money = Decimal(value.replace(",", "."))
+            if not money.is_finite() or money <= 0:
+                raise InvalidOperation
+            return money.quantize(Decimal("0.01"))
         except InvalidOperation as exc:
-            raise AppError(f"{field} must be a valid price.", 400) from exc
-        if money <= 0:
-            raise AppError(f"{field} must be greater than 0.", 400)
-        return money.quantize(Decimal("0.01"))
+            raise AppError(
+                f"поле `{field}` должно быть положительным числом. Пример: `{field}: 4990`.",
+                400,
+            ) from exc
 
     def _parse_optional_money(self, value: str | None, *, field: str) -> Decimal | None:
         value = self._optional_text(value)
@@ -612,11 +860,11 @@ class SellerBotService:
         try:
             parsed = int(value)
         except ValueError as exc:
-            raise AppError(f"{field} must be an integer.", 400) from exc
+            raise AppError(f"поле `{field}` должно быть целым числом.", 400) from exc
         if parsed < minimum:
-            raise AppError(f"{field} must be at least {minimum}.", 400)
+            raise AppError(f"поле `{field}` должно быть не меньше {minimum}.", 400)
         if maximum is not None and parsed > maximum:
-            raise AppError(f"{field} must be between {minimum} and {maximum}.", 400)
+            raise AppError(f"поле `{field}` должно быть от {minimum} до {maximum}.", 400)
         return parsed
 
     def _split_csv(self, value: str | None) -> list[str]:

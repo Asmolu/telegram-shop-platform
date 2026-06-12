@@ -269,6 +269,65 @@ async def test_new_product_caption_command_is_routed(
 
 
 @pytest.mark.asyncio
+async def test_new_product_help_command_is_routed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/new_product_help"))
+
+    assert response.handled is True
+    assert response.result == "new_product_help_sent"
+    assert "Размеры одежды: XS, S, M" in telegram.messages[0][1]
+    assert "российские целые размеры 35-46" in telegram.messages[0][1]
+    assert "RU/EU/US/UK" in telegram.messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_new_product_error_reply_hides_unexpected_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+    seller_bot.product_exception = RuntimeError(
+        "Traceback: asyncpg password=secret raw database failure"
+    )
+
+    response = await service.handle_update(_seller_group_product_command_update())
+
+    assert response.result == "bot_product_post_rejected"
+    reply = telegram.messages[0][1]
+    assert "Не удалось создать товар" in reply
+    assert "внутренняя ошибка" in reply
+    assert "Traceback" not in reply
+    assert "password=secret" not in reply
+    assert "asyncpg" not in reply
+
+
+@pytest.mark.asyncio
+async def test_new_product_validation_error_reply_is_seller_friendly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+    seller_bot.product_exception = AppError(
+        "размер `RU 39` недопустим для обуви. Используй российский размер без "
+        "префикса: `39`. Разрешены размеры обуви: 35, 36, ..., 46.",
+        status.HTTP_400_BAD_REQUEST,
+    )
+
+    response = await service.handle_update(_seller_group_product_command_update())
+
+    assert response.result == "bot_product_post_rejected"
+    reply = telegram.messages[0][1]
+    assert reply.startswith("Не удалось создать товар.")
+    assert "Ошибка: размер `RU 39` недопустим для обуви" in reply
+    assert "Используй российский размер без префикса: `39`" in reply
+    assert "/new_product_help" in reply
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("command_text", "expected_fragment"),
     [
@@ -496,6 +555,7 @@ class FakeSellerBotCommandService:
         self.blocked_user_ids: list[int] = []
         self.unblocked_user_ids: list[int] = []
         self.product_messages: list[str] = []
+        self.product_exception: Exception | None = None
 
     async def format_sellers_command(self, *, chat_id: int) -> str:
         return f"Seller list for {chat_id}"
@@ -531,9 +591,19 @@ class FakeSellerBotCommandService:
         actor_username: str | None,
     ) -> str:
         del chat_id, actor_telegram_user_id, actor_username
+        if self.product_exception is not None:
+            raise self.product_exception
         title_line = (message.caption or "").splitlines()[1]
         self.product_messages.append(title_line.split(":", 1)[1].strip())
         return "Product draft created."
+
+    def format_new_product_help_command(self, *, chat_id: int) -> str:
+        del chat_id
+        return (
+            "Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.\n"
+            "Размеры обуви: российские целые размеры 35-46. "
+            "RU/EU/US/UK и половинные размеры не поддерживаются."
+        )
 
 
 def _webhook_service() -> tuple[

@@ -217,6 +217,30 @@ class ProductsService:
         payload: ProductCreate,
         actor_user_id: int | None = None,
     ) -> Product:
+        product = await self.stage_product_with_variants(payload, [])
+        product_id = await self._flush_commit_and_get_id(
+            product,
+            audit_callback=lambda created_product: self._record_audit(
+                actor_user_id=actor_user_id,
+                action="product.created",
+                entity_type="product",
+                entity_id=created_product.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(created_product, PRODUCT_AUDIT_FIELDS),
+            ),
+        )
+        created_product = await self.repository.get_by_id(product_id)
+        if created_product is None:
+            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        await self._invalidate_product_cache(product_id=created_product.id)
+        return created_product
+
+    async def stage_product_with_variants(
+        self,
+        payload: ProductCreate,
+        variants: list[ProductVariantCreate],
+    ) -> Product:
+        """Validate and stage a product graph without committing the transaction."""
         tags = await self._resolve_tags(payload.tag_ids)
         category_assignments = await self._resolve_category_assignments(
             category_id=payload.category_id,
@@ -239,22 +263,35 @@ class ProductsService:
             images=[ProductImage(**image.model_dump()) for image in payload.images],
         )
         self.repository.add(product)
-        product_id = await self._flush_commit_and_get_id(
-            product,
-            audit_callback=lambda created_product: self._record_audit(
-                actor_user_id=actor_user_id,
-                action="product.created",
-                entity_type="product",
-                entity_id=created_product.id,
-                before_data=None,
-                after_data=self.audit_service.snapshot(created_product, PRODUCT_AUDIT_FIELDS),
-            ),
-        )
-        created_product = await self.repository.get_by_id(product_id)
-        if created_product is None:
-            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
-        await self._invalidate_product_cache(product_id=created_product.id)
-        return created_product
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                "Product slug or variant SKU already exists",
+                status.HTTP_409_CONFLICT,
+            ) from exc
+
+        combinations: set[tuple[str, str | None]] = set()
+        for variant_payload in variants:
+            variant = self.prepare_product_variant(
+                product_id=product.id,
+                size_grid=product.size_grid,
+                payload=variant_payload,
+            )
+            combination = (
+                variant.size,
+                variant.color.strip().casefold() if variant.color else None,
+            )
+            if combination in combinations:
+                color = variant.color or "without color"
+                raise AppError(
+                    f"Duplicate product variant for size {variant.size} and color {color}",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            combinations.add(combination)
+            self.variants_repository.add(variant)
+
+        return product
 
     async def update_product(
         self,
@@ -381,11 +418,11 @@ class ProductsService:
         actor_user_id: int | None = None,
     ) -> ProductVariant:
         product = await self.get_product(product_id)
-        self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
-
-        variant_data = payload.model_dump()
-        variant_data["size"] = self._normalize_variant_size(product.size_grid, payload.size)
-        variant = ProductVariant(product_id=product_id, **variant_data)
+        variant = self.prepare_product_variant(
+            product_id=product_id,
+            size_grid=product.size_grid,
+            payload=payload,
+        )
         self.variants_repository.add(variant)
         variant_id = await self._flush_commit_and_get_id(
             variant,
@@ -404,6 +441,18 @@ class ProductsService:
             raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
         await self._invalidate_product_cache(product_id=created_variant.product_id)
         return created_variant
+
+    def prepare_product_variant(
+        self,
+        *,
+        product_id: int,
+        size_grid: ProductSizeGrid,
+        payload: ProductVariantCreate,
+    ) -> ProductVariant:
+        self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
+        variant_data = payload.model_dump()
+        variant_data["size"] = self._normalize_variant_size(size_grid, payload.size)
+        return ProductVariant(product_id=product_id, **variant_data)
 
     async def update_product_variant(
         self,
