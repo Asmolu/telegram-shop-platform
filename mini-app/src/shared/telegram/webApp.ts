@@ -23,6 +23,7 @@ export type TelegramWebApp = {
   };
   themeParams?: TelegramThemeParams;
   colorScheme?: 'light' | 'dark';
+  platform?: string;
   onEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
   offEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
   ready?: () => void;
@@ -102,15 +103,31 @@ export function getTelegramThemeParams() {
   return getTelegramWebApp()?.themeParams ?? {};
 }
 
+function shouldRequestTelegramFullscreen(webApp: TelegramWebApp | undefined) {
+  if (!webApp || typeof webApp.requestFullscreen !== 'function') {
+    return false;
+  }
+
+  const platform = String(webApp.platform ?? '').toLowerCase();
+  const isMobileTelegramPlatform = platform === 'ios'
+    || platform === 'android'
+    || platform === 'android_x';
+  const isLikelyPhoneViewport = typeof window !== 'undefined'
+    && window.innerWidth > 0
+    && window.innerWidth <= 820;
+
+  return isMobileTelegramPlatform && isLikelyPhoneViewport;
+}
+
 export function initTelegramApp() {
   const webApp = getTelegramWebApp();
 
   try {
     webApp?.ready?.();
     webApp?.expand?.();
-    if (typeof webApp?.requestFullscreen === 'function') {
+    if (shouldRequestTelegramFullscreen(webApp)) {
       try {
-        webApp.requestFullscreen();
+        webApp?.requestFullscreen?.();
       } catch {
         // Fullscreen can be unsupported or rejected without blocking startup.
       }
