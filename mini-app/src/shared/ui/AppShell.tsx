@@ -25,7 +25,7 @@ export function TopBar({
   title,
   onBack,
   right,
-  variant = 'default',
+  variant = 'marketplace',
 }: {
   title: string;
   onBack?: () => void;

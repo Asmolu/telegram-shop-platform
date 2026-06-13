@@ -188,7 +188,9 @@ export function applyTelegramTheme() {
   const webApp = getTelegramWebApp();
   const root = document.documentElement;
 
-  root.dataset.theme = 'light';
+  if (!root.dataset.theme) {
+    root.dataset.theme = 'light';
+  }
   root.dataset.telegram = webApp ? 'true' : 'false';
   themeOverrideTokens.forEach((token) => root.style.removeProperty(token));
 }

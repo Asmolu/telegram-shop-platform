@@ -9,12 +9,14 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
 import { openTelegramLink } from '../shared/telegram/webApp';
+import { useTheme } from '../shared/theme/ThemeProvider';
 import { EmptyState, TopBar } from '../shared/ui';
 import { getUserDisplayName } from '../shared/utils/format';
 
 export function ProfilePage() {
   const { currentPath, navigate } = useRouter();
   const { clearToken, isAuthenticated, isTelegram, status, telegramUser, user } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [subscription, setSubscription] =
     React.useState<CustomerNotificationSubscription | null>(null);
   const [notificationsLoading, setNotificationsLoading] = React.useState(false);
@@ -153,10 +155,18 @@ export function ProfilePage() {
 
       <section className="settings-card">
         <h2>Настройки</h2>
-        <div>
-          <span>Тема интерфейса</span>
-          <strong>светлая</strong>
-        </div>
+        <label className="toggle-setting">
+          <span>
+            <strong>Тема интерфейса</strong>
+            <small>{theme === 'dark' ? 'Тёмная' : 'Светлая'}</small>
+          </span>
+          <input
+            checked={theme === 'dark'}
+            role="switch"
+            type="checkbox"
+            onChange={(event) => setTheme(event.target.checked ? 'dark' : 'light')}
+          />
+        </label>
         <div>
           <span>Данные и приватность</span>
           <strong>появятся позже</strong>

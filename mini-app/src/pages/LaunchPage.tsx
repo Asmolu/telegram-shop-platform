@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getSafeReturnTo, useRouter } from '../shared/router/RouterProvider';
-import { ProductGridSkeleton } from '../shared/ui';
+import { ProductGridSkeleton, TopBar } from '../shared/ui';
 import { getTelegramBotUrl } from '../shared/telegram/webApp';
 import { toApiErrorMessage } from '../shared/api';
 
@@ -37,6 +37,7 @@ export function LaunchPage() {
 
   return (
     <div className="launch-screen">
+      <TopBar title="Gadji Store" />
       <div className="launch-brand">
         <div className="logo-mark">G</div>
         <strong>Gadji Store</strong>

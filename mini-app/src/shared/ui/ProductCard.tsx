@@ -19,6 +19,14 @@ export function ProductCard({
 }) {
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
   const badge = getProductBadge(product);
+  const badgeType = product.image_badge_type !== 'none'
+    ? product.image_badge_type
+    : badge?.toLowerCase() === 'new'
+      ? 'new'
+      : badge?.toLowerCase() === 'sale'
+        ? 'sale'
+        : 'custom';
+  const badgePosition = badgeType === 'new' ? 'top' : 'bottom';
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
   const sizes = sortVariants(product.variants, product.size_grid)
@@ -46,7 +54,7 @@ export function ProductCard({
         <ProductImageCarousel product={product} variant="card" />
         {badge ? (
           <span
-            className={`product-badge product-badge--${product.image_badge_type !== 'none' ? product.image_badge_type : badge.toLowerCase()}`}
+            className={`product-badge product-badge--${badgeType} product-badge--${badgePosition}`}
           >
             {badge}
           </span>

@@ -1,6 +1,7 @@
 import { AuthProvider } from './shared/auth/AuthProvider';
 import { RouterProvider, getRouteId, useRouter } from './shared/router/RouterProvider';
-import { AppShell } from './shared/ui';
+import { ThemeProvider } from './shared/theme/ThemeProvider';
+import { AppShell, TopBar } from './shared/ui';
 import { CartPage } from './pages/CartPage';
 import { CategoryPage } from './pages/CategoryPage';
 import { CategoriesPage } from './pages/CategoriesPage';
@@ -62,6 +63,7 @@ function RouteSwitch() {
     default:
       page = (
         <div className="page">
+          <TopBar title="Страница не найдена" onBack={() => navigate('/main')} />
           <section className="state-block">
             <h1>Страница не найдена</h1>
             <button className="primary-button" type="button" onClick={() => navigate('/main')}>
@@ -77,10 +79,12 @@ function RouteSwitch() {
 
 export function App() {
   return (
-    <RouterProvider>
-      <AuthProvider>
-        <RouteSwitch />
-      </AuthProvider>
-    </RouterProvider>
+    <ThemeProvider>
+      <RouterProvider>
+        <AuthProvider>
+          <RouteSwitch />
+        </AuthProvider>
+      </RouterProvider>
+    </ThemeProvider>
   );
 }
