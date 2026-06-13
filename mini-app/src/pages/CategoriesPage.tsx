@@ -43,7 +43,7 @@ export function CategoriesPage() {
   }, []);
 
   return (
-    <div className="page">
+    <div className="page page--gradient-header">
       <TopBar title="Категории" variant="marketplace" />
 
       {loading ? <PageLoader text="Загружаем категории..." /> : null}

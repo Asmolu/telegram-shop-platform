@@ -64,7 +64,7 @@ export function SearchPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page page--gradient-header">
       <TopBar title="Поиск товаров" variant="marketplace" />
       {loading ? <PageLoader text="Готовим фильтры..." /> : null}
       {!loading && error ? <ErrorState message={error} /> : null}

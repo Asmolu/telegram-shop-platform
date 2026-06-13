@@ -173,9 +173,9 @@ label {
 
 .top-bar--marketplace {
   min-height: 58px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   border-bottom: 0;
-  border-radius: 0 0 22px 22px;
+  border-radius: 0 0 22px 0;
   background: var(--marketplace-gradient);
   color: #ffffff;
   box-shadow: 0 14px 30px rgba(124, 58, 237, 0.24);
@@ -1481,9 +1481,10 @@ label {
 .detail-cta__price {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 3px;
+  justify-content: flex-start;
+  gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .detail-cta__price strong {

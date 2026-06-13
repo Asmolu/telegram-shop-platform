@@ -100,6 +100,15 @@ function buildUrl(path: string, query?: QueryParams): string {
   return url.toString();
 }
 
+function clampQueryLimit(query: QueryParams, maxLimit: number): QueryParams {
+  const requestedLimit = Number(query.limit);
+  if (!Number.isFinite(requestedLimit) || requestedLimit <= maxLimit) {
+    return query;
+  }
+
+  return { ...query, limit: maxLimit };
+}
+
 function getErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') {
     return fallback;
@@ -224,7 +233,7 @@ export const api = {
   },
   products: {
     listAdmin: (query: QueryParams = {}) =>
-      apiRequest<PageList<Product>>('/products/admin', { query }),
+      apiRequest<PageList<Product>>('/products/admin', { query: clampQueryLimit(query, 100) }),
     getAdmin: (productId: number) => apiRequest<Product>(`/products/admin/${productId}`),
     create: (body: ProductCreate) => apiRequest<Product>('/products', { method: 'POST', body }),
     update: (productId: number, body: ProductUpdate) =>

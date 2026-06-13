@@ -102,6 +102,13 @@ export function ProductDetailPage() {
     || !product?.is_available
     || (selectedVariant !== null && !selectedVariantAvailable),
   );
+  const cartActionDisabled = Boolean(
+    cartAction !== null
+    || (!inCart && (
+      !product?.is_available
+      || (selectedVariant !== null && !selectedVariantAvailable)
+    )),
+  );
 
   async function toggleFavorite() {
     if (!product) return;
@@ -126,6 +133,10 @@ export function ProductDetailPage() {
   async function runCartAction(action: 'buy' | 'cart') {
     if (!product || !selectedVariant) {
       setNotice('Выберите доступный размер.');
+      return;
+    }
+    if (action === 'cart' && inCart) {
+      navigate('/cart?tab=cart');
       return;
     }
     if (!selectedVariantAvailable || !product.is_available) {
@@ -355,10 +366,10 @@ export function ProductDetailPage() {
           <button
             className="primary-button"
             type="button"
-            disabled={purchaseActionsDisabled}
+            disabled={cartActionDisabled}
             onClick={() => void runCartAction('cart')}
           >
-            {cartAction === 'cart' ? 'Добавляем...' : 'В корзину'}
+            {cartAction === 'cart' ? 'Добавляем...' : inCart ? 'Перейти в корзину' : 'В корзину'}
           </button>
         </div>
       </div>

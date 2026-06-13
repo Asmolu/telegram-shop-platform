@@ -125,7 +125,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     Promise.all([
       api.categories.list(),
       api.tags.list(),
-      api.products.listAdmin({ limit: 200, offset: 0 }),
+      api.products.listAdmin({ limit: 100, offset: 0 }),
       mode === 'edit' && productId ? api.products.getAdmin(productId) : Promise.resolve(null),
     ])
       .then(([categoryList, tagList, productList, loadedProduct]) => {
