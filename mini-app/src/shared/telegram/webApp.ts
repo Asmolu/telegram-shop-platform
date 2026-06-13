@@ -27,6 +27,8 @@ export type TelegramWebApp = {
   offEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
   ready?: () => void;
   expand?: () => void;
+  requestFullscreen?: () => void;
+  exitFullscreen?: () => void;
   disableVerticalSwipes?: () => void;
   close?: () => void;
   openTelegramLink?: (url: string) => void;
@@ -106,6 +108,13 @@ export function initTelegramApp() {
   try {
     webApp?.ready?.();
     webApp?.expand?.();
+    if (typeof webApp?.requestFullscreen === 'function') {
+      try {
+        webApp.requestFullscreen();
+      } catch {
+        // Fullscreen can be unsupported or rejected without blocking startup.
+      }
+    }
     if (typeof webApp?.disableVerticalSwipes === 'function') {
       webApp.disableVerticalSwipes();
     }
