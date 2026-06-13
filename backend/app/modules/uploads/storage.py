@@ -30,6 +30,11 @@ class LocalStorageService:
         if target_path.is_file():
             target_path.unlink()
 
+    def exists(self, relative_path: str) -> bool:
+        target_path = (self.base_dir / relative_path).resolve()
+        base_path = self.base_dir.resolve()
+        return target_path.is_relative_to(base_path) and target_path.is_file()
+
     def _safe_target_dir(self, folder: str) -> Path:
         if folder not in settings.upload_subdirs:
             msg = "Unsupported upload folder"

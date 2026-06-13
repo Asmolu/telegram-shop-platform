@@ -23,6 +23,17 @@ export const PRODUCT_IMAGE_CROP_SPEC: ImageCropSpec = {
   minHeight: 750,
 };
 
+export const TAG_IMAGE_CROP_SPEC: ImageCropSpec = {
+  id: 'tag',
+  title: 'Tag image crop',
+  aspectLabel: '4:3',
+  aspectRatio: 4 / 3,
+  outputWidth: 1200,
+  outputHeight: 900,
+  minWidth: 600,
+  minHeight: 450,
+};
+
 export const NATIVE_BANNER_CROP_SPEC: ImageCropSpec = {
   id: 'native-banner',
   title: 'Horizontal banner crop',

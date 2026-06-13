@@ -80,6 +80,8 @@ export interface Tag {
   id: number;
   name: string;
   slug: string;
+  image_path: string | null;
+  image_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +89,7 @@ export interface Tag {
 export interface TagPayload {
   name: string;
   slug: string;
+  image_path?: string | null;
 }
 
 export interface ProductImage {
@@ -213,6 +216,8 @@ export interface UploadedBannerImage {
   size_bytes: number;
   alt_text: string | null;
 }
+
+export interface UploadedTagImage extends UploadedBannerImage {}
 
 export interface OrderItem {
   id: number;

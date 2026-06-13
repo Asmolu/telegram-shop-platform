@@ -167,6 +167,27 @@ async def test_banner_image_upload_stores_file_without_creating_banner(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_tag_image_upload_stores_file_in_tags_directory(tmp_path: Path) -> None:
+    session = DummySession()
+    service = UploadsService(session, storage=LocalStorageService(tmp_path))
+    content = _image_bytes(1200, 900, "WEBP")
+
+    image = await service.upload_tag_image(
+        file=_upload_file("../premium.webp", content, "image/webp"),
+        alt_text="Premium",
+    )
+
+    assert image.file_path.startswith("tags/")
+    assert image.url == f"/uploads/{image.file_path}"
+    assert image.original_filename == "premium.webp"
+    assert image.mime_type == "image/webp"
+    assert image.size_bytes == len(content)
+    assert image.alt_text == "Premium"
+    assert (tmp_path / image.file_path).is_file()
+    assert session.committed is False
+
+
+@pytest.mark.asyncio
 async def test_vertical_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
@@ -298,6 +319,36 @@ def test_banner_upload_route_allows_admin() -> None:
 
     assert response.status_code == 201
     assert response.json()["url"] == "/uploads/banners/generated.webp"
+
+
+def test_tag_upload_route_allows_seller() -> None:
+    app = create_app()
+
+    class FakeUploadsService:
+        async def upload_tag_image(self, **_: object) -> dict[str, object]:
+            return {
+                "file_path": "tags/0123456789abcdef0123456789abcdef.webp",
+                "url": "/uploads/tags/0123456789abcdef0123456789abcdef.webp",
+                "original_filename": "premium.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 12,
+                "alt_text": "Premium",
+            }
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_uploads_service] = lambda: FakeUploadsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/uploads/tags/images",
+                files={"file": ("premium.webp", b"tag-bytes", "image/webp")},
+                data={"alt_text": "Premium"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["file_path"].startswith("tags/")
 
 
 def test_static_upload_path_serves_files(tmp_path: Path) -> None:

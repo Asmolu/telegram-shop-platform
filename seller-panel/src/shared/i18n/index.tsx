@@ -325,6 +325,9 @@ const dictionaries: Record<Language, Record<string, string>> = {
     'taxonomy.emptyCategories': 'Категории пока не созданы.',
     'taxonomy.emptyTags': 'Теги пока не созданы.',
     'taxonomy.slugHint': 'Slug формируется латиницей и используется в API.',
+    'taxonomy.tagImage': 'Изображение тега',
+    'taxonomy.tagImageHint': 'Карточка 4:3. Рекомендуемый размер 1200x900, минимум 600x450.',
+    'taxonomy.removeTagImage': 'Удалить изображение',
 
     'orders.loading': 'Загружаем заказы',
     'orders.searchPlaceholder': 'Номер заказа или покупатель',
@@ -488,6 +491,7 @@ const dictionaries: Record<Language, Record<string, string>> = {
     'settings.clearToken': 'Очистить токен и выйти',
 
     'crop.product.title': 'Кроп изображения товара',
+    'crop.tag.title': 'Кроп изображения тега',
     'crop.native-banner.title': 'Кроп нативного баннера',
     'crop.vertical-banner.title': 'Кроп вертикального баннера',
     'crop.popup-banner.title': 'Кроп popup-баннера',
@@ -943,6 +947,9 @@ Object.assign(englishOverrides, {
   'taxonomy.emptyCategories': 'No categories have been created.',
   'taxonomy.emptyTags': 'No tags have been created.',
   'taxonomy.slugHint': 'Slug uses latin characters and is used in the API.',
+  'taxonomy.tagImage': 'Tag image',
+  'taxonomy.tagImageHint': '4:3 card image. Recommended 1200x900, minimum 600x450.',
+  'taxonomy.removeTagImage': 'Remove image',
 });
 
 Object.assign(englishOverrides, {
@@ -1122,6 +1129,7 @@ Object.assign(englishOverrides, {
 
 Object.assign(englishOverrides, {
   'crop.product.title': 'Product image crop',
+  'crop.tag.title': 'Tag image crop',
   'crop.native-banner.title': 'Horizontal banner crop',
   'crop.vertical-banner.title': 'Vertical banner crop',
   'crop.popup-banner.title': 'Popup banner crop',

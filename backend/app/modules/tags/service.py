@@ -9,15 +9,22 @@ from app.core.errors import AppError
 from app.db.models import Tag
 from app.modules.tags.repository import TagsRepository
 from app.modules.tags.schemas import TagCreate, TagRead, TagUpdate
+from app.modules.uploads.storage import LocalStorageService
 
 _TAGS_ADAPTER = TypeAdapter(list[TagRead])
 
 
 class TagsService:
-    def __init__(self, session: AsyncSession, cache: CacheService | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        cache: CacheService | None = None,
+        storage: LocalStorageService | None = None,
+    ) -> None:
         self.session = session
         self.repository = TagsRepository(session)
         self.cache = cache
+        self.storage = storage or LocalStorageService()
 
     async def list_tags(self) -> list[Tag] | list[TagRead]:
         if self.cache is not None:
@@ -42,6 +49,7 @@ class TagsService:
         return tag
 
     async def create_tag(self, payload: TagCreate) -> Tag:
+        self._validate_image_path(payload.image_path)
         tag = Tag(**payload.model_dump())
         self.repository.add(tag)
         await self._commit()
@@ -51,7 +59,10 @@ class TagsService:
 
     async def update_tag(self, tag_id: int, payload: TagUpdate) -> Tag:
         tag = await self.get_tag(tag_id)
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        data = payload.model_dump(exclude_unset=True)
+        if "image_path" in data:
+            self._validate_image_path(data["image_path"])
+        for field, value in data.items():
             setattr(tag, field, value)
 
         await self._commit()
@@ -76,3 +87,7 @@ class TagsService:
         if self.cache is None:
             return
         await self.cache.delete_patterns(*taxonomy_cache_patterns())
+
+    def _validate_image_path(self, image_path: str | None) -> None:
+        if image_path is not None and not self.storage.exists(image_path):
+            raise AppError("Tag image was not uploaded", status.HTTP_400_BAD_REQUEST)

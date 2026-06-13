@@ -448,6 +448,7 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -464,6 +465,10 @@ class Tag(Base):
         secondary=product_tags,
         back_populates="tags",
     )
+
+    @property
+    def image_url(self) -> str | None:
+        return f"/uploads/{self.image_path}" if self.image_path else None
 
 
 class ProductCategory(Base):

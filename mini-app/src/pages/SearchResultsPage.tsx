@@ -33,6 +33,8 @@ export function SearchResultsPage() {
   const priceFrom = Number(searchParams.get('price_from') ?? 0);
   const priceTo = Number(searchParams.get('price_to') ?? 0);
   const categoryName = searchParams.get('category');
+  const tagName = searchParams.get('tag');
+  const fromCategories = searchParams.get('from') === 'categories';
 
   React.useEffect(() => {
     let cancelled = false;
@@ -109,7 +111,11 @@ export function SearchResultsPage() {
 
   return (
     <div className="page">
-      <TopBar title={categoryName || 'Результаты'} variant="marketplace" onBack={() => navigate('/search')} />
+      <TopBar
+        title={categoryName || tagName || 'Результаты'}
+        variant="marketplace"
+        onBack={() => navigate(fromCategories ? '/categories' : '/search')}
+      />
       <button className="search-field search-field--static" type="button" onClick={() => navigate('/search')}>
         <SearchIcon className="search-icon" />
         {query || 'Найти одежду, бренд, размер...'}

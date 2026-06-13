@@ -27,6 +27,8 @@ export type Tag = {
   id: number;
   name: string;
   slug: string;
+  image_path?: string | null;
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 };

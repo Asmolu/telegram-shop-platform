@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     uploads_dir: str = "uploads"
     public_uploads_url: str = "/uploads"
-    upload_subdirs: tuple[str, ...] = ("products", "banners", "reviews", "temp")
+    upload_subdirs: tuple[str, ...] = ("products", "banners", "reviews", "tags", "temp")
 
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://localhost:5174,http://localhost:3000",

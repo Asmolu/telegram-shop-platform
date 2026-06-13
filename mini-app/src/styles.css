@@ -969,6 +969,31 @@ label {
   gap: 10px;
 }
 
+.taxonomy-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.taxonomy-section__heading h2,
+.taxonomy-section__heading p {
+  margin: 0;
+}
+
+.taxonomy-section__heading h2 {
+  font-size: 18px;
+}
+
+.taxonomy-section__heading p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.category-card--tag {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
+}
+
 .category-card {
   position: relative;
   display: grid;

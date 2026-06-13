@@ -13,11 +13,12 @@ from app.modules.products.repository import ProductsRepository
 from app.modules.uploads.image_profiles import (
     BANNER_IMAGE_PROFILES,
     PRODUCT_IMAGE_PROFILE,
+    TAG_IMAGE_PROFILE,
     ImageUploadKind,
     ImageUploadProfile,
 )
 from app.modules.uploads.repository import UploadsRepository
-from app.modules.uploads.schemas import BannerImageUploadRead
+from app.modules.uploads.schemas import BannerImageUploadRead, TagImageUploadRead
 from app.modules.uploads.storage import LocalStorageService
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
@@ -102,6 +103,27 @@ class UploadsService:
             suffix=upload.extension,
         )
         return BannerImageUploadRead(
+            file_path=file_path,
+            url=f"/uploads/{file_path}",
+            original_filename=upload.original_filename,
+            mime_type=upload.mime_type,
+            size_bytes=upload.size_bytes,
+            alt_text=alt_text,
+        )
+
+    async def upload_tag_image(
+        self,
+        *,
+        file: UploadFile,
+        alt_text: str | None = None,
+    ) -> TagImageUploadRead:
+        upload = await self._validate_and_read_image(file, profile=TAG_IMAGE_PROFILE)
+        file_path = self.storage.save_bytes(
+            upload.content,
+            folder="tags",
+            suffix=upload.extension,
+        )
+        return TagImageUploadRead(
             file_path=file_path,
             url=f"/uploads/{file_path}",
             original_filename=upload.original_filename,

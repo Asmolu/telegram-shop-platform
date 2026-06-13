@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -44,8 +45,9 @@ from app.modules.products.size_grids import (
     SizeGridValidationError,
     normalize_size,
 )
-from app.modules.tags.schemas import TagCreate, TagUpdate
+from app.modules.tags.schemas import TagCreate, TagRead, TagUpdate
 from app.modules.tags.service import TagsService
+from app.modules.uploads.storage import LocalStorageService
 
 
 class DummySession:
@@ -123,6 +125,57 @@ async def test_tag_service_crud_flow() -> None:
     assert created.id == 1
     assert updated.name == "Sale"
     service.repository.delete.assert_awaited_once_with(tag)
+
+
+@pytest.mark.asyncio
+async def test_tag_service_sets_and_clears_uploaded_image(tmp_path: Path) -> None:
+    image_path = "tags/0123456789abcdef0123456789abcdef.jpg"
+    (tmp_path / "tags").mkdir()
+    (tmp_path / image_path).write_bytes(b"tag-image")
+    tag = _tag(image_path=image_path)
+    service = TagsService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.repository.add = lambda created: setattr(created, "id", 1)
+    service.repository.get_by_id = AsyncMock(return_value=tag)
+
+    created = await service.create_tag(
+        TagCreate(name="Premium", slug="premium", image_path=image_path)
+    )
+    updated = await service.update_tag(1, TagUpdate(image_path=None))
+
+    assert created.image_path == image_path
+    assert created.image_url == f"/uploads/{image_path}"
+    assert updated.image_path is None
+    assert updated.image_url is None
+
+
+@pytest.mark.asyncio
+async def test_tag_service_rejects_missing_uploaded_image(tmp_path: Path) -> None:
+    service = TagsService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="was not uploaded") as exc_info:
+        await service.create_tag(
+            TagCreate(
+                name="Premium",
+                slug="premium",
+                image_path="tags/0123456789abcdef0123456789abcdef.jpg",
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_tag_schema_rejects_external_image_url() -> None:
+    with pytest.raises(ValidationError):
+        TagCreate(name="Premium", slug="premium", image_path="https://example.com/tag.jpg")
+
+
+def test_tag_read_exposes_image_url() -> None:
+    image_path = "tags/0123456789abcdef0123456789abcdef.webp"
+
+    result = TagRead.model_validate(_tag(image_path=image_path))
+
+    assert result.image_path == image_path
+    assert result.image_url == f"/uploads/{image_path}"
 
 
 @pytest.mark.asyncio
@@ -861,11 +914,13 @@ def _tag(
     tag_id: int = 1,
     name: str = "Premium",
     slug: str = "premium",
+    image_path: str | None = None,
 ) -> Tag:
     return Tag(
         id=tag_id,
         name=name,
         slug=slug,
+        image_path=image_path,
         created_at=datetime(2026, 5, 27, tzinfo=UTC),
         updated_at=datetime(2026, 5, 27, tzinfo=UTC),
     )

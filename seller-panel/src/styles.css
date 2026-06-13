@@ -584,6 +584,33 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.taxonomy-tag-thumb {
+  width: 72px;
+  height: 54px;
+}
+
+.taxonomy-tag-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.taxonomy-tag-preview img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.taxonomy-image-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .statistics-gap-note {
   padding: 12px 14px;
   font-size: 13px;

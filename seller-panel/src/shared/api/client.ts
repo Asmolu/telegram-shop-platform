@@ -41,6 +41,7 @@ import type {
   TokenResponse,
   UploadedBannerImage,
   UploadedProductImage,
+  UploadedTagImage,
   User,
 } from './types';
 
@@ -230,6 +231,17 @@ export const api = {
     update: (tagId: number, body: Partial<TagPayload>) =>
       apiRequest<Tag>(`/tags/${tagId}`, { method: 'PATCH', body }),
     delete: (tagId: number) => apiRequest<void>(`/tags/${tagId}`, { method: 'DELETE' }),
+    uploadImage: (file: File, altText?: string) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (altText) {
+        formData.append('alt_text', altText);
+      }
+      return apiRequest<UploadedTagImage>('/uploads/tags/images', {
+        method: 'POST',
+        formData,
+      });
+    },
   },
   products: {
     listAdmin: (query: QueryParams = {}) =>

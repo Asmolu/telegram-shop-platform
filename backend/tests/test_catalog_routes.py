@@ -8,6 +8,7 @@ from app.db.models import User, UserRole
 from app.main import create_app
 from app.modules.products.router import get_products_service
 from app.modules.products.schemas import ProductList
+from app.modules.tags.router import get_tags_service
 
 
 def test_public_product_list_allows_anonymous_access() -> None:
@@ -93,6 +94,35 @@ def test_category_and_tag_write_routes_are_protected() -> None:
 
     assert category_response.status_code == 401
     assert tag_response.status_code == 401
+
+
+def test_public_tag_list_includes_image_url() -> None:
+    app = create_app()
+
+    class FakeTagsService:
+        async def list_tags(self) -> list[dict[str, object]]:
+            now = datetime(2026, 6, 13, tzinfo=UTC).isoformat()
+            return [
+                {
+                    "id": 1,
+                    "name": "Premium",
+                    "slug": "premium",
+                    "image_path": "tags/0123456789abcdef0123456789abcdef.webp",
+                    "image_url": "/uploads/tags/0123456789abcdef0123456789abcdef.webp",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            ]
+
+    app.dependency_overrides[get_tags_service] = lambda: FakeTagsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/tags")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["image_url"].startswith("/uploads/tags/")
 
 
 def test_product_create_allows_seller() -> None:

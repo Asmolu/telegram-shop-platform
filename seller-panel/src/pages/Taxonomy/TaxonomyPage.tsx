@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { api } from '../../shared/api';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type { Category, CategoryPayload, Tag, TagPayload } from '../../shared/api';
 import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
+import { ImageCropEditor, TAG_IMAGE_CROP_SPEC } from '../../shared/ui/ImageCropEditor';
 import { formatDate, slugify } from '../../shared/utils/format';
 
 interface PageProps {
@@ -18,6 +19,7 @@ interface CategoryFormState {
 interface TagFormState {
   name: string;
   slug: string;
+  imagePath: string | null;
 }
 
 const initialCategoryForm: CategoryFormState = {
@@ -29,6 +31,7 @@ const initialCategoryForm: CategoryFormState = {
 const initialTagForm: TagFormState = {
   name: '',
   slug: '',
+  imagePath: null,
 };
 
 export function TaxonomyPage({ onAuthExpired }: PageProps) {
@@ -39,6 +42,9 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(initialCategoryForm);
   const [tagForm, setTagForm] = useState<TagFormState>(initialTagForm);
+  const [tagImageFile, setTagImageFile] = useState<File | null>(null);
+  const [tagCropSourceFile, setTagCropSourceFile] = useState<File | null>(null);
+  const [tagImagePreview, setTagImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -63,6 +69,17 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
     loadTaxonomy();
   }, []);
 
+  useEffect(() => {
+    if (!tagImageFile) {
+      setTagImagePreview(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(tagImageFile);
+    setTagImagePreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [tagImageFile]);
+
   function selectCategory(category: Category) {
     setEditingCategory(category);
     setCategoryForm({
@@ -78,7 +95,10 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
     setTagForm({
       name: tag.name,
       slug: tag.slug,
+      imagePath: tag.image_path,
     });
+    setTagImageFile(null);
+    setTagCropSourceFile(null);
     setTagError(null);
   }
 
@@ -91,6 +111,8 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
   function resetTagForm() {
     setEditingTag(null);
     setTagForm(initialTagForm);
+    setTagImageFile(null);
+    setTagCropSourceFile(null);
     setTagError(null);
   }
 
@@ -139,12 +161,19 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
     }
 
     setSaving('tag');
-    const payload: TagPayload = {
-      name: tagForm.name.trim(),
-      slug: tagForm.slug.trim(),
-    };
-
     try {
+      let imagePath = tagForm.imagePath;
+      if (tagImageFile) {
+        const uploaded = await api.tags.uploadImage(tagImageFile, tagForm.name.trim());
+        imagePath = uploaded.file_path;
+      }
+
+      const payload: TagPayload = {
+        name: tagForm.name.trim(),
+        slug: tagForm.slug.trim(),
+        image_path: imagePath,
+      };
+
       if (editingTag) {
         await api.tags.update(editingTag.id, payload);
         setNotice(t('taxonomy.notice.tagUpdated'));
@@ -155,10 +184,25 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
       resetTagForm();
       loadTaxonomy();
     } catch (requestError) {
-      setError(requestError);
+      setTagError(
+        requestError instanceof ApiError || requestError instanceof Error
+          ? requestError.message
+          : t('common.requestFailed'),
+      );
     } finally {
       setSaving(null);
     }
+  }
+
+  function handleTagImageChange(event: ChangeEvent<HTMLInputElement>) {
+    setTagCropSourceFile(event.target.files?.[0] ?? null);
+    event.target.value = '';
+  }
+
+  function removeTagImage() {
+    setTagImageFile(null);
+    setTagCropSourceFile(null);
+    setTagForm((current) => ({ ...current, imagePath: null }));
   }
 
   async function deleteCategory(category: Category) {
@@ -201,6 +245,9 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
   if (error) {
     return <ErrorState error={error} onRetry={loadTaxonomy} onAuthExpired={onAuthExpired} />;
   }
+
+  const currentTagImageUrl = tagImagePreview
+    ?? (tagForm.imagePath ? resolveMediaUrl(`/uploads/${tagForm.imagePath}`) : '');
 
   return (
     <div className="page-stack">
@@ -331,6 +378,7 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
           <table>
             <thead>
               <tr>
+                <th>{t('taxonomy.tagImage')}</th>
                 <th>{t('common.name')}</th>
                 <th>{t('productEditor.slug')}</th>
                 <th>{t('common.updated')}</th>
@@ -340,13 +388,26 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
             <tbody>
               {tags.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={5}>
                     <div className="empty-table">{t('taxonomy.emptyTags')}</div>
                   </td>
                 </tr>
               ) : (
                 tags.map((tag) => (
                   <tr key={tag.id}>
+                    <td>
+                      {tag.image_url ? (
+                        <img
+                          className="table-image taxonomy-tag-thumb"
+                          src={resolveMediaUrl(tag.image_url)}
+                          alt=""
+                        />
+                      ) : (
+                        <span className="table-image table-image-empty taxonomy-tag-thumb">
+                          {tag.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <strong>{tag.name}</strong>
                       <small>{t('common.id')} {tag.id}</small>
@@ -407,6 +468,22 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
                 onChange={(event) => setTagForm((current) => ({ ...current, slug: event.target.value }))}
               />
             </label>
+            <label className="field">
+              <span>{t('taxonomy.tagImage')}</span>
+              <small className="field-hint">{t('taxonomy.tagImageHint')}</small>
+              <input accept="image/jpeg,image/png,image/webp" type="file" onChange={handleTagImageChange} />
+            </label>
+            {currentTagImageUrl ? (
+              <div className="taxonomy-tag-preview">
+                <img src={currentTagImageUrl} alt={tagForm.name || t('common.tag')} />
+                <div className="taxonomy-image-actions">
+                  {tagImageFile ? <span>{tagImageFile.name}</span> : null}
+                  <button className="text-button danger-text" type="button" onClick={removeTagImage}>
+                    {t('taxonomy.removeTagImage')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <button className="button button-primary" disabled={saving === 'tag'} type="submit">
               {saving === 'tag'
                 ? t('common.saving')
@@ -417,6 +494,17 @@ export function TaxonomyPage({ onAuthExpired }: PageProps) {
           </form>
         </section>
       </div>
+      {tagCropSourceFile ? (
+        <ImageCropEditor
+          file={tagCropSourceFile}
+          spec={TAG_IMAGE_CROP_SPEC}
+          onApply={(file) => {
+            setTagImageFile(file);
+            setTagCropSourceFile(null);
+          }}
+          onCancel={() => setTagCropSourceFile(null)}
+        />
+      ) : null}
     </div>
   );
 }
