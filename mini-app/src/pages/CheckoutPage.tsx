@@ -1,5 +1,14 @@
 import React from 'react';
-import { checkoutCart, getCart, toApiErrorMessage, validatePromoCode, type Cart, type PromoValidation } from '../shared/api';
+import {
+  checkoutCart,
+  getCart,
+  getPersonalData,
+  toApiErrorMessage,
+  validatePromoCode,
+  type Cart,
+  type PersonalData,
+  type PromoValidation,
+} from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
@@ -28,6 +37,7 @@ export function CheckoutPage() {
     comment: '',
     username: telegramUser?.username ?? user?.username ?? '',
   });
+  const editedFields = React.useRef(new Set<keyof typeof form>());
 
   React.useEffect(() => {
     let cancelled = false;
@@ -39,9 +49,15 @@ export function CheckoutPage() {
       setLoading(true);
       setError(null);
       try {
-        const result = await getCart();
+        const [result, personalData] = await Promise.all([
+          getCart(),
+          getPersonalData().catch(() => null),
+        ]);
         if (!cancelled) {
           setCart(result);
+          if (personalData) {
+            applyPersonalData(personalData);
+          }
         }
 
         const code = normalizePromoCode(initialPromoCode.current);
@@ -73,7 +89,30 @@ export function CheckoutPage() {
   }, [isAuthenticated]);
 
   function updateField(field: keyof typeof form, value: string) {
+    editedFields.current.add(field);
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function applyPersonalData(personalData: PersonalData) {
+    const values: Partial<typeof form> = {
+      contactName: personalData.recipient_name ?? undefined,
+      phone: personalData.contact_phone ?? undefined,
+      city: personalData.city ?? undefined,
+      height: personalData.height_cm == null ? undefined : String(personalData.height_cm),
+      weight: personalData.weight_kg == null ? undefined : String(personalData.weight_kg),
+      comment: personalData.persistent_comment ?? undefined,
+      username: personalData.telegram_username ?? undefined,
+    };
+
+    setForm((current) => {
+      const next = { ...current };
+      for (const [field, value] of Object.entries(values) as [keyof typeof form, string | undefined][]) {
+        if (value !== undefined && !editedFields.current.has(field)) {
+          next[field] = value;
+        }
+      }
+      return next;
+    });
   }
 
   async function applyPromo(event: React.FormEvent<HTMLFormElement>) {

@@ -122,6 +122,9 @@ export function getRouteId(pathname: string) {
   if (pathname === '/profile') {
     return 'profile';
   }
+  if (pathname === '/profile/personal-data') {
+    return 'personal-data';
+  }
   if (pathname === '/faq') {
     return 'faq';
   }

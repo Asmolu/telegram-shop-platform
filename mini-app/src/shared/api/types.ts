@@ -127,6 +127,18 @@ export type User = {
   updated_at: string;
 };
 
+export type PersonalData = {
+  recipient_name?: string | null;
+  contact_phone?: string | null;
+  city?: string | null;
+  height_cm?: number | null;
+  weight_kg?: string | number | null;
+  telegram_username?: string | null;
+  persistent_comment?: string | null;
+};
+
+export type PersonalDataUpdate = PersonalData;
+
 export type TokenResponse = {
   access_token: string;
   token_type: 'bearer' | string;

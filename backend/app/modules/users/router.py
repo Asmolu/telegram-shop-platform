@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import User, UserRole
-from app.modules.users.schemas import UserList, UserRead
+from app.modules.users.schemas import (
+    PersonalDataRead,
+    PersonalDataUpdate,
+    UserList,
+    UserRead,
+)
 from app.modules.users.service import UsersService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -18,6 +23,23 @@ def get_users_service(session: Annotated[AsyncSession, Depends(get_db_session)])
 @router.get("/me", response_model=UserRead)
 async def read_current_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
     return current_user
+
+
+@router.get("/me/personal-data", response_model=PersonalDataRead)
+async def read_current_user_personal_data(
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UsersService, Depends(get_users_service)],
+) -> PersonalDataRead:
+    return service.get_personal_data(current_user)
+
+
+@router.put("/me/personal-data", response_model=PersonalDataRead)
+async def update_current_user_personal_data(
+    payload: PersonalDataUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UsersService, Depends(get_users_service)],
+) -> PersonalDataRead:
+    return await service.update_personal_data(current_user, payload)
 
 
 @router.get("/admin", response_model=UserList)

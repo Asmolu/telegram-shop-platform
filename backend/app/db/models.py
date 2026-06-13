@@ -171,6 +171,13 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recipient_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    persistent_comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role", values_callable=_enum_values),
         nullable=False,

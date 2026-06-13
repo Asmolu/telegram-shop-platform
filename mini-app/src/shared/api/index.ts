@@ -11,6 +11,8 @@ import type {
   FavoriteList,
   Order,
   OrderList,
+  PersonalData,
+  PersonalDataUpdate,
   Product,
   ProductList,
   ProductSizeGrid,
@@ -46,6 +48,17 @@ export function loginWithTelegram(initData: string) {
 
 export function getCurrentUser() {
   return apiRequest<User>('/users/me');
+}
+
+export function getPersonalData() {
+  return apiRequest<PersonalData>('/users/me/personal-data');
+}
+
+export function updatePersonalData(payload: PersonalDataUpdate) {
+  return apiRequest<PersonalData>('/users/me/personal-data', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getProducts(params: ProductListParams = {}) {

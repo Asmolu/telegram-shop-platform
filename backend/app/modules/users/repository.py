@@ -30,3 +30,7 @@ class UsersRepository:
 
     def add(self, user: User) -> None:
         self.session.add(user)
+
+    def set_personal_data(self, user: User, values: dict[str, object]) -> None:
+        for field, value in values.items():
+            setattr(user, field, value)

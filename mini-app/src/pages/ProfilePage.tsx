@@ -136,6 +136,9 @@ export function ProfilePage() {
       </section>
 
       <section className="link-list">
+        <button type="button" onClick={() => navigate('/profile/personal-data')}>
+          Личные данные<span>›</span>
+        </button>
         <button type="button" onClick={() => navigate('/cart?tab=orders')}>
           Мои заказы<span>›</span>
         </button>
