@@ -40,6 +40,7 @@ import type {
   TagPayload,
   TokenResponse,
   UploadedBannerImage,
+  UploadedCategoryImage,
   UploadedProductImage,
   UploadedTagImage,
   User,
@@ -224,6 +225,17 @@ export const api = {
       apiRequest<Category>(`/categories/${categoryId}`, { method: 'PATCH', body }),
     delete: (categoryId: number) =>
       apiRequest<void>(`/categories/${categoryId}`, { method: 'DELETE' }),
+    uploadImage: (file: File, altText?: string) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (altText) {
+        formData.append('alt_text', altText);
+      }
+      return apiRequest<UploadedCategoryImage>('/uploads/categories/images', {
+        method: 'POST',
+        formData,
+      });
+    },
   },
   tags: {
     list: () => apiRequest<Tag[]>('/tags'),

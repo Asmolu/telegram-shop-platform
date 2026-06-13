@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select, update
+from sqlalchemy import Select, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -81,6 +81,68 @@ class CustomerNotificationCampaignRepository:
 
     async def get_campaign_by_id(self, campaign_id: int) -> BroadcastCampaign | None:
         return await self.session.get(BroadcastCampaign, campaign_id)
+
+    async def get_campaign_by_id_for_update(self, campaign_id: int) -> BroadcastCampaign | None:
+        result = await self.session.execute(
+            select(BroadcastCampaign)
+            .where(BroadcastCampaign.id == campaign_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def list_due_campaign_ids(
+        self,
+        *,
+        now: datetime,
+        stale_before: datetime,
+        limit: int,
+    ) -> list[int]:
+        processable_delivery = exists().where(
+            BroadcastDelivery.campaign_id == BroadcastCampaign.id,
+            or_(
+                and_(
+                    BroadcastDelivery.status == BroadcastDeliveryStatus.PENDING,
+                    or_(
+                        BroadcastDelivery.next_attempt_at.is_(None),
+                        BroadcastDelivery.next_attempt_at <= now,
+                    ),
+                ),
+                and_(
+                    BroadcastDelivery.status == BroadcastDeliveryStatus.RATE_LIMITED,
+                    BroadcastDelivery.next_attempt_at <= now,
+                ),
+                and_(
+                    BroadcastDelivery.status == BroadcastDeliveryStatus.SENDING,
+                    BroadcastDelivery.updated_at <= stale_before,
+                ),
+            ),
+        )
+        unfinished_delivery = exists().where(
+            BroadcastDelivery.campaign_id == BroadcastCampaign.id,
+            BroadcastDelivery.status.in_(
+                [
+                    BroadcastDeliveryStatus.PENDING,
+                    BroadcastDeliveryStatus.SENDING,
+                    BroadcastDeliveryStatus.RATE_LIMITED,
+                ]
+            ),
+        )
+        result = await self.session.execute(
+            select(BroadcastCampaign.id)
+            .where(
+                or_(
+                    BroadcastCampaign.status == BroadcastCampaignStatus.SENDING,
+                    and_(
+                        BroadcastCampaign.status == BroadcastCampaignStatus.SCHEDULED,
+                        BroadcastCampaign.scheduled_at <= now,
+                    ),
+                ),
+                or_(processable_delivery, ~unfinished_delivery),
+            )
+            .order_by(BroadcastCampaign.scheduled_at.asc().nullsfirst(), BroadcastCampaign.id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def list_campaigns(
         self,
@@ -213,8 +275,35 @@ class CustomerNotificationCampaignRepository:
                 BroadcastDelivery.id.asc(),
             )
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
+
+    async def recover_stale_sending_deliveries(
+        self,
+        *,
+        campaign_id: int,
+        stale_before: datetime,
+        now: datetime,
+    ) -> int:
+        result = await self.session.execute(
+            update(BroadcastDelivery)
+            .where(
+                BroadcastDelivery.campaign_id == campaign_id,
+                BroadcastDelivery.status == BroadcastDeliveryStatus.SENDING,
+                BroadcastDelivery.updated_at <= stale_before,
+            )
+            .values(
+                status=BroadcastDeliveryStatus.FAILED,
+                next_attempt_at=None,
+                error_code="delivery_state_uncertain",
+                error_message=(
+                    "Previous send attempt did not finish; it was not retried to avoid a duplicate"
+                ),
+                updated_at=now,
+            )
+        )
+        return int(result.rowcount or 0)
 
     async def count_unfinished_deliveries(self, *, campaign_id: int) -> int:
         result = await self.session.execute(

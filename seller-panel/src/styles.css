@@ -584,17 +584,17 @@ textarea:focus {
   margin-top: 14px;
 }
 
-.taxonomy-tag-thumb {
+.taxonomy-image-thumb {
   width: 72px;
   height: 54px;
 }
 
-.taxonomy-tag-preview {
+.taxonomy-image-preview {
   display: grid;
   gap: 10px;
 }
 
-.taxonomy-tag-preview img {
+.taxonomy-image-preview img {
   width: 100%;
   aspect-ratio: 4 / 3;
   border: 1px solid #e5e7eb;
@@ -1303,6 +1303,27 @@ textarea:focus {
 
 .customer-campaign-form textarea {
   min-height: 132px;
+}
+
+.campaign-guidance {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 16px;
+  border-left: 3px solid #7c3aed;
+  background: #f5f3ff;
+  padding: 12px 14px;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.campaign-guidance p,
+.customer-polling-note {
+  margin: 0;
+}
+
+.customer-polling-note {
+  margin-top: 12px;
 }
 
 .customer-action-grid {

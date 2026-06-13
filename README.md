@@ -32,6 +32,7 @@ The Seller Panel crops images before upload to match these display-safe standard
 | ------- | ------------ | ----------- | ------- | ---------------- |
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Category/tag card image | 4:3 | 1200x900 | 600x450 | 1600x1200 |
 | Horizontal Mini App banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
 | Vertical Mini App banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 | Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
@@ -197,7 +198,7 @@ python scripts/set_seller_bot_webhook.py info
 
 Customer notification MVP Phase 1 adds a Bot 1 subscription registry. Phase 1.5
 adds order-related customer service notifications through Bot 1. Phase 2 adds
-controlled templates, campaigns, materialized delivery rows, bounded batch
+controlled templates, campaigns, materialized delivery rows, bounded grouped
 processing, and reports. Bot 1 remains separate from Bot 2 seller registration
 and uses:
 
@@ -228,9 +229,14 @@ reports. Order service notifications and campaign sends use
 
 Phase 2 deliberately keeps recipient exports, arbitrary database field
 interpolation, non-plain Telegram parse modes, and a separate worker process out
-of scope. Staging campaign tests should start with one internal account that has
-opened Bot 1 with `/start`, complete preview and test-send in Seller Panel, then
-start a tiny campaign and run one bounded process batch before production use.
+of scope. The backend lifespan worker automatically processes due campaigns in
+small groups when `TELEGRAM_CUSTOMER_BOT_TOKEN` is configured. The protected
+`/process-batch` endpoint remains available for controlled recovery and support.
+Preview and test-send are recommended checks, but are not hidden activation
+requirements. A delivery marked sent means Telegram Bot API accepted the Bot 1
+send; it is not a read receipt. Staging tests should start with one internal
+account that has opened Bot 1 with `/start`, then enable a tiny campaign before
+production use.
 
 ## Production hardening
 

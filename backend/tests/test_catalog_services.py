@@ -20,7 +20,7 @@ from app.db.models import (
     ProductVariant,
     Tag,
 )
-from app.modules.categories.schemas import CategoryCreate, CategoryUpdate
+from app.modules.categories.schemas import CategoryCreate, CategoryRead, CategoryUpdate
 from app.modules.categories.service import CategoriesService
 from app.modules.products.inventory import calculate_available_quantity
 from app.modules.products.repository import ProductsRepository
@@ -108,6 +108,65 @@ async def test_category_service_crud_flow() -> None:
     assert created.id == 1
     assert updated.name == "Premium Hoodies"
     service.repository.delete.assert_awaited_once_with(category)
+
+
+@pytest.mark.asyncio
+async def test_category_service_sets_and_clears_uploaded_image(tmp_path: Path) -> None:
+    image_path = "categories/0123456789abcdef0123456789abcdef.jpg"
+    (tmp_path / "categories").mkdir()
+    (tmp_path / image_path).write_bytes(b"category-image")
+    category = _category(image_path=image_path)
+    service = CategoriesService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.repository.add = lambda created: setattr(created, "id", 1)
+    service.repository.get_by_id = AsyncMock(return_value=category)
+
+    created = await service.create_category(
+        CategoryCreate(name="Hoodies", slug="hoodies", image_path=image_path)
+    )
+    updated = await service.update_category(1, CategoryUpdate(image_path=None))
+
+    assert created.image_path == image_path
+    assert created.image_url == f"/uploads/{image_path}"
+    assert updated.image_path is None
+    assert updated.image_url is None
+
+
+@pytest.mark.asyncio
+async def test_category_service_rejects_missing_uploaded_image(tmp_path: Path) -> None:
+    service = CategoriesService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="was not uploaded") as exc_info:
+        await service.create_category(
+            CategoryCreate(
+                name="Hoodies",
+                slug="hoodies",
+                image_path="categories/0123456789abcdef0123456789abcdef.jpg",
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "image_path",
+    [
+        "https://example.com/category.jpg",
+        "categories/../../category.jpg",
+        "tags/0123456789abcdef0123456789abcdef.jpg",
+    ],
+)
+def test_category_schema_rejects_invalid_image_paths(image_path: str) -> None:
+    with pytest.raises(ValidationError):
+        CategoryCreate(name="Hoodies", slug="hoodies", image_path=image_path)
+
+
+def test_category_read_exposes_image_url() -> None:
+    image_path = "categories/0123456789abcdef0123456789abcdef.webp"
+
+    result = CategoryRead.model_validate(_category(image_path=image_path))
+
+    assert result.image_path == image_path
+    assert result.image_url == f"/uploads/{image_path}"
 
 
 @pytest.mark.asyncio
@@ -898,12 +957,13 @@ def test_repository_category_context_orders_by_category_priority() -> None:
     assert "product_categories.priority" in str(ordering[0])
 
 
-def _category() -> Category:
+def _category(*, image_path: str | None = None) -> Category:
     return Category(
         id=1,
         name="Hoodies",
         slug="hoodies",
         description=None,
+        image_path=image_path,
         created_at=datetime(2026, 5, 27, tzinfo=UTC),
         updated_at=datetime(2026, 5, 27, tzinfo=UTC),
     )

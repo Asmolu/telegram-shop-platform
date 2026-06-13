@@ -565,6 +565,7 @@ and file-size checks. The Seller Panel should crop uploads before sending them t
 | ------- | ------------ | ----------- | ------- | ---------------- |
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
+| Category/tag card image | 4:3 | 1200x900 | 600x450 | 1600x1200 |
 | Horizontal banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
 | Vertical banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 | Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
@@ -846,11 +847,11 @@ infrastructure for SELLER/ADMIN users:
 - Template CRUD with explicit allowed variables and plain-text Telegram message
   rendering for MVP.
 - Campaign drafts, preview recipient estimates, test sends to the current
-  seller/admin's Bot 1 subscription, schedule/start, pause, cancel, bounded
-  process-batch delivery, and delivery reports.
+  seller/admin's Bot 1 subscription, schedule/start, pause, cancel, automatic
+  bounded-group delivery, protected process-batch recovery, and delivery reports.
 - Marketing eligibility always requires Bot 1 private chat, known chat id,
   `marketing_opt_in=true`, and `blocked_at is null`; service campaigns use
   `service_opt_in=true` with the same chat/block checks.
-- Batch delivery uses `TELEGRAM_CUSTOMER_BOT_TOKEN` only. Bot 2 remains limited
+- Campaign delivery uses `TELEGRAM_CUSTOMER_BOT_TOKEN` only. Bot 2 remains limited
   to seller registration, seller verification, seller chat operations, and
   seller notifications.

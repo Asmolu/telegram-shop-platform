@@ -67,7 +67,12 @@ export function CategoriesPage() {
         <div className="category-grid">
           {categories.map((category) => {
             const categoryProducts = products.filter((product) => isProductInCategory(product, category.id));
-            const imageUrl = categoryProducts[0] ? getProductImageUrl(categoryProducts[0]) : null;
+            const categoryImageUrl = normalizeAssetUrl(
+              category.image_url
+                ?? (category.image_path ? `/uploads/${category.image_path}` : null),
+            );
+            const imageUrl = categoryImageUrl
+              ?? (categoryProducts[0] ? getProductImageUrl(categoryProducts[0]) : null);
 
             return (
               <button

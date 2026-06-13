@@ -9,6 +9,7 @@ from app.db.models import User, UserRole
 from app.modules.uploads.image_profiles import ImageUploadKind
 from app.modules.uploads.schemas import (
     BannerImageUploadRead,
+    CategoryImageUploadRead,
     ProductImageUploadRead,
     TagImageUploadRead,
 )
@@ -78,3 +79,17 @@ async def upload_tag_image(
     alt_text: Annotated[str | None, Form(max_length=255)] = None,
 ) -> object:
     return await service.upload_tag_image(file=file, alt_text=alt_text)
+
+
+@router.post(
+    "/categories/images",
+    response_model=CategoryImageUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_category_image(
+    service: Annotated[UploadsService, Depends(get_uploads_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    file: Annotated[UploadFile, File()],
+    alt_text: Annotated[str | None, Form(max_length=255)] = None,
+) -> object:
+    return await service.upload_category_image(file=file, alt_text=alt_text)

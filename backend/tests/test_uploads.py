@@ -188,6 +188,27 @@ async def test_tag_image_upload_stores_file_in_tags_directory(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_category_image_upload_stores_file_in_categories_directory(tmp_path: Path) -> None:
+    session = DummySession()
+    service = UploadsService(session, storage=LocalStorageService(tmp_path))
+    content = _image_bytes(1200, 900, "WEBP")
+
+    image = await service.upload_category_image(
+        file=_upload_file("../hoodies.webp", content, "image/webp"),
+        alt_text="Hoodies",
+    )
+
+    assert image.file_path.startswith("categories/")
+    assert image.url == f"/uploads/{image.file_path}"
+    assert image.original_filename == "hoodies.webp"
+    assert image.mime_type == "image/webp"
+    assert image.size_bytes == len(content)
+    assert image.alt_text == "Hoodies"
+    assert (tmp_path / image.file_path).is_file()
+    assert session.committed is False
+
+
+@pytest.mark.asyncio
 async def test_vertical_banner_upload_accepts_nine_to_sixteen_image(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
@@ -349,6 +370,46 @@ def test_tag_upload_route_allows_seller() -> None:
 
     assert response.status_code == 201
     assert response.json()["file_path"].startswith("tags/")
+
+
+def test_category_upload_route_requires_seller_or_admin_auth() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/v1/uploads/categories/images",
+            files={"file": ("hoodies.webp", b"category-bytes", "image/webp")},
+        )
+
+    assert response.status_code == 401
+
+
+def test_category_upload_route_allows_seller() -> None:
+    app = create_app()
+
+    class FakeUploadsService:
+        async def upload_category_image(self, **_: object) -> dict[str, object]:
+            return {
+                "file_path": "categories/0123456789abcdef0123456789abcdef.webp",
+                "url": "/uploads/categories/0123456789abcdef0123456789abcdef.webp",
+                "original_filename": "hoodies.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 12,
+                "alt_text": "Hoodies",
+            }
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_uploads_service] = lambda: FakeUploadsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/uploads/categories/images",
+                files={"file": ("hoodies.webp", b"category-bytes", "image/webp")},
+                data={"alt_text": "Hoodies"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["file_path"].startswith("categories/")
 
 
 def test_static_upload_path_serves_files(tmp_path: Path) -> None:

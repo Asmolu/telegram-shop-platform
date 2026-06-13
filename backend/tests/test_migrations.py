@@ -10,6 +10,7 @@ from app.db.models import (
     BroadcastCampaignType,
     BroadcastDelivery,
     BroadcastDeliveryStatus,
+    Category,
     CustomerTelegramSubscription,
     Notification,
     NotificationChannel,
@@ -642,3 +643,23 @@ def test_customer_personal_data_migration_and_model_contract() -> None:
     assert table.c.weight_kg.type.scale == 2
     assert table.c.telegram_username.type.length == 32
     assert table.c.persistent_comment.type.length == 500
+
+
+def test_category_images_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260613_0026_add_category_images.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_category_images", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260613_0025"
+    assert "image_path" in content
+    assert Category.__table__.c.image_path.nullable is True
+    assert Category.__table__.c.image_path.type.length == 1024

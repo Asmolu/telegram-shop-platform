@@ -104,6 +104,14 @@ class BatchCounts:
     skipped: int = 0
 
 
+@dataclass(frozen=True)
+class DeliverySkip:
+    status: BroadcastDeliveryStatus
+    result: str
+    error_code: str
+    error_message: str
+
+
 class CustomerNotificationCampaignService:
     """Business logic for Bot 1 templates, campaigns, delivery rows, and reports."""
 
@@ -475,19 +483,29 @@ class CustomerNotificationCampaignService:
         payload: BroadcastCampaignScheduleRequest,
         start_now: bool = False,
     ) -> BroadcastCampaignRead:
-        campaign = await self._get_campaign_or_404(campaign_id)
+        campaign = await self.repository.get_campaign_by_id_for_update(campaign_id)
+        if campaign is None:
+            raise AppError("Broadcast campaign not found", status.HTTP_404_NOT_FOUND)
+        if campaign.status in {
+            BroadcastCampaignStatus.SCHEDULED,
+            BroadcastCampaignStatus.SENDING,
+        }:
+            return BroadcastCampaignRead.model_validate(campaign)
         self._require_status(
             campaign,
             {BroadcastCampaignStatus.DRAFT, BroadcastCampaignStatus.PAUSED},
             "Only draft or paused campaigns can be scheduled",
         )
-        self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+        await self._validate_campaign_for_activation(campaign)
         before_data = self._campaign_snapshot(campaign)
         now = self._now()
         scheduled_at = now if start_now else payload.scheduled_at or campaign.scheduled_at or now
         final_count = await self._materialize_deliveries(campaign)
         if final_count <= 0:
-            raise AppError("Campaign has no eligible recipients", status.HTTP_400_BAD_REQUEST)
+            raise AppError(
+                "Campaign cannot be enabled: no eligible Bot 1 recipients match the audience",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
 
         campaign.recipient_count_estimate = final_count
         campaign.recipient_count_final = final_count
@@ -575,10 +593,23 @@ class CustomerNotificationCampaignService:
         self,
         *,
         campaign_id: int,
-        actor: User,
+        actor: User | None,
         payload: BroadcastCampaignProcessBatchRequest,
     ) -> BroadcastCampaignProcessBatchResponse:
         campaign = await self._get_campaign_or_404(campaign_id)
+        if campaign.status == BroadcastCampaignStatus.COMPLETED:
+            return BroadcastCampaignProcessBatchResponse(
+                campaign_id=campaign.id,
+                processed=0,
+                sent=0,
+                failed=0,
+                blocked=0,
+                rate_limited=0,
+                retried=0,
+                skipped=0,
+                remaining=0,
+                campaign_status=campaign.status,
+            )
         self._require_status(
             campaign,
             {BroadcastCampaignStatus.SCHEDULED, BroadcastCampaignStatus.SENDING},
@@ -586,6 +617,12 @@ class CustomerNotificationCampaignService:
         )
         limit = self._batch_limit(payload.limit)
         now = self._now()
+        await self.repository.recover_stale_sending_deliveries(
+            campaign_id=campaign.id,
+            stale_before=now
+            - timedelta(seconds=max(1, settings.customer_campaign_sending_timeout_seconds)),
+            now=now,
+        )
         await self._audit(
             actor=actor,
             action=ACTION_PROCESS_BATCH_STARTED,
@@ -766,6 +803,17 @@ class CustomerNotificationCampaignService:
         delivery: BroadcastDelivery,
     ) -> str:
         now = self._now()
+        skip = self._delivery_skip(campaign=campaign, delivery=delivery)
+        if skip is not None:
+            delivery.status = skip.status
+            delivery.next_attempt_at = None
+            delivery.error_code = skip.error_code
+            delivery.error_message = skip.error_message
+            delivery.retry_after_seconds = None
+            delivery.telegram_message_id = None
+            delivery.sent_at = None
+            return skip.result
+
         delivery.status = BroadcastDeliveryStatus.SENDING
         delivery.attempt_count += 1
         delivery.last_attempt_at = now
@@ -786,6 +834,52 @@ class CustomerNotificationCampaignService:
         delivery.error_message = None
         delivery.retry_after_seconds = None
         return "sent"
+
+    def _delivery_skip(
+        self,
+        *,
+        campaign: BroadcastCampaign,
+        delivery: BroadcastDelivery,
+    ) -> DeliverySkip | None:
+        subscription = delivery.subscription
+        if subscription is None:
+            return DeliverySkip(
+                status=BroadcastDeliveryStatus.SKIPPED,
+                result="skipped",
+                error_code="subscription_missing",
+                error_message="Bot 1 subscription no longer exists",
+            )
+        if subscription.blocked_at is not None:
+            return DeliverySkip(
+                status=BroadcastDeliveryStatus.BLOCKED,
+                result="blocked",
+                error_code="blocked",
+                error_message="Customer blocked Bot 1",
+            )
+        if (
+            not subscription.has_chat
+            or subscription.telegram_chat_id is None
+            or subscription.chat_type != PRIVATE_CHAT_TYPE
+        ):
+            return DeliverySkip(
+                status=BroadcastDeliveryStatus.SKIPPED,
+                result="skipped",
+                error_code="bot1_chat_unavailable",
+                error_message="Customer has no active private chat with Bot 1",
+            )
+        opted_in = (
+            subscription.marketing_opt_in
+            if campaign.type == BroadcastCampaignType.MARKETING
+            else subscription.service_opt_in
+        )
+        if not opted_in:
+            return DeliverySkip(
+                status=BroadcastDeliveryStatus.SKIPPED,
+                result="skipped",
+                error_code="consent_revoked",
+                error_message="Customer consent no longer permits this campaign",
+            )
+        return None
 
     def _mark_delivery_error(
         self,
@@ -927,6 +1021,37 @@ class CustomerNotificationCampaignService:
             raise AppError(
                 "Campaign message exceeds Telegram message length",
                 status.HTTP_400_BAD_REQUEST,
+            )
+
+    async def _validate_campaign_for_activation(self, campaign: BroadcastCampaign) -> None:
+        issues: list[str] = []
+        if not campaign.name.strip():
+            issues.append("name is required")
+        if not campaign.message_body.strip():
+            issues.append("message_body is required")
+        else:
+            try:
+                self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+            except AppError as exc:
+                issues.append(exc.message)
+        try:
+            self._parse_audience_filter(campaign.audience_filter)
+        except AppError as exc:
+            issues.append(exc.message)
+
+        if campaign.template_id is not None:
+            template = await self.repository.get_template_by_id(campaign.template_id)
+            if template is None:
+                issues.append("template does not exist")
+            elif not template.is_active:
+                issues.append("template is disabled")
+            elif template.category.value != campaign.type.value:
+                issues.append("template category does not match campaign type")
+
+        if issues:
+            raise AppError(
+                f"Campaign cannot be enabled: {'; '.join(issues)}",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
             )
 
     def _normalize_parse_mode(self, parse_mode: str | None) -> str | None:
@@ -1135,7 +1260,7 @@ class CustomerNotificationCampaignService:
     async def _audit(
         self,
         *,
-        actor: User,
+        actor: User | None,
         action: str,
         entity_type: str,
         entity_id: int | None,
@@ -1144,7 +1269,7 @@ class CustomerNotificationCampaignService:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         await self.audit_service.record_action(
-            actor_user_id=actor.id,
+            actor_user_id=actor.id if actor is not None else None,
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,

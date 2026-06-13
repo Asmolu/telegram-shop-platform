@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api } from '../../shared/api';
+import { ApiError, api } from '../../shared/api';
 import type {
   BroadcastCampaign,
   BroadcastCampaignPreview,
@@ -58,10 +58,10 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
   const [selectedCampaign, setSelectedCampaign] = useState<BroadcastCampaign | null>(null);
   const [selectedSummary, setSelectedSummary] = useState<BroadcastDeliverySummary>(emptySummary);
   const [preview, setPreview] = useState<BroadcastCampaignPreview | null>(null);
-  const [testCompleteCampaignId, setTestCompleteCampaignId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const [campaignForm, setCampaignForm] = useState({
@@ -147,7 +147,23 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     if (selectedCampaign) {
       loadDeliveryData(selectedCampaign.id);
     }
-  }, [deliveryQuery, selectedCampaign]);
+  }, [deliveryQuery, selectedCampaign?.id]);
+
+  useEffect(() => {
+    if (
+      view !== 'reports'
+      || !selectedCampaign
+      || !['scheduled', 'sending'].includes(selectedCampaign.status)
+    ) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      loadDeliveryData(selectedCampaign.id);
+      loadCampaigns();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [selectedCampaign?.id, selectedCampaign?.status, view]);
 
   function loadInitial() {
     setLoading(true);
@@ -169,6 +185,10 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       .then((response) => {
         setCampaigns(response.items);
         setCampaignMeta(response.meta);
+        setSelectedCampaign((current) => {
+          if (!current) return current;
+          return response.items.find((campaign) => campaign.id === current.id) ?? current;
+        });
       })
       .catch(setError);
   }
@@ -195,11 +215,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
 
   function loadDeliveryData(campaignId: number) {
     Promise.all([
-      api.customerNotifications.deliverySummary(campaignId),
+      api.customerNotifications.campaignDetail(campaignId),
       api.customerNotifications.deliveries(campaignId, deliveryQuery),
     ])
-      .then(([summary, deliveryResponse]) => {
-        setSelectedSummary(summary);
+      .then(([detail, deliveryResponse]) => {
+        setSelectedCampaign(detail.campaign);
+        setSelectedSummary(detail.delivery_summary);
         setDeliveries(deliveryResponse.items);
         setDeliveryMeta(deliveryResponse.meta);
       })
@@ -209,11 +230,15 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
   async function runAction(action: () => Promise<void>) {
     setActionBusy(true);
     setActionMessage(null);
-    setError(null);
+    setActionError(null);
     try {
       await action();
     } catch (requestError) {
-      setError(requestError);
+      setActionError(
+        requestError instanceof ApiError || requestError instanceof Error
+          ? requestError.message
+          : t('common.requestFailed'),
+      );
     } finally {
       setActionBusy(false);
     }
@@ -228,7 +253,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         : await api.customerNotifications.createCampaign(body);
       setSelectedCampaign(saved);
       setPreview(null);
-      setTestCompleteCampaignId(null);
       setActionMessage(
         campaignForm.id
           ? t('customerNotifications.campaignUpdated')
@@ -300,7 +324,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
   function testCampaign(campaign: BroadcastCampaign) {
     runAction(async () => {
       const response = await api.customerNotifications.testCampaign(campaign.id);
-      setTestCompleteCampaignId(campaign.id);
       setSelectedCampaign(campaign);
       setActionMessage(
         t('customerNotifications.testSent', {
@@ -312,13 +335,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
 
   function startCampaign(campaign: BroadcastCampaign) {
     runAction(async () => {
-      const started = campaignForm.scheduledAt
-        ? await api.customerNotifications.scheduleCampaign(
-            campaign.id,
-            new Date(campaignForm.scheduledAt).toISOString(),
-          )
+      const scheduledAt = campaign.scheduled_at ? new Date(campaign.scheduled_at) : null;
+      const started = scheduledAt && scheduledAt.getTime() > Date.now()
+        ? await api.customerNotifications.scheduleCampaign(campaign.id, scheduledAt.toISOString())
         : await api.customerNotifications.startCampaign(campaign.id);
       setSelectedCampaign(started);
+      setView('reports');
       setActionMessage(
         started.status === 'scheduled'
           ? t('customerNotifications.campaignScheduled')
@@ -476,6 +498,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           ))}
         </div>
         {actionMessage ? <div className="success-banner">{actionMessage}</div> : null}
+        {actionError ? <div className="form-error">{actionError}</div> : null}
       </section>
 
       {view === 'campaigns' ? renderCampaignsView() : null}
@@ -507,6 +530,11 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                 {t('customerNotifications.newDraft')}
               </button>
             ) : null}
+          </div>
+          <div className="campaign-guidance">
+            <p>{t('customerNotifications.audienceHelp')}</p>
+            <p>{t('customerNotifications.activationHelp')}</p>
+            <p>{t('customerNotifications.groupHelp')}</p>
           </div>
           <form className="form-grid customer-campaign-form" onSubmit={handleCampaignSubmit}>
             <label className="field">
@@ -748,36 +776,46 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                     </td>
                     <td>
                       <div className="table-actions customer-action-grid">
-                        <button className="button button-secondary" type="button" onClick={() => editCampaign(campaign)}>
-                          {t('common.edit')}
-                        </button>
-                        <button className="button button-secondary" type="button" onClick={() => previewCampaign(campaign)}>
+                        {campaign.status === 'draft' ? (
+                          <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => editCampaign(campaign)}>
+                            {t('common.edit')}
+                          </button>
+                        ) : null}
+                        <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => previewCampaign(campaign)}>
                           {t('customerNotifications.preview')}
                         </button>
-                        <button className="button button-secondary" type="button" onClick={() => testCampaign(campaign)}>
+                        <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => testCampaign(campaign)}>
                           {t('customerNotifications.test')}
                         </button>
                         <button
                           className="button button-primary"
-                          disabled={!canStartCampaign(campaign)}
+                          disabled={actionBusy || !canStartCampaign(campaign)}
                           type="button"
                           onClick={() => startCampaign(campaign)}
                         >
                           {t('customerNotifications.start')}
                         </button>
-                        <button className="button button-secondary" type="button" onClick={() => processBatch(campaign)}>
-                          {t('customerNotifications.batch')}
-                        </button>
+                        {campaign.status === 'sending' ? (
+                          <button
+                            className="button button-secondary"
+                            disabled={actionBusy}
+                            title={t('customerNotifications.groupHelp')}
+                            type="button"
+                            onClick={() => processBatch(campaign)}
+                          >
+                            {t('customerNotifications.batch')}
+                          </button>
+                        ) : null}
                         <button className="text-button" type="button" onClick={() => selectCampaign(campaign)}>
                           {t('customerNotifications.report')}
                         </button>
                         {campaign.status === 'sending' || campaign.status === 'scheduled' ? (
-                          <button className="text-button" type="button" onClick={() => pauseCampaign(campaign)}>
+                          <button className="text-button" disabled={actionBusy} type="button" onClick={() => pauseCampaign(campaign)}>
                             {t('customerNotifications.pause')}
                           </button>
                         ) : null}
                         {!['completed', 'cancelled'].includes(campaign.status) ? (
-                          <button className="text-button danger-text" type="button" onClick={() => cancelCampaign(campaign)}>
+                          <button className="text-button danger-text" disabled={actionBusy} type="button" onClick={() => cancelCampaign(campaign)}>
                             {t('common.cancel')}
                           </button>
                         ) : null}
@@ -992,6 +1030,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             <>
               <div className="kpi-grid customer-summary-grid">
                 <Kpi label={t('customerNotifications.pending')} value={selectedSummary.pending} />
+                <Kpi label={t('customerNotifications.sending')} value={selectedSummary.sending} />
                 <Kpi label={t('customerNotifications.sent')} value={selectedSummary.sent} />
                 <Kpi label={t('customerNotifications.failed')} value={selectedSummary.failed} />
                 <Kpi label={t('customerNotifications.blocked')} value={selectedSummary.blocked} />
@@ -1000,7 +1039,13 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   label={t('customerNotifications.rateLimited')}
                   value={selectedSummary.rate_limited}
                 />
+                <Kpi label={t('customerNotifications.total')} value={selectedSummary.total} />
               </div>
+              {['scheduled', 'sending'].includes(campaign.status) ? (
+                <p className="muted-text customer-polling-note">
+                  {t('customerNotifications.pollingHelp')}
+                </p>
+              ) : null}
               {preview && preview.campaign_id === campaign.id ? (
                 <div className="campaign-preview">
                   <strong>{t('customerNotifications.previewSample')}</strong>
@@ -1319,7 +1364,14 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     if (campaign.status !== 'draft' && campaign.status !== 'paused') {
       return false;
     }
-    return preview?.campaign_id === campaign.id && testCompleteCampaignId === campaign.id;
+    if (!campaign.name.trim() || !campaign.message_body.trim()) {
+      return false;
+    }
+    const audience = campaign.audience_filter as Record<string, unknown>;
+    if (audience.scope === 'product') return Number(audience.product_id) > 0;
+    if (audience.scope === 'category') return Number(audience.category_id) > 0;
+    if (audience.scope === 'promo_code') return Number(audience.promo_code_id) > 0;
+    return ['all', 'purchasers'].includes(String(audience.scope ?? 'all'));
   }
 }
 

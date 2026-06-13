@@ -6,6 +6,7 @@ from app.common.deps import get_current_user
 from app.common.pagination import PageMeta
 from app.db.models import User, UserRole
 from app.main import create_app
+from app.modules.categories.router import get_categories_service
 from app.modules.products.router import get_products_service
 from app.modules.products.schemas import ProductList
 from app.modules.tags.router import get_tags_service
@@ -123,6 +124,36 @@ def test_public_tag_list_includes_image_url() -> None:
 
     assert response.status_code == 200
     assert response.json()[0]["image_url"].startswith("/uploads/tags/")
+
+
+def test_public_category_list_includes_image_url() -> None:
+    app = create_app()
+
+    class FakeCategoriesService:
+        async def list_categories(self) -> list[dict[str, object]]:
+            now = datetime(2026, 6, 13, tzinfo=UTC).isoformat()
+            return [
+                {
+                    "id": 1,
+                    "name": "Hoodies",
+                    "slug": "hoodies",
+                    "description": None,
+                    "image_path": "categories/0123456789abcdef0123456789abcdef.webp",
+                    "image_url": "/uploads/categories/0123456789abcdef0123456789abcdef.webp",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            ]
+
+    app.dependency_overrides[get_categories_service] = lambda: FakeCategoriesService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/categories")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["image_url"].startswith("/uploads/categories/")
 
 
 def test_product_create_allows_seller() -> None:

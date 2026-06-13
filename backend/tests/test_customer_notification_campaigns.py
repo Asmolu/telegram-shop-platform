@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.common.deps import get_current_user
 from app.core.config import settings
+from app.core.errors import AppError
 from app.db.models import (
     BroadcastCampaign,
     BroadcastCampaignStatus,
@@ -129,6 +130,9 @@ class FakeCampaignRepository:
     async def get_campaign_by_id(self, campaign_id: int) -> BroadcastCampaign | None:
         return self.campaigns.get(campaign_id)
 
+    async def get_campaign_by_id_for_update(self, campaign_id: int) -> BroadcastCampaign | None:
+        return self.campaigns.get(campaign_id)
+
     async def list_campaigns(self, **_: object) -> tuple[list[BroadcastCampaign], int]:
         return list(self.campaigns.values()), len(self.campaigns)
 
@@ -207,6 +211,9 @@ class FakeCampaignRepository:
                 continue
             processable.append(delivery)
         return processable[:limit]
+
+    async def recover_stale_sending_deliveries(self, **_: object) -> int:
+        return 0
 
     async def count_unfinished_deliveries(self, *, campaign_id: int) -> int:
         return len(
@@ -418,6 +425,32 @@ async def test_start_materializes_delivery_rows_without_synchronous_broadcast() 
 
 
 @pytest.mark.asyncio
+async def test_invalid_campaign_enable_returns_actionable_fields() -> None:
+    service, repository, _, _ = _service()
+    repository.subscriptions = {1: _subscription(marketing_opt_in=True)}
+    campaign = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignCreate(
+            name=" ",
+            type=BroadcastCampaignType.MARKETING,
+            audience_filter={"scope": "all"},
+            message_body=" ",
+        ),
+    )
+
+    with pytest.raises(AppError, match="name is required") as exc_info:
+        await service.schedule_campaign(
+            campaign_id=campaign.id,
+            actor=_user(role=UserRole.SELLER),
+            payload=BroadcastCampaignScheduleRequest(),
+            start_now=True,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "message_body is required" in exc_info.value.message
+
+
+@pytest.mark.asyncio
 async def test_process_batch_sends_bounded_pending_deliveries() -> None:
     service, repository, sender, _ = _service()
     campaign = _campaign(status=BroadcastCampaignStatus.SENDING)
@@ -464,6 +497,46 @@ async def test_successful_batch_send_stores_message_id_and_sent_at() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repeated_processing_is_idempotent_after_success() -> None:
+    service, repository, sender, _ = _service()
+    campaign, _, _ = _campaign_with_delivery(repository)
+
+    first = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+    second = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+
+    assert first.sent == 1
+    assert second.processed == 0
+    assert second.campaign_status == BroadcastCampaignStatus.COMPLETED
+    assert len(sender.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_consent_revoked_after_activation_is_skipped() -> None:
+    service, repository, sender, _ = _service()
+    campaign, delivery, subscription = _campaign_with_delivery(repository)
+    subscription.marketing_opt_in = False
+
+    response = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+
+    assert response.skipped == 1
+    assert delivery.status == BroadcastDeliveryStatus.SKIPPED
+    assert delivery.error_code == "consent_revoked"
+    assert sender.messages == []
+
+
+@pytest.mark.asyncio
 async def test_telegram_403_marks_delivery_and_subscription_blocked() -> None:
     error = TelegramDeliveryError(
         "Forbidden: bot was blocked by the user",
@@ -505,6 +578,28 @@ async def test_telegram_429_records_retry_after_and_next_attempt() -> None:
     assert delivery.status == BroadcastDeliveryStatus.RATE_LIMITED
     assert delivery.retry_after_seconds == 12
     assert delivery.next_attempt_at == _now() + timedelta(seconds=12)
+
+
+@pytest.mark.asyncio
+async def test_terminal_telegram_error_is_failed_and_secrets_are_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_customer_bot_token", "customer-secret")
+    error = TelegramDeliveryError("request failed with customer-secret")
+    service, repository, _, _ = _service(errors=[error])
+    campaign, delivery, _ = _campaign_with_delivery(repository)
+    delivery.attempt_count = settings.customer_campaign_max_attempts - 1
+
+    response = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+
+    assert response.failed == 1
+    assert delivery.status == BroadcastDeliveryStatus.FAILED
+    assert "customer-secret" not in (delivery.error_message or "")
+    assert "[redacted]" in (delivery.error_message or "")
 
 
 @pytest.mark.asyncio

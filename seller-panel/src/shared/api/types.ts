@@ -66,6 +66,8 @@ export interface Category {
   name: string;
   slug: string;
   description: string | null;
+  image_path: string | null;
+  image_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +76,7 @@ export interface CategoryPayload {
   name: string;
   slug: string;
   description?: string | null;
+  image_path?: string | null;
 }
 
 export interface Tag {
@@ -218,6 +221,8 @@ export interface UploadedBannerImage {
 }
 
 export interface UploadedTagImage extends UploadedBannerImage {}
+
+export interface UploadedCategoryImage extends UploadedBannerImage {}
 
 export interface OrderItem {
   id: number;

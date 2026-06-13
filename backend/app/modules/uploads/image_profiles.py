@@ -62,6 +62,19 @@ TAG_IMAGE_PROFILE = ImageUploadProfile(
     max_pixels=1_920_000,
 )
 
+CATEGORY_IMAGE_PROFILE = ImageUploadProfile(
+    display_name="category",
+    aspect_label="4:3",
+    aspect_ratio=4 / 3,
+    recommended_width=1200,
+    recommended_height=900,
+    min_width=600,
+    min_height=450,
+    max_width=1600,
+    max_height=1200,
+    max_pixels=1_920_000,
+)
+
 NATIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
     display_name="баннера",
     aspect_label="3:1",

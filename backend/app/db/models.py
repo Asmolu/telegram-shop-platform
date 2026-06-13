@@ -429,6 +429,7 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -447,6 +448,10 @@ class Category(Base):
         cascade="all, delete-orphan",
         order_by="ProductCategory.priority",
     )
+
+    @property
+    def image_url(self) -> str | None:
+        return f"/uploads/{self.image_path}" if self.image_path else None
 
 
 class Tag(Base):

@@ -16,6 +16,10 @@ const LANGUAGE_STORAGE_KEY = 'seller_panel_language';
 
 const dictionaries: Record<Language, Record<string, string>> = {
   ru: {
+    'crop.category.title': '\u041a\u0440\u043e\u043f \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u044f \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438',
+    'taxonomy.categoryImage': '\u0418\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438',
+    'taxonomy.categoryImageHint': '\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 4:3. \u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u043c\u044b\u0439 \u0440\u0430\u0437\u043c\u0435\u0440 1200x900, \u043c\u0438\u043d\u0438\u043c\u0443\u043c 600x450.',
+    'taxonomy.removeCategoryImage': '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435',
     'app.brand': 'Seller Portal',
     'app.product': 'Telegram Shop',
     'app.eyebrow': 'Панель продавца',
@@ -637,6 +641,10 @@ for (const [key, value] of Object.entries(dictionaries.ru)) {
 }
 
 Object.assign(englishOverrides, {
+  'crop.category.title': 'Category image crop',
+  'taxonomy.categoryImage': 'Category image',
+  'taxonomy.categoryImageHint': '4:3 card image. Recommended 1200x900, minimum 600x450.',
+  'taxonomy.removeCategoryImage': 'Remove image',
   'nav.dashboard': 'Dashboard',
   'nav.orders': 'Orders',
   'nav.products': 'Products',
@@ -1252,6 +1260,48 @@ Object.assign(englishOverrides, {
   'customerNotifications.startAt': 'Start: {date}',
   'customerNotifications.stopAt': 'Stop: {date}',
   'customerNotifications.settingsAt': 'Settings: {date}',
+});
+
+Object.assign(dictionaries.ru, {
+  'enum.pending': '\u041e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438',
+  'enum.blocked': '\u041d\u0435 \u0434\u043e\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043e',
+  'enum.completed': '\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e',
+  'enum.paused': '\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430',
+  'customerNotifications.description': '\u041a\u0430\u043c\u043f\u0430\u043d\u0438\u0438 Bot 1: \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430, \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0430 \u0438 \u0447\u0435\u0441\u0442\u043d\u044b\u0439 \u043e\u0442\u0447\u0435\u0442 \u043f\u043e \u0441\u0442\u0430\u0442\u0443\u0441\u0430\u043c.',
+  'customerNotifications.test': '\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0442\u0435\u0441\u0442',
+  'customerNotifications.start': '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043a\u0430\u043c\u043f\u0430\u043d\u0438\u044e',
+  'customerNotifications.pause': '\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u043a\u0430\u043c\u043f\u0430\u043d\u0438\u044e',
+  'customerNotifications.batch': '\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0443\u044e \u043f\u043e\u0440\u0446\u0438\u044e',
+  'customerNotifications.pending': '\u041e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438',
+  'customerNotifications.sending': '\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442\u0441\u044f',
+  'customerNotifications.sent': '\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e',
+  'customerNotifications.blocked': '\u041d\u0435 \u0434\u043e\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043e',
+  'customerNotifications.total': '\u0412\u0441\u0435\u0433\u043e',
+  'customerNotifications.audienceHelp': '\u041f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u0438: \u0442\u043e\u043b\u044c\u043a\u043e \u043a\u043b\u0438\u0435\u043d\u0442\u044b \u0441 \u0430\u043a\u0442\u0438\u0432\u043d\u044b\u043c \u043b\u0438\u0447\u043d\u044b\u043c \u0447\u0430\u0442\u043e\u043c Bot 1 \u0438 \u043d\u0443\u0436\u043d\u044b\u043c \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435\u043c.',
+  'customerNotifications.activationHelp': '\u041f\u043e\u0441\u043b\u0435 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f backend \u0441\u043e\u0437\u0434\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0434\u043e\u0441\u0442\u0430\u0432\u043a\u0438, \u0430 Bot 1 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442 \u0438\u0445 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438.',
+  'customerNotifications.groupHelp': '\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u043d\u0435\u0431\u043e\u043b\u044c\u0448\u0438\u043c\u0438 \u043f\u043e\u0440\u0446\u0438\u044f\u043c\u0438, \u0447\u0442\u043e\u0431\u044b \u0441\u043e\u0431\u043b\u044e\u0434\u0430\u0442\u044c \u043b\u0438\u043c\u0438\u0442\u044b Telegram \u0438 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043f\u043e\u0432\u0442\u043e\u0440\u044f\u0442\u044c \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u044b\u0435 \u043e\u0448\u0438\u0431\u043a\u0438.',
+  'customerNotifications.pollingHelp': '\u0421\u0442\u0430\u0442\u0443\u0441\u044b \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043a\u0430\u0436\u0434\u044b\u0435 5 \u0441\u0435\u043a\u0443\u043d\u0434. Telegram \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0443 Bot 1, \u043d\u043e \u043d\u0435 \u043f\u0440\u043e\u0447\u0442\u0435\u043d\u0438\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u043a\u043b\u0438\u0435\u043d\u0442\u043e\u043c.',
+});
+
+Object.assign(dictionaries.en, {
+  'enum.pending': 'Queued',
+  'enum.blocked': 'Not delivered',
+  'enum.completed': 'Sent',
+  'enum.paused': 'Stopped',
+  'customerNotifications.description': 'Bot 1 campaigns with automatic sending and clear delivery status reporting.',
+  'customerNotifications.test': 'Send test',
+  'customerNotifications.start': 'Enable campaign',
+  'customerNotifications.pause': 'Stop campaign',
+  'customerNotifications.batch': 'Send next group',
+  'customerNotifications.pending': 'Queued',
+  'customerNotifications.sending': 'Sending',
+  'customerNotifications.sent': 'Sent',
+  'customerNotifications.blocked': 'Not delivered',
+  'customerNotifications.total': 'Total',
+  'customerNotifications.audienceHelp': 'Recipients need an active private Bot 1 chat and the required consent.',
+  'customerNotifications.activationHelp': 'After activation, the backend creates delivery jobs and Bot 1 sends them automatically.',
+  'customerNotifications.groupHelp': 'Messages are sent in small groups to respect Telegram limits and retry temporary errors safely.',
+  'customerNotifications.pollingHelp': 'Statuses refresh every 5 seconds. Sent means accepted by Bot 1, not read by the customer.',
 });
 
 interface I18nContextValue {

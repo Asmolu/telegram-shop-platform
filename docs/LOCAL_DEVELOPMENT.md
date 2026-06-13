@@ -103,6 +103,9 @@ RATE_LIMIT_CUSTOMER_CAMPAIGN_WINDOW_SECONDS=60
 CUSTOMER_CAMPAIGN_BATCH_SIZE=20
 CUSTOMER_CAMPAIGN_MAX_ATTEMPTS=3
 CUSTOMER_CAMPAIGN_RETRY_BASE_SECONDS=60
+CUSTOMER_CAMPAIGN_WORKER_ENABLED=true
+CUSTOMER_CAMPAIGN_WORKER_POLL_SECONDS=5
+CUSTOMER_CAMPAIGN_SENDING_TIMEOUT_SECONDS=300
 ```
 
 Safe local/staging campaign flow:
@@ -114,8 +117,11 @@ Safe local/staging campaign flow:
 4. Run preview and verify the eligible count excludes opted-out or blocked
    subscriptions.
 5. Send a test message to the current seller/admin Bot 1 subscription.
-6. Start a tiny campaign and call `process-batch` once from Seller Panel or a
-   protected cron request.
+6. Enable a tiny campaign and confirm that the backend worker sends it through
+   Bot 1 and updates the persisted counters. `Sent` means accepted by Telegram,
+   not read by the customer.
+7. Use the protected `process-batch` endpoint only for controlled recovery or
+   support; normal campaigns are processed automatically.
 
 3. Run backend:
 
@@ -134,7 +140,8 @@ the isolated in-memory fallback.
 
 Image upload validation checks decoded dimensions in addition to extension, MIME, and byte size:
 product images use 4:5 at 1200x1500 recommended, native banners use 16:9 at 1600x900 recommended,
-and aggressive promo banners use 3:1 at 1800x600 recommended.
+category and tag cards use 4:3 at 1200x900 recommended, and aggressive promo banners use 3:1 at
+1800x600 recommended.
 
 Product search uses PostgreSQL `pg_trgm` for typo-tolerant catalog matching. The Alembic head
 migration enables the extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then adds product

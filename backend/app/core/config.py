@@ -42,7 +42,14 @@ class Settings(BaseSettings):
 
     uploads_dir: str = "uploads"
     public_uploads_url: str = "/uploads"
-    upload_subdirs: tuple[str, ...] = ("products", "banners", "reviews", "tags", "temp")
+    upload_subdirs: tuple[str, ...] = (
+        "products",
+        "banners",
+        "reviews",
+        "categories",
+        "tags",
+        "temp",
+    )
 
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://localhost:5174,http://localhost:3000",
@@ -83,6 +90,9 @@ class Settings(BaseSettings):
     customer_campaign_batch_size: int = 20
     customer_campaign_max_attempts: int = 3
     customer_campaign_retry_base_seconds: int = 60
+    customer_campaign_worker_enabled: bool = True
+    customer_campaign_worker_poll_seconds: int = 5
+    customer_campaign_sending_timeout_seconds: int = 300
 
     @property
     def cors_origins(self) -> list[str]:
