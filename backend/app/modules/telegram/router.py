@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_db_session
 from app.core.config import settings
+from app.modules.audit.service import AuditService
 from app.modules.customer_notifications.schemas import CustomerBotWebhookResponse
 from app.modules.customer_notifications.service import (
     CustomerBotWebhookService,
     CustomerNotificationsService,
 )
+from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.seller_auth.service import SellerAuthService
 from app.modules.seller_bot.service import SellerBotService
 from app.modules.telegram.schemas import (
@@ -34,6 +36,10 @@ def get_seller_bot_webhook_service(
     return SellerBotWebhookService(
         seller_auth_service=seller_auth_service,
         seller_bot_service=seller_bot_service,
+        manual_payments_service=ManualPaymentsService(
+            session,
+            audit_service=AuditService(session),
+        ),
     )
 
 

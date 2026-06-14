@@ -75,6 +75,23 @@ class OrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class ManualPaymentMethod(StrEnum):
+    SBP_PHONE = "SBP_PHONE"
+
+
+class ManualPaymentCurrency(StrEnum):
+    RUB = "RUB"
+
+
+class ManualPaymentStatus(StrEnum):
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+
+
 class ReviewStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
@@ -926,6 +943,11 @@ class Order(Base):
     )
     coupon_usages: Mapped[list["CouponUsage"]] = relationship(back_populates="order")
     reviews: Mapped[list["Review"]] = relationship(back_populates="order")
+    manual_payment: Mapped["ManualPayment | None"] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class OrderItem(Base):
@@ -974,6 +996,129 @@ class OrderItem(Base):
     order: Mapped[Order] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="order_items")
     product_variant: Mapped[ProductVariant] = relationship(back_populates="order_items")
+
+
+class SellerPaymentSettings(Base):
+    __tablename__ = "seller_payment_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seller_phone_e164: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    seller_phone_display: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    seller_bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    seller_recipient_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_manual_sbp_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ManualPayment(Base):
+    __tablename__ = "manual_payments"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_manual_payments_amount_positive"),
+        Index(
+            "ix_manual_payments_status_expires_at",
+            "status",
+            "expires_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    method: Mapped[ManualPaymentMethod] = mapped_column(
+        Enum(
+            ManualPaymentMethod,
+            name="manual_payment_method",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=ManualPaymentMethod.SBP_PHONE,
+        server_default=ManualPaymentMethod.SBP_PHONE.value,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[ManualPaymentCurrency] = mapped_column(
+        Enum(
+            ManualPaymentCurrency,
+            name="manual_payment_currency",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=ManualPaymentCurrency.RUB,
+        server_default=ManualPaymentCurrency.RUB.value,
+    )
+    seller_phone_e164: Mapped[str] = mapped_column(String(16), nullable=False)
+    seller_phone_display: Mapped[str] = mapped_column(String(24), nullable=False)
+    seller_bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    seller_recipient_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payment_comment: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[ManualPaymentStatus] = mapped_column(
+        Enum(
+            ManualPaymentStatus,
+            name="manual_payment_status",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=ManualPaymentStatus.PENDING,
+        server_default=ManualPaymentStatus.PENDING.value,
+        index=True,
+    )
+    receipt_image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reject_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    stock_released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    order: Mapped[Order] = relationship(back_populates="manual_payment")
 
 
 class ProductImage(Base):

@@ -12,6 +12,7 @@ from app.core.errors import AppError
 from app.db.models import (
     Cart,
     CartItem,
+    ManualPaymentStatus,
     Order,
     OrderItem,
     OrderStatus,
@@ -28,6 +29,7 @@ from app.events.payloads import (
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
+from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
@@ -96,6 +98,7 @@ class OrdersService:
         promo_codes_service: PromoCodesService | None = None,
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
+        manual_payments_service: ManualPaymentsService | None = None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
@@ -103,6 +106,7 @@ class OrdersService:
         self.promo_codes_service = promo_codes_service or PromoCodesService(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
+        self.manual_payments_service = manual_payments_service or ManualPaymentsService(session)
 
     async def checkout_current_user_cart(
         self,
@@ -115,6 +119,7 @@ class OrdersService:
             cart = await self.repository.get_cart_for_checkout(user_id)
             self._validate_cart_not_empty(cart)
             assert cart is not None
+            payment_settings = await self.manual_payments_service.require_checkout_settings()
 
             variants_by_id = await self.repository.lock_variants_by_ids(
                 item.product_variant_id for item in cart.items
@@ -135,6 +140,10 @@ class OrdersService:
             )
             self.repository.add(order)
             await self.session.flush()
+            await self.manual_payments_service.create_for_checkout(
+                order,
+                payment_settings=payment_settings,
+            )
 
             if promo_calculation is not None:
                 self.promo_codes_service.record_usage_for_checkout(
@@ -281,6 +290,16 @@ class OrdersService:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
 
         previous_status = order.status
+        if (
+            order.manual_payment is not None
+            and order.manual_payment.status
+            in {ManualPaymentStatus.PENDING, ManualPaymentStatus.SUBMITTED}
+            and payload.status != previous_status
+        ):
+            raise AppError(
+                "Use the manual payment approve or reject action for this order",
+                status.HTTP_409_CONFLICT,
+            )
         before_data = self.audit_service.snapshot(order, ("status",))
         order.status = payload.status
         post_commit_events: list[tuple[str, dict[str, object]]] = []

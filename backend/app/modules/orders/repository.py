@@ -30,6 +30,7 @@ class OrdersRepository:
                 selectinload(Cart.items).selectinload(CartItem.product_variant),
             )
             .where(Cart.user_id == user_id)
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
@@ -127,4 +128,5 @@ class OrdersRepository:
             .selectinload(OrderItem.product)
             .selectinload(Product.images),
             selectinload(Order.items).selectinload(OrderItem.product_variant),
+            selectinload(Order.manual_payment),
         )

@@ -23,6 +23,12 @@ from app.db.models import (
     User,
 )
 from app.events.names import (
+    MANUAL_PAYMENT_APPROVED,
+    MANUAL_PAYMENT_APPROVED_CUSTOMER,
+    MANUAL_PAYMENT_EXPIRED,
+    MANUAL_PAYMENT_EXPIRED_CUSTOMER,
+    MANUAL_PAYMENT_REJECTED,
+    MANUAL_PAYMENT_REJECTED_CUSTOMER,
     ORDER_CANCELLED_CUSTOMER,
     ORDER_CREATED,
     ORDER_CREATED_CUSTOMER,
@@ -122,6 +128,12 @@ class CustomerServiceNotificationDeliveryService:
             return await self.notify_order_created(payload)
         if name == ORDER_STATUS_CHANGED:
             return await self.notify_order_status_changed(payload)
+        if name in {
+            MANUAL_PAYMENT_APPROVED,
+            MANUAL_PAYMENT_REJECTED,
+            MANUAL_PAYMENT_EXPIRED,
+        }:
+            return await self.notify_manual_payment(name, payload)
         return None
 
     async def notify_order_created(
@@ -147,6 +159,48 @@ class CustomerServiceNotificationDeliveryService:
             return None
 
         event_name, message = self._status_event_and_message(payload)
+        return await self._deliver_service_notification(
+            user_id=user_id,
+            order_id=self._payload_int(payload, "order_id"),
+            event_name=event_name,
+            message=message,
+        )
+
+    async def notify_manual_payment(
+        self,
+        name: str,
+        payload: Mapping[str, object],
+    ) -> CustomerServiceNotificationDelivery | None:
+        user_id = self._payload_int(payload, "user_id")
+        if user_id is None:
+            return None
+
+        order_label = self._order_label(payload)
+        if name == MANUAL_PAYMENT_APPROVED:
+            event_name = MANUAL_PAYMENT_APPROVED_CUSTOMER
+            message = (
+                "Оплата подтверждена\n\n"
+                f"Заказ {order_label} принят в обработку."
+            )
+        elif name == MANUAL_PAYMENT_REJECTED:
+            event_name = MANUAL_PAYMENT_REJECTED_CUSTOMER
+            reason = self._payload_value(
+                payload,
+                "reject_reason",
+                fallback="причина не указана",
+            )
+            message = (
+                "Оплата отклонена\n\n"
+                f"Заказ {order_label}. Причина: {reason}. "
+                "Резерв товара снят."
+            )
+        else:
+            event_name = MANUAL_PAYMENT_EXPIRED_CUSTOMER
+            message = (
+                "Время оплаты истекло\n\n"
+                f"Заказ {order_label} отменен. Резерв товара снят."
+            )
+
         return await self._deliver_service_notification(
             user_id=user_id,
             order_id=self._payload_int(payload, "order_id"),

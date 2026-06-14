@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, resolveMediaUrl } from '../../shared/api';
-import type { Order, OrderStatus, ProductSizeGrid } from '../../shared/api';
+import type {
+  ManualPayment,
+  ManualPaymentStatus,
+  Order,
+  OrderStatus,
+  ProductSizeGrid,
+} from '../../shared/api';
 import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
@@ -18,10 +24,23 @@ interface OrderFilters {
 
 const initialFilters: OrderFilters = { search: '', status: '' };
 const orderStatuses: OrderStatus[] = ['NEW', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+const paymentStatuses: ManualPaymentStatus[] = [
+  'PENDING',
+  'SUBMITTED',
+  'APPROVED',
+  'REJECTED',
+  'EXPIRED',
+  'CANCELLED',
+];
 
 export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   const { language, t } = useI18n();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [payments, setPayments] = useState<ManualPayment[]>([]);
+  const [paymentFilter, setPaymentFilter] = useState<'' | ManualPaymentStatus>('SUBMITTED');
+  const [selectedPayment, setSelectedPayment] = useState<ManualPayment | null>(null);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [rejectReason, setRejectReason] = useState('Деньги не поступили');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
   const [filters, setFilters] = useState<OrderFilters>(initialFilters);
@@ -34,21 +53,30 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     setLoading(true);
     setError(null);
 
-    api.orders
-      .listAdmin({
-        limit: 100,
-        offset: 0,
-        search: filters.search,
-        status: filters.status,
+    Promise.all([
+      api.orders.listAdmin({
+          limit: 100,
+          offset: 0,
+          search: filters.search,
+          status: filters.status,
+        }),
+      api.manualPayments.list(paymentFilter || undefined),
+    ])
+      .then(([orderList, paymentList]) => {
+        setOrders(orderList.items);
+        setPayments(paymentList.items);
+        const requestedPaymentId = Number(new URLSearchParams(window.location.search).get('payment'));
+        if (Number.isFinite(requestedPaymentId) && requestedPaymentId > 0) {
+          void selectPaymentDetails(requestedPaymentId);
+        }
       })
-      .then((orderList) => setOrders(orderList.items))
       .catch(setError)
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
     loadOrders();
-  }, [filters]);
+  }, [filters, paymentFilter]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -79,6 +107,57 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
       .then(setSelectedOrder)
       .catch(setError)
       .finally(() => setSelectedOrderLoading(false));
+  }
+
+  async function selectPaymentDetails(paymentId: number) {
+    setPaymentBusy(true);
+    setError(null);
+    try {
+      const payment = await api.manualPayments.get(paymentId);
+      setSelectedPayment(payment);
+      setRejectReason(payment.reject_reason || 'Деньги не поступили');
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function approvePayment(payment: ManualPayment) {
+    if (!window.confirm(`Подтвердить оплату заказа ${payment.order_number}?`)) return;
+    setPaymentBusy(true);
+    setError(null);
+    try {
+      const updated = await api.manualPayments.approve(payment.id);
+      updatePaymentState(updated);
+      setNotice(`Оплата заказа ${updated.order_number} подтверждена.`);
+      loadOrders();
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function rejectPayment(payment: ManualPayment) {
+    if (!window.confirm(`Отклонить оплату заказа ${payment.order_number}?`)) return;
+    setPaymentBusy(true);
+    setError(null);
+    try {
+      const updated = await api.manualPayments.reject(payment.id, rejectReason);
+      updatePaymentState(updated);
+      setNotice(`Оплата заказа ${updated.order_number} отклонена, резерв снят.`);
+      loadOrders();
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  function updatePaymentState(updated: ManualPayment) {
+    setPayments((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setSelectedPayment(updated);
   }
 
   if (loading) return <LoadingState title={t('orders.loading')} />;
@@ -127,6 +206,130 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
 
       {notice ? <div className="success-banner">{notice}</div> : null}
 
+      <section className="panel payment-review-panel">
+        <div className="section-heading">
+          <div>
+            <h2>Проверка ручных оплат</h2>
+            <p>Подтвердите поступление полной суммы или отклоните оплату и снимите резерв.</p>
+          </div>
+          <label className="payment-filter-field">
+            <span>Статус оплаты</span>
+            <select
+              value={paymentFilter}
+              onChange={(event) =>
+                setPaymentFilter(event.target.value as '' | ManualPaymentStatus)
+              }
+            >
+              <option value="">Все статусы</option>
+              {paymentStatuses.map((status) => (
+                <option key={status} value={status}>{paymentStatusLabel(status)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="payment-review-layout">
+          <div className="payment-review-list">
+            {payments.length === 0 ? (
+              <div className="empty-table">Нет оплат с выбранным статусом.</div>
+            ) : payments.map((payment) => (
+              <button
+                className={`payment-review-row ${payment.status === 'SUBMITTED' ? 'is-submitted' : ''}`}
+                key={payment.id}
+                type="button"
+                onClick={() => void selectPaymentDetails(payment.id)}
+              >
+                <span>
+                  <strong>{payment.order_number}</strong>
+                  <small>{payment.customer_name} · {payment.customer_phone}</small>
+                </span>
+                <span>
+                  <strong>{formatMoney(payment.amount, language)}</strong>
+                  <small>{paymentStatusLabel(payment.status)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <aside className="payment-review-detail">
+            {paymentBusy && !selectedPayment ? (
+              <LoadingState title="Загружаем оплату" />
+            ) : selectedPayment ? (
+              <>
+                <div className="section-heading">
+                  <div>
+                    <h3>{selectedPayment.order_number}</h3>
+                    <p>{paymentStatusLabel(selectedPayment.status)}</p>
+                  </div>
+                  <StatusBadge status={selectedPayment.status} />
+                </div>
+                <dl className="details-list payment-details-list">
+                  <div><dt>Клиент</dt><dd>{selectedPayment.customer_name}</dd></div>
+                  <div><dt>Телефон клиента</dt><dd>{selectedPayment.customer_phone}</dd></div>
+                  <div><dt>Сумма</dt><dd>{formatMoney(selectedPayment.amount, language)}</dd></div>
+                  <div><dt>Телефон СБП</dt><dd>{selectedPayment.seller_phone_display}</dd></div>
+                  <div><dt>Комментарий</dt><dd>{selectedPayment.payment_comment}</dd></div>
+                  <div><dt>Отправлено</dt><dd>{selectedPayment.submitted_at ? formatDate(selectedPayment.submitted_at, language) : 'Не отправлено'}</dd></div>
+                  <div><dt>Резерв до</dt><dd>{formatDate(selectedPayment.expires_at, language)}</dd></div>
+                </dl>
+
+                {selectedPayment.receipt_image_url ? (
+                  <a
+                    className="payment-receipt-preview"
+                    href={resolveMediaUrl(selectedPayment.receipt_image_url)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <img
+                      src={resolveMediaUrl(selectedPayment.receipt_image_url)}
+                      alt="Скриншот оплаты"
+                    />
+                    <span>Открыть скриншот</span>
+                  </a>
+                ) : <div className="empty-table">Скриншот не загружен.</div>}
+
+                {['PENDING', 'SUBMITTED'].includes(selectedPayment.status) ? (
+                  <div className="payment-decision-box">
+                      <label>
+                        <span>Причина отклонения</span>
+                        <input
+                          list="payment-reject-reasons"
+                          maxLength={500}
+                          value={rejectReason}
+                          onChange={(event) => setRejectReason(event.target.value)}
+                        />
+                        <datalist id="payment-reject-reasons">
+                          <option value="Деньги не поступили" />
+                          <option value="Неверная сумма" />
+                          <option value="Неверный комментарий" />
+                        </datalist>
+                      </label>
+                    <div className="payment-decision-actions">
+                      <button
+                        className="button button-primary"
+                        disabled={paymentBusy}
+                        type="button"
+                        onClick={() => void approvePayment(selectedPayment)}
+                      >
+                        Подтвердить оплату
+                      </button>
+                      <button
+                        className="button button-danger"
+                        disabled={paymentBusy}
+                        type="button"
+                        onClick={() => void rejectPayment(selectedPayment)}
+                      >
+                        Отклонить оплату
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : <div className="empty-drawer">Выберите оплату для проверки.</div>}
+          </aside>
+        </div>
+      </section>
+
       <div className="split-view">
         <div className="table-panel">
           <table>
@@ -167,7 +370,10 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     <td>{formatMoney(order.total_amount, language)}</td>
                     <td>{order.promo_code_code ?? t('common.none')}</td>
                     <td>
-                      <StatusBadge status={order.status} />
+                      <StatusBadge
+                        status={order.manual_payment?.status ?? order.status}
+                        label={order.manual_payment ? paymentStatusLabel(order.manual_payment.status) : undefined}
+                      />
                     </td>
                     <td>{formatDate(order.created_at, language)}</td>
                     <td>
@@ -180,6 +386,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                           {t('common.details')}
                         </button>
                         <select
+                          disabled={Boolean(order.manual_payment && ['PENDING', 'SUBMITTED'].includes(order.manual_payment.status))}
                           value={order.status}
                           onChange={(event) =>
                             updateOrderStatus(order, event.target.value as OrderStatus)
@@ -210,7 +417,10 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   <h2>{selectedOrder.order_number}</h2>
                   <p>{t('orders.created', { date: formatDate(selectedOrder.created_at, language) })}</p>
                 </div>
-                <StatusBadge status={selectedOrder.status} />
+                <StatusBadge
+                  status={selectedOrder.manual_payment?.status ?? selectedOrder.status}
+                  label={selectedOrder.manual_payment ? paymentStatusLabel(selectedOrder.manual_payment.status) : undefined}
+                />
               </div>
               <dl className="details-list">
                 <div>
@@ -256,6 +466,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
               <div className="section-heading order-detail-actions">
                 <h3>{t('orders.items')}</h3>
                 <select
+                  disabled={Boolean(selectedOrder.manual_payment && ['PENDING', 'SUBMITTED'].includes(selectedOrder.manual_payment.status))}
                   value={selectedOrder.status}
                   onChange={(event) =>
                     updateOrderStatus(selectedOrder, event.target.value as OrderStatus)
@@ -339,4 +550,15 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
 function formatVariantSize(sizeGrid: ProductSizeGrid, size: string, oneSizeLabel: string): string {
   if (sizeGrid === 'shoes_ru') return `RU ${size}`;
   return size === 'ONE_SIZE' ? oneSizeLabel : size;
+}
+
+function paymentStatusLabel(status: ManualPaymentStatus): string {
+  return {
+    PENDING: 'Ожидает оплату',
+    SUBMITTED: 'Оплата на проверке',
+    APPROVED: 'Оплачено',
+    REJECTED: 'Отклонено',
+    EXPIRED: 'Истекло время оплаты',
+    CANCELLED: 'Отменено',
+  }[status];
 }

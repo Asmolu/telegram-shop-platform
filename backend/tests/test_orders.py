@@ -11,6 +11,10 @@ from app.db.models import (
     CartItem,
     CouponUsage,
     DiscountType,
+    ManualPayment,
+    ManualPaymentCurrency,
+    ManualPaymentMethod,
+    ManualPaymentStatus,
     Notification,
     NotificationStatus,
     Order,
@@ -22,6 +26,7 @@ from app.db.models import (
     ProductStatus,
     ProductVariant,
     PromoCode,
+    SellerPaymentSettings,
     User,
     UserRole,
 )
@@ -153,6 +158,51 @@ class FakePromoCodesService:
         )
 
 
+class FakeManualPaymentsService:
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.settings = SellerPaymentSettings(
+            id=1,
+            seller_phone_e164="+79999999999",
+            seller_phone_display="+7 (999) 999-99-99",
+            seller_bank_name="Bank",
+            seller_recipient_name="Ada L.",
+            is_manual_sbp_enabled=enabled,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+
+    async def require_checkout_settings(self) -> SellerPaymentSettings:
+        if not self.settings.is_manual_sbp_enabled:
+            raise AppError("Manual SBP payment is not configured")
+        return self.settings
+
+    async def create_for_checkout(
+        self,
+        order: Order,
+        *,
+        payment_settings: SellerPaymentSettings,
+    ) -> ManualPayment:
+        payment = ManualPayment(
+            id=order.id,
+            order_id=order.id,
+            order=order,
+            method=ManualPaymentMethod.SBP_PHONE,
+            amount=order.total_amount,
+            currency=ManualPaymentCurrency.RUB,
+            seller_phone_e164=payment_settings.seller_phone_e164,
+            seller_phone_display=payment_settings.seller_phone_display,
+            seller_bank_name=payment_settings.seller_bank_name,
+            seller_recipient_name=payment_settings.seller_recipient_name,
+            payment_comment=f"Заказ #{order.id}",
+            status=ManualPaymentStatus.PENDING,
+            expires_at=_now(),
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        order.manual_payment = payment
+        return payment
+
+
 class FakeOrdersRepository:
     def __init__(self) -> None:
         self.carts: dict[int, Cart] = {}
@@ -261,6 +311,8 @@ async def test_checkout_from_valid_cart() -> None:
     assert order.items[0].variant_size == "M"
     assert order.items[0].variant_size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert order.items[0].variant_sku == "HOODIE-M-BLK"
+    assert order.manual_payment is not None
+    assert order.manual_payment.status == ManualPaymentStatus.PENDING
     assert repository.variants[1].stock_quantity == 3
     assert repository.carts[1].items == []
     assert session.committed is True
@@ -524,6 +576,18 @@ async def test_stock_deducted_after_successful_checkout() -> None:
     await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
 
     assert repository.variants[1].stock_quantity == 5
+
+
+@pytest.mark.asyncio
+async def test_checkout_requires_enabled_manual_payment_settings() -> None:
+    service, repository, session, _ = _orders_service(manual_payments_enabled=False)
+
+    with pytest.raises(AppError, match="Manual SBP payment is not configured"):
+        await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert repository.orders == {}
+    assert repository.variants[1].stock_quantity == 5
+    assert session.rolled_back is True
 
 
 @pytest.mark.asyncio
@@ -801,6 +865,7 @@ def _orders_service(
     promo_codes_service: FakePromoCodesService | None = None,
     analytics_tracker: FakeAnalyticsTracker | None = None,
     audit_service: FakeAuditService | None = None,
+    manual_payments_enabled: bool = True,
 ) -> tuple[OrdersService, FakeOrdersRepository, DummySession, FakeOrderEventPublisher]:
     session = DummySession()
     events = FakeOrderEventPublisher(session)
@@ -810,6 +875,7 @@ def _orders_service(
         promo_codes_service=promo_codes_service,
         analytics_tracker=analytics_tracker,
         audit_service=audit_service,
+        manual_payments_service=FakeManualPaymentsService(enabled=manual_payments_enabled),
     )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(

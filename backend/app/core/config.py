@@ -48,6 +48,7 @@ class Settings(BaseSettings):
         "reviews",
         "categories",
         "tags",
+        "payment_receipts",
         "temp",
     )
 
@@ -93,6 +94,9 @@ class Settings(BaseSettings):
     customer_campaign_worker_enabled: bool = True
     customer_campaign_worker_poll_seconds: int = 5
     customer_campaign_sending_timeout_seconds: int = 300
+
+    manual_payment_expiration_worker_enabled: bool = True
+    manual_payment_expiration_poll_seconds: int = 60
 
     @property
     def cors_origins(self) -> list[str]:

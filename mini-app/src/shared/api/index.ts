@@ -9,6 +9,7 @@ import type {
   CustomerNotificationSubscriptionUpdate,
   Favorite,
   FavoriteList,
+  ManualPayment,
   Order,
   OrderList,
   PersonalData,
@@ -150,6 +151,25 @@ export function getOrders() {
 
 export function getOrder(orderId: number) {
   return apiRequest<Order>(`/orders/${orderId}`);
+}
+
+export function getOrderPayment(orderId: number) {
+  return apiRequest<ManualPayment>(`/orders/${orderId}/payment`);
+}
+
+export function submitOrderPayment(orderId: number) {
+  return apiRequest<ManualPayment>(`/orders/${orderId}/payment/submit`, {
+    method: 'POST',
+  });
+}
+
+export function uploadOrderPaymentReceipt(orderId: number, file: File) {
+  const body = new FormData();
+  body.append('file', file);
+  return apiRequest<ManualPayment>(`/orders/${orderId}/payment/receipt`, {
+    method: 'POST',
+    body,
+  });
 }
 
 export function getProductReviews(productId: number) {

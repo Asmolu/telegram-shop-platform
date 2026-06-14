@@ -106,7 +106,18 @@ CUSTOMER_CAMPAIGN_RETRY_BASE_SECONDS=60
 CUSTOMER_CAMPAIGN_WORKER_ENABLED=true
 CUSTOMER_CAMPAIGN_WORKER_POLL_SECONDS=5
 CUSTOMER_CAMPAIGN_SENDING_TIMEOUT_SECONDS=300
+MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED=true
+MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60
 ```
+
+Manual SBP checkout remains unavailable until a seller or administrator saves
+and enables payment settings in Seller Panel. Receipt images are written to
+`backend/uploads/payment_receipts/`; the application creates the directory, but
+the backend process must have write access. Changing settings affects only new
+payments because each payment stores its own phone, bank, recipient, and comment
+snapshot. Bot 2 uses `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` for
+seller-group approve/reject actions. Bot 1 is needed only when customer payment
+notifications are enabled.
 
 Safe local/staging campaign flow:
 

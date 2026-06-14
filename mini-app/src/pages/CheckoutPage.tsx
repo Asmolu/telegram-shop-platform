@@ -196,7 +196,7 @@ export function CheckoutPage() {
         promo_code: promoCodeForOrder,
       });
       window.dispatchEvent(new Event('miniapp:cart-updated'));
-      navigate(withReturnTo(`/order-success/${order.id}`, returnToParam), { replace: true });
+      navigate(withReturnTo(`/payment/${order.id}`, returnToParam), { replace: true });
     } catch (checkoutError) {
       setNotice(toApiErrorMessage(checkoutError));
     } finally {

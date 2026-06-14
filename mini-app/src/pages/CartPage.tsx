@@ -389,6 +389,11 @@ function OrdersTab({ orders }: { orders: Order[] }) {
       {orders.map((order) => {
         const promoCode = order.promo_code_code ?? order.promo_code;
         const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
+        const paymentStatus = order.manual_payment?.status;
+        const displayStatus = paymentStatus
+          ? formatPaymentStatus(paymentStatus)
+          : formatOrderStatus(order.status);
+        const statusClass = paymentStatus?.toLowerCase() ?? order.status.toLowerCase();
 
         return (
           <article className="order-card order-card--rich" key={order.id}>
@@ -397,8 +402,8 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                 <strong>Заказ {order.order_number}</strong>
                 <small>{formatDate(order.created_at)} · {order.items.length} поз.</small>
               </div>
-              <span className={`status-pill status-pill--${order.status.toLowerCase()}`}>
-                {formatOrderStatus(order.status)}
+              <span className={`status-pill status-pill--${statusClass}`}>
+                {displayStatus}
               </span>
             </header>
 
@@ -438,7 +443,17 @@ function OrdersTab({ orders }: { orders: Order[] }) {
               })}
             </div>
 
-            <button className="secondary-button" type="button" onClick={() => navigate(`/order-success/${order.id}`)}>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() =>
+                navigate(
+                  order.manual_payment && paymentStatus !== 'APPROVED'
+                    ? `/payment/${order.id}`
+                    : `/order-success/${order.id}`,
+                )
+              }
+            >
               Подробнее
             </button>
           </article>
@@ -446,4 +461,16 @@ function OrdersTab({ orders }: { orders: Order[] }) {
       })}
     </div>
   );
+}
+
+function formatPaymentStatus(status: NonNullable<Order['manual_payment']>['status']) {
+  const labels = {
+    PENDING: 'Ожидает оплату',
+    SUBMITTED: 'Оплата на проверке',
+    APPROVED: 'Оплачено',
+    REJECTED: 'Отклонено',
+    EXPIRED: 'Время оплаты истекло',
+    CANCELLED: 'Отменено',
+  };
+  return labels[status];
 }

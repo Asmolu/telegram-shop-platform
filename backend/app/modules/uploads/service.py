@@ -27,6 +27,7 @@ from app.modules.uploads.schemas import (
 from app.modules.uploads.storage import LocalStorageService
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+MAX_GENERIC_IMAGE_PIXELS = 40_000_000
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 PIL_IMAGE_MIME_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
@@ -58,7 +59,7 @@ class UploadsService:
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
 
-        upload = await self._validate_and_read_image(file, profile=PRODUCT_IMAGE_PROFILE)
+        upload = await self.validate_and_read_image(file, profile=PRODUCT_IMAGE_PROFILE)
         file_path = self.storage.save_bytes(
             upload.content,
             folder="products",
@@ -98,7 +99,7 @@ class UploadsService:
         alt_text: str | None = None,
         image_kind: ImageUploadKind = ImageUploadKind.NATIVE_BANNER,
     ) -> BannerImageUploadRead:
-        upload = await self._validate_and_read_image(
+        upload = await self.validate_and_read_image(
             file,
             profile=BANNER_IMAGE_PROFILES[image_kind],
         )
@@ -122,7 +123,7 @@ class UploadsService:
         file: UploadFile,
         alt_text: str | None = None,
     ) -> TagImageUploadRead:
-        upload = await self._validate_and_read_image(file, profile=TAG_IMAGE_PROFILE)
+        upload = await self.validate_and_read_image(file, profile=TAG_IMAGE_PROFILE)
         file_path = self.storage.save_bytes(
             upload.content,
             folder="tags",
@@ -143,7 +144,7 @@ class UploadsService:
         file: UploadFile,
         alt_text: str | None = None,
     ) -> CategoryImageUploadRead:
-        upload = await self._validate_and_read_image(file, profile=CATEGORY_IMAGE_PROFILE)
+        upload = await self.validate_and_read_image(file, profile=CATEGORY_IMAGE_PROFILE)
         file_path = self.storage.save_bytes(
             upload.content,
             folder="categories",
@@ -158,12 +159,12 @@ class UploadsService:
             alt_text=alt_text,
         )
 
-    async def _validate_and_read_image(
+    async def validate_and_read_image(
         self,
         file: UploadFile,
         *,
-        profile: ImageUploadProfile,
-    ) -> "_ValidatedUpload":
+        profile: ImageUploadProfile | None = None,
+    ) -> "ValidatedImageUpload":
         original_filename = _safe_original_filename(file.filename)
         extension = Path(original_filename).suffix.lower()
         if extension not in ALLOWED_IMAGE_EXTENSIONS:
@@ -181,7 +182,7 @@ class UploadsService:
 
         self._validate_image_dimensions(content, mime_type=mime_type, profile=profile)
 
-        return _ValidatedUpload(
+        return ValidatedImageUpload(
             content=content,
             extension=extension,
             original_filename=original_filename,
@@ -194,7 +195,7 @@ class UploadsService:
         content: bytes,
         *,
         mime_type: str,
-        profile: ImageUploadProfile,
+        profile: ImageUploadProfile | None,
     ) -> None:
         try:
             with Image.open(BytesIO(content)) as image:
@@ -207,6 +208,11 @@ class UploadsService:
             raise
         except (OSError, UnidentifiedImageError) as exc:
             raise AppError("Invalid image content", status.HTTP_400_BAD_REQUEST) from exc
+
+        if profile is None:
+            if width <= 0 or height <= 0 or width * height > MAX_GENERIC_IMAGE_PIXELS:
+                raise AppError("Invalid image dimensions", status.HTTP_422_UNPROCESSABLE_CONTENT)
+            return
 
         if width < profile.min_width or height < profile.min_height:
             raise AppError(
@@ -238,7 +244,7 @@ class UploadsService:
             return
         await self.cache.delete_patterns(*product_cache_patterns())
 
-class _ValidatedUpload:
+class ValidatedImageUpload:
     def __init__(
         self,
         *,

@@ -119,6 +119,9 @@ export function getRouteId(pathname: string) {
   if (pathname.startsWith('/order-success/')) {
     return 'order-success';
   }
+  if (pathname.startsWith('/payment/')) {
+    return 'payment';
+  }
   if (pathname === '/profile') {
     return 'profile';
   }

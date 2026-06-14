@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import status
@@ -12,7 +13,7 @@ from app.core.log_sanitization import (
     redact_sensitive_path,
     redact_sensitive_text,
 )
-from app.db.models import PendingSellerRegistration, SellerRegistrationStatus
+from app.db.models import ManualPaymentStatus, PendingSellerRegistration, SellerRegistrationStatus
 from app.main import create_app
 from app.modules.seller_auth.callbacks import build_seller_registration_callback_data
 from app.modules.seller_auth.schemas import SellerRegistrationStartRequest
@@ -46,6 +47,7 @@ class FakeTelegramService:
         self.messages: list[tuple[str, str]] = []
         self.parse_modes: list[str | None] = []
         self.reply_markups: list[dict[str, object]] = []
+        self.callback_answers: list[tuple[str, str | None]] = []
 
     async def send_message(
         self,
@@ -59,6 +61,65 @@ class FakeTelegramService:
         self.parse_modes.append(parse_mode)
         if reply_markup is not None:
             self.reply_markups.append(reply_markup)
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str | None = None,
+    ) -> None:
+        self.callback_answers.append((callback_query_id, text))
+
+
+class FakeManualPaymentsService:
+    def __init__(
+        self,
+        *,
+        actor_user_id: int | None = 9,
+        terminal_status: ManualPaymentStatus | None = None,
+    ) -> None:
+        self.actions: list[tuple[str, int, int | None, int]] = []
+        self.actor_user_id = actor_user_id
+        self.terminal_status = terminal_status
+
+    async def actor_user_id_for_telegram(self, telegram_id: int) -> int | None:
+        assert telegram_id == 500
+        return self.actor_user_id
+
+    async def approve(
+        self,
+        payment_id: int,
+        *,
+        actor_user_id: int | None,
+        source: str,
+        actor_telegram_user_id: int,
+    ) -> SimpleNamespace:
+        assert source == "seller_bot"
+        if self.terminal_status is not None:
+            raise AppError("Payment cannot be approved", status.HTTP_409_CONFLICT)
+        self.actions.append(("approve", payment_id, actor_user_id, actor_telegram_user_id))
+        return SimpleNamespace(id=payment_id, status=ManualPaymentStatus.APPROVED)
+
+    async def reject(
+        self,
+        payment_id: int,
+        *,
+        actor_user_id: int | None,
+        reject_reason: str,
+        source: str,
+        actor_telegram_user_id: int,
+    ) -> SimpleNamespace:
+        assert source == "seller_bot"
+        assert reject_reason == "Деньги не поступили"
+        if self.terminal_status is not None:
+            raise AppError("Payment cannot be rejected", status.HTTP_409_CONFLICT)
+        self.actions.append(("reject", payment_id, actor_user_id, actor_telegram_user_id))
+        return SimpleNamespace(id=payment_id, status=ManualPaymentStatus.REJECTED)
+
+    async def get_for_seller(self, payment_id: int) -> SimpleNamespace:
+        if self.terminal_status is None:
+            raise AppError("Payment not found", status.HTTP_404_NOT_FOUND)
+        return SimpleNamespace(id=payment_id, status=self.terminal_status)
 
 
 class FakeAuditService:
@@ -218,6 +279,107 @@ async def test_seller_bot_reject_callback_sends_failure_message(
         ("100", "Регистрация не удалась."),
         ("-100", "Регистрация продавца отклонена."),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "expected_status"),
+    [
+        ("approve", ManualPaymentStatus.APPROVED),
+        ("reject", ManualPaymentStatus.REJECTED),
+    ],
+)
+async def test_seller_bot_manual_payment_callback_uses_shared_service(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    expected_status: ManualPaymentStatus,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService()
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    first = await service.handle_update(_callback_update(f"manual_payment:{action}:17"))
+    second = await service.handle_update(_callback_update(f"manual_payment:{action}:17"))
+
+    assert first.result == f"manual_payment_{expected_status.value.lower()}"
+    assert second.result == first.result
+    assert payments.actions == [
+        (action, 17, 9, 500),
+        (action, 17, 9, 500),
+    ]
+    assert telegram.callback_answers[-1] == (
+        "callback-id",
+        f"Payment status: {expected_status.value}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_manual_payment_callback_rejects_other_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService()
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    response = await service.handle_update(
+        _callback_update("manual_payment:approve:17", chat_id=-200)
+    )
+
+    assert response.result == "approval_rejected_outside_seller_group"
+    assert payments.actions == []
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_manual_payment_callback_requires_active_seller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService(actor_user_id=None)
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    response = await service.handle_update(_callback_update("manual_payment:approve:17"))
+
+    assert response.result == "manual_payment_callback_unauthorized"
+    assert payments.actions == []
+    assert telegram.callback_answers[-1] == (
+        "callback-id",
+        "Only an active seller or administrator can review payments.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_stale_payment_callback_reports_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService(terminal_status=ManualPaymentStatus.EXPIRED)
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    response = await service.handle_update(_callback_update("manual_payment:approve:17"))
+
+    assert response.result == "manual_payment_expired"
+    assert payments.actions == []
+    assert telegram.callback_answers[-1] == ("callback-id", "Payment status: EXPIRED")
 
 
 @pytest.mark.asyncio

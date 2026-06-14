@@ -14,6 +14,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import NoInspectionAvailable
 
 from app.db.models import OrderStatus, ProductSizeGrid
+from app.modules.manual_payments.schemas import ManualPaymentSummary
 
 
 class OrderCheckoutCreate(BaseModel):
@@ -119,6 +120,7 @@ class OrderRead(BaseModel):
     contact_phone: str
     delivery_address: str
     delivery_comment: str | None = None
+    manual_payment: ManualPaymentSummary | None = None
     items: list[OrderItemRead]
     created_at: datetime
     updated_at: datetime

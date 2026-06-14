@@ -37,6 +37,8 @@ Backend:
   links
 - `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for the protected Bot 1 webhook
   `X-Telegram-Bot-Api-Secret-Token` header
+- `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED=true`
+- `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60` (or another positive polling interval)
 - cache, rate limit, and customer campaign batch settings from
   `backend/.env.production.example`
 
@@ -46,6 +48,11 @@ Frontend:
 - `VITE_TELEGRAM_BOT_USERNAME` for Mini App UI links only, not bot tokens
 
 ## Start
+
+Before deploying this migration, create and verify a PostgreSQL plus uploads
+backup. The release requires rebuilding the backend, Mini App, and Seller Panel,
+then applying Alembic head `20260614_0027`. The persistent uploads volume must
+allow the backend to create and write `/app/uploads/payment_receipts/`.
 
 Validate the compose file syntax:
 
@@ -65,9 +72,9 @@ Run migrations:
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
-Seller Portal email/password auth, seller approval, and Customer Notifications
-Phase 2 require migrations through head `20260605_0018`. Bot 2 is connected
-through:
+Manual SBP payments require migration head `20260614_0027`. Seller Portal
+email/password auth, seller approval, and Customer Notifications Phase 2 remain
+included in that migration chain. Bot 2 is connected through:
 
 ```text
 POST /api/v1/telegram/seller-bot/webhook
@@ -147,6 +154,24 @@ Seller registration verification:
 10. On a test seller only, verify `/block_seller <Seller ID>` prevents
    login/current-user access without deleting seller history.
 
+Manual SBP payment verification:
+
+1. In Seller Panel settings, save the SBP phone and enable manual payment.
+2. Create a Mini App order and confirm the 30-minute payment page shows the
+   snapshotted phone, amount, bank/recipient when configured, and order comment.
+3. Upload a receipt and click `Я оплатил`.
+4. Confirm Bot 2 posts only to `TELEGRAM_SELLER_CHAT_ID`, then approve or reject
+   with an active seller/admin account.
+5. Confirm approval moves the order to processing without returning stock.
+6. Confirm rejection or expiry cancels the order and returns stock exactly once.
+7. Change seller payment settings and confirm the existing payment snapshot is
+   unchanged while a new checkout uses the new values.
+
+Bot 2 token and seller group configuration are required for Telegram review
+buttons. Seller Panel review remains available without Telegram delivery. Bot 1
+token is required only when customer payment notifications are enabled, and Bot
+2 must never send customer messages.
+
 Smoke checks:
 
 ```bash
@@ -172,6 +197,7 @@ curl -i https://seller.tsplatform.ru
 - PostgreSQL: private compose network, persistent `postgres_prod_data` volume
 - Redis: private compose network, persistent `redis_prod_data` volume
 - Uploads: persistent `uploads_data` volume mounted at `/app/uploads`
+- Manual payment receipts: writable `/app/uploads/payment_receipts/` inside that volume
 
 ## Migrations
 

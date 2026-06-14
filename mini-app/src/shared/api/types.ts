@@ -8,6 +8,13 @@ export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+export type ManualPaymentStatus =
+  | 'PENDING'
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type UserRole = 'USER' | 'SELLER' | 'ADMIN';
@@ -248,6 +255,13 @@ export type Order = {
   contact_phone: string;
   delivery_address: string;
   delivery_comment?: string | null;
+  manual_payment?: {
+    id: number;
+    status: ManualPaymentStatus;
+    expires_at: string;
+    submitted_at?: string | null;
+    receipt_image_path?: string | null;
+  } | null;
   items: OrderItem[];
   created_at: string;
   updated_at: string;
@@ -255,6 +269,35 @@ export type Order = {
 
 export type OrderList = {
   items: Order[];
+};
+
+export type ManualPayment = {
+  id: number;
+  order_id: number;
+  order_number: string;
+  customer_user_id: number;
+  customer_name: string;
+  customer_phone: string;
+  method: 'SBP_PHONE';
+  amount: string;
+  currency: 'RUB';
+  status: ManualPaymentStatus;
+  expires_at: string;
+  server_now: string;
+  seller_phone_display: string;
+  seller_phone_e164: string;
+  seller_bank_name?: string | null;
+  seller_recipient_name?: string | null;
+  payment_comment: string;
+  receipt_image_path?: string | null;
+  receipt_image_url?: string | null;
+  submitted_at?: string | null;
+  approved_at?: string | null;
+  rejected_at?: string | null;
+  reject_reason?: string | null;
+  stock_released_at?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Review = {

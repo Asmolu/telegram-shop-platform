@@ -1868,6 +1868,179 @@ label {
   color: var(--danger-text);
 }
 
+.status-pill--pending,
+.status-pill--submitted {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.status-pill--approved {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.status-pill--rejected,
+.status-pill--expired {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.payment-page {
+  display: grid;
+  gap: 12px;
+}
+
+.payment-status-card,
+.payment-help-card,
+.payment-details-card,
+.payment-receipt-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.payment-status-card {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  background: linear-gradient(145deg, var(--primary-soft), var(--surface));
+}
+
+.payment-status-card > span {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.payment-status-card > strong {
+  font-size: 20px;
+}
+
+.payment-status-card--approved {
+  background: linear-gradient(145deg, var(--success-soft), var(--surface));
+}
+
+.payment-status-card--rejected,
+.payment-status-card--expired,
+.payment-status-card--cancelled {
+  background: linear-gradient(145deg, var(--danger-soft), var(--surface));
+}
+
+.payment-countdown {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.payment-countdown small {
+  color: var(--text-muted);
+}
+
+.payment-countdown strong {
+  color: var(--warning-text);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.payment-help-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.payment-help-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.payment-details-card {
+  overflow: hidden;
+}
+
+.payment-details-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.payment-details-row:last-child {
+  border-bottom: 0;
+}
+
+.payment-details-row > span {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.payment-details-row > strong {
+  overflow-wrap: anywhere;
+}
+
+.payment-details-row > button {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.payment-receipt-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.payment-receipt-card span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.payment-receipt-card img {
+  width: 100%;
+  max-height: 360px;
+  border-radius: 14px;
+  object-fit: contain;
+  background: var(--media-bg);
+}
+
+.payment-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-upload-button {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.payment-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.payment-orders-link {
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 800;
+}
+
 .checkout-form {
   margin-top: 12px;
 }

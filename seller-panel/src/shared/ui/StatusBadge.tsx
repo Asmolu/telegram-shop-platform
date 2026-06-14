@@ -1,7 +1,13 @@
-import type { OrderStatus, ProductStatus, ReviewStatus } from '../api';
+import type { ManualPaymentStatus, OrderStatus, ProductStatus, ReviewStatus } from '../api';
 import { labelForEnum, useI18n } from '../i18n';
 
-type StatusValue = ProductStatus | OrderStatus | ReviewStatus | 'ACTIVE' | 'INACTIVE';
+type StatusValue =
+  | ProductStatus
+  | OrderStatus
+  | ReviewStatus
+  | ManualPaymentStatus
+  | 'ACTIVE'
+  | 'INACTIVE';
 
 const toneByStatus: Record<string, string> = {
   ACTIVE: 'success',
@@ -12,10 +18,12 @@ const toneByStatus: Record<string, string> = {
   DRAFT: 'neutral',
   NEW: 'warning',
   PENDING: 'warning',
+  SUBMITTED: 'warning',
   OUT_OF_STOCK: 'warning',
   ARCHIVED: 'danger',
   CANCELLED: 'danger',
   REJECTED: 'danger',
+  EXPIRED: 'danger',
   INACTIVE: 'neutral',
 };
 

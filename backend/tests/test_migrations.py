@@ -12,6 +12,10 @@ from app.db.models import (
     BroadcastDeliveryStatus,
     Category,
     CustomerTelegramSubscription,
+    ManualPayment,
+    ManualPaymentCurrency,
+    ManualPaymentMethod,
+    ManualPaymentStatus,
     Notification,
     NotificationChannel,
     NotificationStatus,
@@ -25,6 +29,7 @@ from app.db.models import (
     ProductRelatedProduct,
     ProductSizeGrid,
     ProductVariant,
+    SellerPaymentSettings,
     SellerRegistrationStatus,
     Tag,
     User,
@@ -663,3 +668,32 @@ def test_category_images_migration_and_model_contract() -> None:
     assert "image_path" in content
     assert Category.__table__.c.image_path.nullable is True
     assert Category.__table__.c.image_path.type.length == 1024
+
+
+def test_manual_sbp_payment_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260614_0027_add_manual_sbp_payments.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_manual_sbp_payments", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260613_0026"
+    assert migration.MANUAL_PAYMENT_METHOD_ENUM.enums == [ManualPaymentMethod.SBP_PHONE.value]
+    assert migration.MANUAL_PAYMENT_CURRENCY_ENUM.enums == [ManualPaymentCurrency.RUB.value]
+    assert migration.MANUAL_PAYMENT_STATUS_ENUM.enums == [
+        status.value for status in ManualPaymentStatus
+    ]
+    assert "seller_payment_settings" in content
+    assert "manual_payments" in content
+    assert "stock_released_at" in content
+    assert "ix_manual_payments_status_expires_at" in content
+    assert SellerPaymentSettings.__table__.c.seller_phone_e164.nullable is True
+    assert ManualPayment.__table__.c.order_id.unique is True
+    assert ManualPayment.__table__.c.receipt_image_path.type.length == 1024

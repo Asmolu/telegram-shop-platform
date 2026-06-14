@@ -238,6 +238,22 @@ send; it is not a read receipt. Staging tests should start with one internal
 account that has opened Bot 1 with `/start`, then enable a tiny campaign before
 production use.
 
+## Manual SBP payments
+
+Checkout uses a manual 100% SBP transfer workflow. A seller or administrator
+must first enable `Ручная оплата через СБП` in Seller Panel settings and provide
+a Russian phone number. New orders snapshot the normalized phone, display
+phone, bank, recipient, amount, and transfer comment for a 30-minute reservation;
+later settings changes do not alter existing payments.
+
+Customers can upload a JPEG, PNG, or WebP receipt up to 5 MB and submit payment
+for review. Receipts are stored under `backend/uploads/payment_receipts/` (or
+`/app/uploads/payment_receipts/` in Compose). Bot 2 posts seller-group review
+buttons when configured; Bot 1 is used only for optional customer payment
+notifications. The backend lifespan expiration worker is controlled by
+`MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED` and
+`MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS`.
+
 ## Production hardening
 
 Sprint 14 adds MVP production readiness:

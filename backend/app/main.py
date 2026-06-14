@@ -16,6 +16,7 @@ from app.core.redis import close_redis_client
 from app.core.request_logging import RequestLoggingMiddleware
 from app.db.session import dispose_database_engine
 from app.modules.customer_notifications.campaigns.worker import run_customer_campaign_worker
+from app.modules.manual_payments.worker import run_manual_payment_expiration_worker
 from app.modules.uploads.storage import ensure_upload_directories
 
 
@@ -23,15 +24,19 @@ from app.modules.uploads.storage import ensure_upload_directories
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     ensure_upload_directories()
     worker_stop = asyncio.Event()
-    worker_task: asyncio.Task[None] | None = None
+    worker_tasks: list[asyncio.Task[None]] = []
     if settings.customer_campaign_worker_enabled and settings.telegram_customer_bot_token:
-        worker_task = asyncio.create_task(run_customer_campaign_worker(worker_stop))
+        worker_tasks.append(asyncio.create_task(run_customer_campaign_worker(worker_stop)))
+    if settings.manual_payment_expiration_worker_enabled:
+        worker_tasks.append(
+            asyncio.create_task(run_manual_payment_expiration_worker(worker_stop))
+        )
     try:
         yield
     finally:
         worker_stop.set()
-        if worker_task is not None:
-            await worker_task
+        if worker_tasks:
+            await asyncio.gather(*worker_tasks)
         await close_redis_client()
         await dispose_database_engine()
 

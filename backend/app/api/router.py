@@ -11,6 +11,8 @@ from app.modules.customer_notifications.campaigns.router import (
 )
 from app.modules.customer_notifications.router import router as customer_notifications_router
 from app.modules.favorites.router import router as favorites_router
+from app.modules.manual_payments.router import customer_router as manual_payments_customer_router
+from app.modules.manual_payments.router import seller_router as manual_payments_seller_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.orders.router import router as orders_router
 from app.modules.products.router import router as products_router
@@ -35,6 +37,8 @@ api_router.include_router(users_router)
 api_router.include_router(banners_router)
 api_router.include_router(cart_router)
 api_router.include_router(orders_router)
+api_router.include_router(manual_payments_customer_router)
+api_router.include_router(manual_payments_seller_router)
 api_router.include_router(promo_codes_router)
 api_router.include_router(reviews_router)
 api_router.include_router(product_reviews_router)

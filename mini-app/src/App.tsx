@@ -10,6 +10,7 @@ import { FaqPage } from './pages/FaqPage';
 import { LaunchPage } from './pages/LaunchPage';
 import { MainPage } from './pages/MainPage';
 import { OrderSuccessPage } from './pages/OrderSuccessPage';
+import { PaymentPage } from './pages/PaymentPage';
 import { PersonalDataPage } from './pages/PersonalDataPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -54,6 +55,9 @@ function RouteSwitch() {
       break;
     case 'order-success':
       page = <OrderSuccessPage />;
+      break;
+    case 'payment':
+      page = <PaymentPage />;
       break;
     case 'profile':
       page = <ProfilePage />;

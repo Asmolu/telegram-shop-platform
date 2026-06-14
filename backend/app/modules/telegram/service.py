@@ -21,6 +21,9 @@ COMMAND_RE = re.compile(
     r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>[\s\S]*))?$"
 )
 SELLER_ID_RE = re.compile(r"^[0-9]+$")
+MANUAL_PAYMENT_CALLBACK_RE = re.compile(
+    r"^manual_payment:(?P<action>approve|reject):(?P<payment_id>[1-9][0-9]*)$"
+)
 POSTGRES_INT32_MAX = 2_147_483_647
 TELEGRAM_ID_HINT_MAX = 20_000_000_000
 TELEGRAM_ID_GUIDANCE_MESSAGE = (
@@ -316,10 +319,12 @@ class SellerBotWebhookService:
         *,
         seller_auth_service,
         seller_bot_service=None,
+        manual_payments_service=None,
         telegram_service: TelegramService | None = None,
     ) -> None:
         self.seller_auth_service = seller_auth_service
         self.seller_bot_service = seller_bot_service
+        self.manual_payments_service = manual_payments_service
         self.telegram_service = telegram_service or seller_auth_service.telegram_service
 
     async def handle_update(self, update: TelegramUpdate) -> SellerBotWebhookResponse:
@@ -392,9 +397,17 @@ class SellerBotWebhookService:
         if not self._is_seller_group_chat(callback_query.message.chat.id):
             await self._send_chat_message(
                 callback_query.message.chat.id,
-                "Seller registration approval is available only in the seller group.",
+                "Seller callback actions are available only in the seller group.",
             )
             return self._response(handled=True, result="approval_rejected_outside_seller_group")
+
+        payment_callback = MANUAL_PAYMENT_CALLBACK_RE.fullmatch(callback_query.data)
+        if payment_callback is not None:
+            return await self._handle_manual_payment_callback(
+                callback_query=callback_query,
+                action=payment_callback.group("action"),
+                payment_id=int(payment_callback.group("payment_id")),
+            )
 
         try:
             action, registration_id = parse_seller_registration_callback_data(callback_query.data)
@@ -417,6 +430,85 @@ class SellerBotWebhookService:
                 self._registration_error_message(exc),
             )
             return self._response(handled=True, result="registration_callback_error")
+
+    async def _handle_manual_payment_callback(
+        self,
+        *,
+        callback_query,
+        action: str,
+        payment_id: int,
+    ) -> SellerBotWebhookResponse:
+        if self.manual_payments_service is None:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Manual payments are not configured.",
+            )
+            return self._response(handled=True, result="manual_payments_unconfigured")
+
+        actor_user_id = await self.manual_payments_service.actor_user_id_for_telegram(
+            callback_query.from_user.id
+        )
+        if actor_user_id is None:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Only an active seller or administrator can review payments.",
+            )
+            return self._response(handled=True, result="manual_payment_callback_unauthorized")
+        try:
+            if action == "approve":
+                payment = await self.manual_payments_service.approve(
+                    payment_id,
+                    actor_user_id=actor_user_id,
+                    source="seller_bot",
+                    actor_telegram_user_id=callback_query.from_user.id,
+                )
+            else:
+                payment = await self.manual_payments_service.reject(
+                    payment_id,
+                    actor_user_id=actor_user_id,
+                    reject_reason="Деньги не поступили",
+                    source="seller_bot",
+                    actor_telegram_user_id=callback_query.from_user.id,
+                )
+        except AppError as exc:
+            try:
+                current_payment = await self.manual_payments_service.get_for_seller(payment_id)
+            except AppError:
+                current_payment = None
+            if current_payment is not None and current_payment.status.value not in {
+                "PENDING",
+                "SUBMITTED",
+            }:
+                await self.telegram_service.answer_callback_query(
+                    callback_query.id,
+                    text=f"Payment status: {current_payment.status.value}",
+                )
+                await self._send_chat_message(
+                    callback_query.message.chat.id,
+                    f"Payment #{current_payment.id}: {current_payment.status.value}",
+                )
+                return self._response(
+                    handled=True,
+                    result=f"manual_payment_{current_payment.status.value.lower()}",
+                )
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text=str(exc)[:180],
+            )
+            return self._response(handled=True, result="manual_payment_callback_error")
+
+        await self.telegram_service.answer_callback_query(
+            callback_query.id,
+            text=f"Payment status: {payment.status.value}",
+        )
+        await self._send_chat_message(
+            callback_query.message.chat.id,
+            f"Payment #{payment.id}: {payment.status.value}",
+        )
+        return self._response(
+            handled=True,
+            result=f"manual_payment_{payment.status.value.lower()}",
+        )
 
     async def _handle_seller_group_command(
         self,

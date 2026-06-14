@@ -16,6 +16,8 @@ import type {
   Category,
   CategoryPayload,
   CustomerNotificationSubscription,
+  ManualPayment,
+  ManualPaymentStatus,
   NotificationTemplate,
   NotificationTemplatePayload,
   Notification,
@@ -32,6 +34,8 @@ import type {
   PromoCodePayload,
   Review,
   ReviewStatus,
+  SellerPaymentSettings,
+  SellerPaymentSettingsPayload,
   SellerBotActionResponse,
   SellerBotStatus,
   SellerRegistrationResendCodeResponse,
@@ -67,7 +71,7 @@ type QueryValue = string | number | boolean | null | undefined;
 type QueryParams = Record<string, QueryValue>;
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: QueryParams;
   body?: unknown;
   formData?: FormData;
@@ -302,6 +306,31 @@ export const api = {
       apiRequest<Order>(`/orders/admin/${orderId}/status`, {
         method: 'PATCH',
         body: { status },
+      }),
+  },
+  paymentSettings: {
+    get: () => apiRequest<SellerPaymentSettings>('/seller/settings/payment'),
+    update: (body: SellerPaymentSettingsPayload) =>
+      apiRequest<SellerPaymentSettings>('/seller/settings/payment', {
+        method: 'PUT',
+        body,
+      }),
+  },
+  manualPayments: {
+    list: (status?: ManualPaymentStatus) =>
+      apiRequest<PageList<ManualPayment>>('/seller/payments', {
+        query: { limit: 100, offset: 0, status },
+      }),
+    get: (paymentId: number) =>
+      apiRequest<ManualPayment>(`/seller/payments/${paymentId}`),
+    approve: (paymentId: number) =>
+      apiRequest<ManualPayment>(`/seller/payments/${paymentId}/approve`, {
+        method: 'POST',
+      }),
+    reject: (paymentId: number, rejectReason?: string | null) =>
+      apiRequest<ManualPayment>(`/seller/payments/${paymentId}/reject`, {
+        method: 'POST',
+        body: { reject_reason: rejectReason ?? null },
       }),
   },
   banners: {
