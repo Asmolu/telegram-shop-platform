@@ -144,7 +144,9 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     try {
       const updated = await api.manualPayments.approve(payment.id);
       updatePaymentState(updated);
-      setNotice(`Оплата заказа ${updated.order_number} подтверждена.`);
+      const refreshed = await refreshPaymentDetails(updated.id);
+      await refreshOrder(updated.order_id);
+      setNotice(`Оплата заказа ${(refreshed ?? updated).order_number} подтверждена.`);
     } catch (requestError) {
       await recoverPaymentMutation(payment, 'APPROVED', requestError);
     } finally {
@@ -160,7 +162,9 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     try {
       const updated = await api.manualPayments.reject(payment.id, rejectReason);
       updatePaymentState(updated);
-      setNotice(`Оплата заказа ${updated.order_number} отклонена, резерв снят.`);
+      const refreshed = await refreshPaymentDetails(updated.id);
+      await refreshOrder(updated.order_id);
+      setNotice(`Оплата заказа ${(refreshed ?? updated).order_number} отклонена, резерв снят.`);
     } catch (requestError) {
       await recoverPaymentMutation(payment, 'REJECTED', requestError);
     } finally {
@@ -180,6 +184,16 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     setSelectedOrder((current) => (
       current ? updateOrderFromPayment(current, updated) : current
     ));
+  }
+
+  async function refreshPaymentDetails(paymentId: number) {
+    try {
+      const refreshed = await api.manualPayments.get(paymentId);
+      updatePaymentState(refreshed);
+      return refreshed;
+    } catch {
+      return null;
+    }
   }
 
   async function refreshOrder(orderId: number) {
@@ -408,7 +422,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     />
                     <span>Открыть скриншот</span>
                   </a>
-                ) : <div className="empty-table">Скриншот не загружен.</div>}
+                ) : <div className="empty-table">Без фото</div>}
 
                 {['PENDING', 'SUBMITTED'].includes(selectedPayment.status) ? (
                   <div className="payment-decision-box">
@@ -614,6 +628,22 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   <dd>{formatMoney(selectedOrder.total_amount, language)}</dd>
                 </div>
               </dl>
+              {selectedOrder.manual_payment?.receipt_image_url ? (
+                <a
+                  className="payment-receipt-preview"
+                  href={resolveMediaUrl(selectedOrder.manual_payment.receipt_image_url)}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <img
+                    src={resolveMediaUrl(selectedOrder.manual_payment.receipt_image_url)}
+                    alt="Скриншот оплаты"
+                  />
+                  <span>Открыть скриншот</span>
+                </a>
+              ) : selectedOrder.manual_payment ? (
+                <div className="empty-table">Без фото</div>
+              ) : null}
               <div className="section-heading order-detail-actions">
                 <h3>{t('orders.items')}</h3>
                 <select
@@ -799,6 +829,7 @@ function updateOrderFromPayment(order: Order, payment: ManualPayment): Order {
       expires_at: payment.expires_at,
       submitted_at: payment.submitted_at,
       receipt_image_path: payment.receipt_image_path,
+      receipt_image_url: payment.receipt_image_url,
     },
   };
 }

@@ -25,15 +25,14 @@ export function TopBar({
   title,
   onBack,
   right,
-  variant = 'marketplace',
 }: {
   title: string;
   onBack?: () => void;
   right?: React.ReactNode;
-  variant?: 'default' | 'marketplace';
+  variant?: 'marketplace';
 }) {
   return (
-    <header className={`top-bar ${variant === 'marketplace' ? 'top-bar--marketplace' : ''}`}>
+    <header className="top-bar top-bar--marketplace">
       <div className="top-bar__left">
         {onBack ? (
           <button className="icon-button" type="button" aria-label="Назад" onClick={onBack}>

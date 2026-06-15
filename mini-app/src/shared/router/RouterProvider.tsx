@@ -19,6 +19,7 @@ const SWIPE_MIN_DISTANCE = 72;
 const SWIPE_MAX_VERTICAL_DISTANCE = 48;
 const SWIPE_FINISH_DURATION = 190;
 const SWIPE_CANCEL_DURATION = 220;
+const SWIPE_UNDERLAY_CLASS = 'swipe-back-underlay';
 const SWIPE_BACK_IGNORE_SELECTOR = [
   '[data-swipe-back-ignore]',
   '[role="dialog"][aria-modal="true"]',
@@ -48,15 +49,46 @@ function getHistoryIndex() {
   return typeof index === 'number' && Number.isFinite(index) ? index : 0;
 }
 
+function createSwipeBackSnapshot() {
+  const frame = document.querySelector<HTMLElement>('.mini-app-frame');
+  if (!frame) {
+    return null;
+  }
+
+  const underlay = document.createElement('div');
+  const snapshot = frame.cloneNode(true) as HTMLElement;
+  underlay.className = SWIPE_UNDERLAY_CLASS;
+  underlay.dataset.scrollTop = String(window.scrollY);
+  underlay.setAttribute('aria-hidden', 'true');
+  underlay.setAttribute('inert', '');
+  snapshot.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+  underlay.appendChild(snapshot);
+  return underlay;
+}
+
+function mountSwipeBackSnapshot(snapshot: HTMLElement | null) {
+  if (!snapshot || snapshot.isConnected) {
+    return;
+  }
+
+  document.body.appendChild(snapshot);
+  snapshot.scrollTop = Number(snapshot.dataset.scrollTop ?? 0);
+}
+
 function clearSwipeBackVisual() {
   const root = document.documentElement;
   root.removeAttribute('data-swipe-back-state');
   root.style.removeProperty('--swipe-back-x');
+  root.style.removeProperty('--swipe-back-progress');
+  root.style.removeProperty('--swipe-back-underlay-opacity');
+  root.style.removeProperty('--swipe-back-underlay-scale');
+  document.querySelectorAll(`.${SWIPE_UNDERLAY_CLASS}`).forEach((element) => element.remove());
 }
 
 export function RouterProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = React.useState(getCurrentPath);
   const historyIndexRef = React.useRef(getHistoryIndex());
+  const previousPageSnapshotRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
     if (window.history.state?.[HISTORY_INDEX_KEY] === undefined) {
@@ -71,6 +103,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const onPopState = () => {
       clearSwipeBackVisual();
+      previousPageSnapshotRef.current = null;
       historyIndexRef.current = getHistoryIndex();
       setLocation(getCurrentPath());
     };
@@ -90,6 +123,8 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         to,
       );
     } else {
+      previousPageSnapshotRef.current?.remove();
+      previousPageSnapshotRef.current = createSwipeBackSnapshot();
       historyIndexRef.current += 1;
       window.history.pushState({ [HISTORY_INDEX_KEY]: historyIndexRef.current }, '', to);
     }
@@ -132,7 +167,18 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
     const setSwipeOffset = (offset: number) => {
       window.cancelAnimationFrame(animationFrame);
       animationFrame = window.requestAnimationFrame(() => {
-        document.documentElement.style.setProperty('--swipe-back-x', `${Math.max(offset, 0)}px`);
+        const safeOffset = Math.max(offset, 0);
+        const progress = Math.min(safeOffset / Math.max(window.innerWidth, 1), 1);
+        document.documentElement.style.setProperty('--swipe-back-x', `${safeOffset}px`);
+        document.documentElement.style.setProperty('--swipe-back-progress', String(progress));
+        document.documentElement.style.setProperty(
+          '--swipe-back-underlay-opacity',
+          String(0.9 + progress * 0.1),
+        );
+        document.documentElement.style.setProperty(
+          '--swipe-back-underlay-scale',
+          String(0.985 + progress * 0.015),
+        );
       });
     };
 
@@ -170,6 +216,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
 
       window.clearTimeout(finishTimer);
       clearSwipeBackVisual();
+      mountSwipeBackSnapshot(previousPageSnapshotRef.current);
       gesture = {
         startX: touch.clientX,
         startY: touch.clientY,

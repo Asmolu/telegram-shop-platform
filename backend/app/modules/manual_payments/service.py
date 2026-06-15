@@ -102,7 +102,12 @@ class ManualPaymentEventPublisher:
     async def _notify_seller(self, payload: Mapping[str, object]) -> None:
         payment_id = int(payload["payment_id"])
         order_id = int(payload["order_id"])
-        message = self._review_message(payload)
+        notification_payload = dict(payload)
+        payment = await self.repository.get_by_id(payment_id, populate_existing=True)
+        if payment is not None:
+            notification_payload["receipt_image_path"] = payment.receipt_image_path
+            notification_payload["has_receipt"] = bool(payment.receipt_image_path)
+        message = self._review_message(notification_payload)
         reply_markup = {
             "inline_keyboard": [
                 [
@@ -123,7 +128,7 @@ class ManualPaymentEventPublisher:
             "seller_chat_id",
             settings.telegram_seller_chat_id,
         )
-        receipt_path = self._receipt_path(payload)
+        receipt_path = self._receipt_path(notification_payload)
         logger.info(
             "manual_payment.seller_bot_notification_attempt",
             extra={
@@ -144,14 +149,16 @@ class ManualPaymentEventPublisher:
                     extra={
                         "payment_id": payment_id,
                         "order_id": order_id,
+                        "has_receipt_path": True,
                         "error_type": type(exc).__name__,
                     },
                 )
                 message = self._review_message(
                     {
-                        **payload,
+                        **notification_payload,
                         "has_receipt": False,
                         "receipt_image_path": None,
+                        "receipt_unavailable": True,
                     }
                 )
                 message_id = await self.telegram_service.send_message(
@@ -171,14 +178,29 @@ class ManualPaymentEventPublisher:
                     reply_markup=reply_markup,
                 )
                 delivery_type = "photo"
+                logger.info(
+                    "manual_payment.seller_bot_receipt_photo_sent",
+                    extra={
+                        "payment_id": payment_id,
+                        "order_id": order_id,
+                        "has_receipt_path": True,
+                    },
+                )
         else:
+            logger.info(
+                "manual_payment.seller_bot_receipt_missing",
+                extra={
+                    "payment_id": payment_id,
+                    "order_id": order_id,
+                    "has_receipt_path": False,
+                },
+            )
             message_id = await self.telegram_service.send_message(
                 seller_chat_id,
                 message,
                 reply_markup=reply_markup,
             )
         if message_id is not None:
-            payment = await self.repository.get_by_id(payment_id)
             if payment is not None:
                 payment.seller_telegram_chat_id = int(seller_chat_id)
                 payment.seller_telegram_message_id = message_id
@@ -202,7 +224,10 @@ class ManualPaymentEventPublisher:
         username = payload.get("customer_username")
         username_label = f"@{username}" if username else "—"
         has_receipt = bool(self._receipt_path(payload) or payload.get("has_receipt"))
-        receipt_line = "" if has_receipt else "Без фото\n"
+        if payload.get("receipt_unavailable"):
+            receipt_line = "Фото не удалось открыть\n"
+        else:
+            receipt_line = "" if has_receipt else "Без фото\n"
         return (
             "Проверка оплаты\n\n"
             f"Заказ {payload['order_number']}\n"
@@ -546,24 +571,89 @@ class ManualPaymentsService:
         if payment.status not in ACTIVE_PAYMENT_STATUSES:
             raise AppError("Receipt can no longer be changed", status.HTTP_409_CONFLICT)
 
-        upload = await self.uploads_service.validate_and_read_image(file)
-        new_path = self.storage.save_bytes(
-            upload.content,
-            folder="payment_receipts",
-            suffix=upload.extension,
+        payment_id = payment.id
+        logger.info(
+            "manual_payment.receipt_upload_started",
+            extra={
+                "payment_id": payment_id,
+                "order_id": payment.order_id,
+                "has_receipt_path": bool(payment.receipt_image_path),
+            },
         )
         old_path = payment.receipt_image_path
-        payment.receipt_image_path = new_path
-        payment_id = payment.id
+        new_path: str | None = None
+        committed = False
         try:
-            await self._commit("Payment receipt update failed")
-        except Exception:
-            self.storage.delete(new_path)
+            upload = await self.uploads_service.validate_and_read_image(file)
+            new_path = self.storage.save_bytes(
+                upload.content,
+                folder="payment_receipts",
+                suffix=upload.extension,
+            )
+            logger.info(
+                "manual_payment.receipt_upload_saved",
+                extra={
+                    "payment_id": payment_id,
+                    "order_id": payment.order_id,
+                    "has_receipt_path": True,
+                },
+            )
+            try:
+                await self.repository.update_receipt_image_path(
+                    payment_id=payment_id,
+                    receipt_image_path=new_path,
+                )
+                await self._commit("Payment receipt update failed")
+            except AppError:
+                raise
+            except Exception as exc:
+                await self.session.rollback()
+                raise AppError(
+                    "Payment receipt update failed",
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                ) from exc
+            committed = True
+            payment = await self._reload_payment(payment_id)
+            if payment.receipt_image_path != new_path:
+                self.storage.delete(new_path)
+                raise AppError(
+                    "Receipt upload could not be confirmed",
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        except Exception as exc:
+            if new_path is not None and not committed:
+                self.storage.delete(new_path)
+            logger.warning(
+                "manual_payment.receipt_upload_failed",
+                extra={
+                    "payment_id": payment_id,
+                    "order_id": payment.order_id,
+                    "has_receipt_path": bool(new_path),
+                    "committed": committed,
+                    "error_type": type(exc).__name__,
+                },
+            )
             raise
         if old_path and old_path != new_path:
-            self.storage.delete(old_path)
-        payment = await self._reload_payment(payment_id)
-        self._log_persisted("manual_payment.receipt_uploaded", payment)
+            try:
+                self.storage.delete(old_path)
+            except OSError:
+                logger.warning(
+                    "manual_payment.receipt_replaced_file_cleanup_failed",
+                    extra={
+                        "payment_id": payment_id,
+                        "order_id": payment.order_id,
+                        "has_receipt_path": True,
+                    },
+                )
+        logger.info(
+            "manual_payment.receipt_upload_persisted",
+            extra={
+                "payment_id": payment_id,
+                "order_id": payment.order_id,
+                "has_receipt_path": True,
+            },
+        )
         return self._payment_response(payment, server_now=now)
 
     async def list_for_seller(

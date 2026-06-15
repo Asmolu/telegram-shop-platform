@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -113,6 +113,24 @@ class ManualPaymentsRepository:
     async def get_user_by_telegram_id(self, telegram_id: int) -> User | None:
         result = await self.session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
+
+    async def update_receipt_image_path(
+        self,
+        *,
+        payment_id: int,
+        receipt_image_path: str,
+    ) -> None:
+        result = await self.session.execute(
+            update(ManualPayment)
+            .where(ManualPayment.id == payment_id)
+            .values(
+                receipt_image_path=receipt_image_path,
+                updated_at=func.now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise RuntimeError(f"Manual payment {payment_id} receipt update affected no rows")
 
     def add(self, instance: ManualPayment | SellerPaymentSettings) -> None:
         self.session.add(instance)

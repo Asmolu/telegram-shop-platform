@@ -32,7 +32,7 @@ from app.events.names import (
 from app.main import create_app
 from app.modules.manual_payments.phone import normalize_russian_phone
 from app.modules.manual_payments.router import get_manual_payments_service
-from app.modules.manual_payments.schemas import SellerPaymentSettingsUpdate
+from app.modules.manual_payments.schemas import ManualPaymentSummary, SellerPaymentSettingsUpdate
 from app.modules.manual_payments.service import ManualPaymentEventPublisher, ManualPaymentsService
 from app.modules.telegram.service import TelegramDeliveryError
 
@@ -65,6 +65,9 @@ class FakeRepository:
         self.users: dict[int, User] = {}
         self.next_payment_id = 1
         self.populate_existing_ids: list[int] = []
+        self.persist_receipt_update = True
+        self.receipt_update_error: Exception | None = None
+        self.receipt_update_calls: list[tuple[int, str]] = []
 
     async def get_settings(self) -> SellerPaymentSettings | None:
         return self.settings
@@ -118,6 +121,18 @@ class FakeRepository:
 
     async def get_user_by_telegram_id(self, telegram_id: int) -> User | None:
         return self.users.get(telegram_id)
+
+    async def update_receipt_image_path(
+        self,
+        *,
+        payment_id: int,
+        receipt_image_path: str,
+    ) -> None:
+        self.receipt_update_calls.append((payment_id, receipt_image_path))
+        if self.receipt_update_error is not None:
+            raise self.receipt_update_error
+        if self.persist_receipt_update:
+            self.payments[payment_id].receipt_image_path = receipt_image_path
 
     def add(self, instance: ManualPayment | SellerPaymentSettings) -> None:
         if isinstance(instance, SellerPaymentSettings):
@@ -462,7 +477,10 @@ async def test_submit_after_deadline_expires_payment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_receipt_upload_replaces_old_file_without_submitting() -> None:
+async def test_receipt_upload_replaces_old_file_without_submitting(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO")
     service, repository, _, _, _, storage = _service(with_payment=True)
     payment = repository.payments[1]
     payment.receipt_image_path = "payment_receipts/old.png"
@@ -471,8 +489,70 @@ async def test_receipt_upload_replaces_old_file_without_submitting() -> None:
 
     assert result.status == ManualPaymentStatus.PENDING
     assert result.receipt_image_path == "payment_receipts/receipt.png"
+    assert result.receipt_image_url == "/uploads/payment_receipts/receipt.png"
+    assert repository.receipt_update_calls == [(1, "payment_receipts/receipt.png")]
     assert repository.populate_existing_ids == [1]
     assert storage.deleted == ["payment_receipts/old.png"]
+    assert "manual_payment.receipt_upload_started" in caplog.messages
+    assert "manual_payment.receipt_upload_saved" in caplog.messages
+    assert "manual_payment.receipt_upload_persisted" in caplog.messages
+
+
+def test_order_payment_summary_includes_receipt_url() -> None:
+    order, _ = _order_and_variant()
+    payment = _payment(order, expires_at=NOW + timedelta(minutes=30))
+    payment.receipt_image_path = "payment_receipts/receipt.png"
+
+    summary = ManualPaymentSummary.model_validate(payment)
+
+    assert summary.receipt_image_path == "payment_receipts/receipt.png"
+    assert summary.receipt_image_url == "/uploads/payment_receipts/receipt.png"
+
+
+@pytest.mark.asyncio
+async def test_receipt_upload_is_visible_in_customer_and_seller_reads() -> None:
+    service, _, _, _, _, _ = _service(with_payment=True)
+
+    uploaded = await service.upload_receipt(order_id=10, user_id=1, file=object())
+    customer_payment = await service.get_for_customer(order_id=10, user_id=1)
+    seller_payment = await service.get_for_seller(uploaded.id)
+    seller_list = await service.list_for_seller(limit=50, offset=0)
+
+    for payment in (uploaded, customer_payment, seller_payment, seller_list.items[0]):
+        assert payment.receipt_image_path == "payment_receipts/receipt.png"
+        assert payment.receipt_image_url == "/uploads/payment_receipts/receipt.png"
+
+
+@pytest.mark.asyncio
+async def test_receipt_upload_fails_if_fresh_row_does_not_contain_saved_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING")
+    service, repository, _, _, _, storage = _service(with_payment=True)
+    repository.persist_receipt_update = False
+
+    with pytest.raises(AppError, match="could not be confirmed"):
+        await service.upload_receipt(order_id=10, user_id=1, file=object())
+
+    assert repository.payments[1].receipt_image_path is None
+    assert storage.saved == ["payment_receipts/receipt.png"]
+    assert storage.deleted == ["payment_receipts/receipt.png"]
+    assert "manual_payment.receipt_upload_failed" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_receipt_upload_db_failure_removes_new_file_and_keeps_old_receipt() -> None:
+    service, repository, session, _, _, storage = _service(with_payment=True)
+    repository.payments[1].receipt_image_path = "payment_receipts/old.png"
+    repository.receipt_update_error = RuntimeError("database unavailable")
+
+    with pytest.raises(AppError, match="Payment receipt update failed"):
+        await service.upload_receipt(order_id=10, user_id=1, file=object())
+
+    assert repository.payments[1].receipt_image_path == "payment_receipts/old.png"
+    assert storage.saved == ["payment_receipts/receipt.png"]
+    assert storage.deleted == ["payment_receipts/receipt.png"]
+    assert session.rollback_count == 1
 
 
 @pytest.mark.asyncio
@@ -484,6 +564,30 @@ async def test_invalid_receipt_is_rejected() -> None:
 
     with pytest.raises(AppError, match="Invalid image content"):
         await service.upload_receipt(order_id=10, user_id=1, file=object())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Invalid MIME type", "MIME"),
+        ("File size exceeds limit", "size"),
+    ],
+)
+async def test_receipt_upload_validation_errors_are_preserved(
+    message: str,
+    expected: str,
+) -> None:
+    service, repository, _, _, _, storage = _service(
+        with_payment=True,
+        upload_error=AppError(message),
+    )
+
+    with pytest.raises(AppError, match=expected):
+        await service.upload_receipt(order_id=10, user_id=1, file=object())
+
+    assert repository.receipt_update_calls == []
+    assert storage.saved == []
 
 
 @pytest.mark.asyncio
@@ -500,13 +604,14 @@ async def test_notification_failure_does_not_rollback_payment_state() -> None:
 
 @pytest.mark.asyncio
 async def test_submit_attempts_configured_seller_bot_notification() -> None:
-    service, _, _, _, _, _ = _service(with_payment=True)
+    service, repository, _, _, _, _ = _service(with_payment=True)
     telegram = FakeTelegramService()
     service.event_publisher = ManualPaymentEventPublisher(
         service.session,
         telegram_service=telegram,
         customer_publisher=FakeEventPublisher(),
     )
+    service.event_publisher.repository = repository
 
     result = await service.submit(order_id=10, user_id=1)
 
@@ -526,6 +631,7 @@ async def test_seller_bot_send_failure_does_not_rollback_submit() -> None:
         telegram_service=FakeTelegramService(fail=True),
         customer_publisher=FakeEventPublisher(),
     )
+    service.event_publisher.repository = repository
 
     result = await service.submit(order_id=10, user_id=1)
 
@@ -544,6 +650,7 @@ async def test_missing_seller_bot_configuration_does_not_break_submit() -> None:
         telegram_service=telegram,
         customer_publisher=FakeEventPublisher(),
     )
+    service.event_publisher.repository = repository
 
     result = await service.submit(order_id=10, user_id=1)
 
@@ -556,7 +663,9 @@ async def test_missing_seller_bot_configuration_does_not_break_submit() -> None:
 @pytest.mark.asyncio
 async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("INFO")
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     telegram = FakeTelegramService()
     storage = FakeStorage()
@@ -567,6 +676,7 @@ async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
         customer_publisher=FakeEventPublisher(),
         storage=storage,
     )
+    publisher.repository = FakeRepository()
 
     await publisher.emit(
         MANUAL_PAYMENT_SUBMITTED,
@@ -602,18 +712,23 @@ async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
     buttons = keyboard["inline_keyboard"][0]
     assert buttons[0]["callback_data"] == "manual_payment:approve:17"
     assert buttons[1]["callback_data"] == "manual_payment:reject:17"
+    assert "manual_payment.seller_bot_receipt_photo_sent" in caplog.messages
     assert buttons[0]["text"] == "✅ Подтвердить"
     assert buttons[1]["text"] == "❌ Отклонить"
 
 
 @pytest.mark.asyncio
-async def test_submitted_event_without_receipt_uses_clean_text_note() -> None:
+async def test_submitted_event_without_receipt_uses_clean_text_note(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO")
     telegram = FakeTelegramService()
     publisher = ManualPaymentEventPublisher(
         DummySession(),
         telegram_service=telegram,
         customer_publisher=FakeEventPublisher(),
     )
+    publisher.repository = FakeRepository()
 
     await publisher.emit(
         MANUAL_PAYMENT_SUBMITTED,
@@ -636,8 +751,60 @@ async def test_submitted_event_without_receipt_uses_clean_text_note() -> None:
     assert telegram.photos == []
     assert len(telegram.messages) == 1
     message = telegram.messages[0][1]
+    assert "manual_payment.seller_bot_receipt_missing" in caplog.messages
     assert "Без фото" in message
     assert "Скриншот: нет" not in message
+
+
+@pytest.mark.asyncio
+async def test_submit_after_receipt_upload_sends_seller_photo() -> None:
+    service, repository, _, _, _, storage = _service(with_payment=True)
+    telegram = FakeTelegramService(message_id=707)
+    publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+        storage=storage,
+    )
+    publisher.repository = repository
+    service.event_publisher = publisher
+
+    uploaded = await service.upload_receipt(order_id=10, user_id=1, file=object())
+    submitted = await service.submit(order_id=10, user_id=1)
+
+    assert uploaded.receipt_image_path == "payment_receipts/receipt.png"
+    assert submitted.receipt_image_path == uploaded.receipt_image_path
+    assert telegram.messages == []
+    assert telegram.photos[0][1] == b"image"
+    assert "ORD-00000010" in (telegram.photos[0][4] or "")
+    assert repository.payments[1].seller_telegram_message_id == 707
+
+
+@pytest.mark.asyncio
+async def test_missing_receipt_file_falls_back_to_text_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    telegram = FakeTelegramService()
+    storage = FakeStorage()
+    repository = FakeRepository()
+    order, _ = _order_and_variant()
+    payment = _payment(order, expires_at=NOW + timedelta(minutes=30))
+    payment.receipt_image_path = "payment_receipts/missing.png"
+    repository.payments[payment.id] = payment
+    publisher = ManualPaymentEventPublisher(
+        DummySession(),
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+        storage=storage,
+    )
+    publisher.repository = repository
+
+    with caplog.at_level("WARNING"):
+        await publisher.emit(MANUAL_PAYMENT_SUBMITTED, _submitted_payload(payment))
+
+    assert telegram.photos == []
+    assert "Фото не удалось открыть" in telegram.messages[0][1]
+    assert "manual_payment.seller_bot_receipt_read_failed" in caplog.messages
 
 
 @pytest.mark.asyncio
@@ -842,6 +1009,9 @@ def test_manual_payment_mutation_routes_return_fresh_success_responses() -> None
                 "/api/v1/orders/10/payment/receipt",
                 files={"file": ("receipt.png", b"image", "image/png")},
             )
+            customer_detail_response = client.get("/api/v1/orders/10/payment")
+            seller_detail_response = client.get("/api/v1/seller/payments/1")
+            seller_list_response = client.get("/api/v1/seller/payments")
             submit_response = client.post("/api/v1/orders/10/payment/submit")
             approve_response = client.post("/api/v1/seller/payments/1/approve")
     finally:
@@ -849,6 +1019,21 @@ def test_manual_payment_mutation_routes_return_fresh_success_responses() -> None
 
     assert receipt_response.status_code == 200
     assert receipt_response.json()["receipt_image_path"] == "payment_receipts/receipt.png"
+    assert receipt_response.json()["receipt_image_url"] == (
+        "/uploads/payment_receipts/receipt.png"
+    )
+    assert customer_detail_response.status_code == 200
+    assert customer_detail_response.json()["receipt_image_url"] == (
+        "/uploads/payment_receipts/receipt.png"
+    )
+    assert seller_detail_response.status_code == 200
+    assert seller_detail_response.json()["receipt_image_url"] == (
+        "/uploads/payment_receipts/receipt.png"
+    )
+    assert seller_list_response.status_code == 200
+    assert seller_list_response.json()["items"][0]["receipt_image_url"] == (
+        "/uploads/payment_receipts/receipt.png"
+    )
     assert submit_response.status_code == 200
     assert submit_response.json()["status"] == "SUBMITTED"
     assert approve_response.status_code == 200
@@ -1028,3 +1213,25 @@ def _payment(order: Order, *, expires_at: datetime) -> ManualPayment:
     )
     order.manual_payment = payment
     return payment
+
+
+def _submitted_payload(payment: ManualPayment) -> dict[str, object]:
+    return {
+        "payment_id": payment.id,
+        "order_id": payment.order.id,
+        "order_number": payment.order.order_number,
+        "user_id": payment.order.user_id,
+        "customer_username": payment.order.user.username,
+        "customer_phone": payment.order.contact_phone,
+        "delivery_method": payment.order.delivery_method.value,
+        "delivery_method_label": "СДЭК",
+        "amount": str(payment.amount),
+        "payment_comment": payment.payment_comment,
+        "expires_at": payment.expires_at.isoformat(),
+        "has_receipt": bool(payment.receipt_image_path),
+        "receipt_image_path": payment.receipt_image_path,
+        "reject_reason": payment.reject_reason,
+        "status": ManualPaymentStatus.SUBMITTED.value,
+        "seller_telegram_chat_id": payment.seller_telegram_chat_id,
+        "seller_telegram_message_id": payment.seller_telegram_message_id,
+    }

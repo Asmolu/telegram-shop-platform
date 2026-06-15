@@ -1,8 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
+from app.core.config import settings
 from app.db.models import (
     ManualPaymentCurrency,
     ManualPaymentMethod,
@@ -44,6 +45,11 @@ class ManualPaymentSummary(BaseModel):
     expires_at: datetime
     submitted_at: datetime | None = None
     receipt_image_path: str | None = None
+
+    @computed_field
+    @property
+    def receipt_image_url(self) -> str | None:
+        return _receipt_image_url(self.receipt_image_path)
 
 
 class ManualPaymentRead(BaseModel):
@@ -95,3 +101,12 @@ class ManualPaymentReject(BaseModel):
 
 class ManualPaymentExpireBatchRead(BaseModel):
     expired_count: int
+
+
+def _receipt_image_url(receipt_image_path: str | None) -> str | None:
+    if not receipt_image_path:
+        return None
+    return (
+        f"{settings.public_uploads_url.rstrip('/')}/"
+        f"{receipt_image_path.lstrip('/')}"
+    )

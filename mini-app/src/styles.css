@@ -172,14 +172,56 @@ label {
 
 :root[data-swipe-back-state] .mini-app-frame,
 :root[data-swipe-back-state] .launch-screen {
+  position: relative;
+  z-index: 2;
   transform: translate3d(var(--swipe-back-x, 0px), 0, 0);
   will-change: transform;
+}
+
+:root[data-swipe-back-state] body {
+  background: var(--bg);
+}
+
+:root[data-swipe-back-state] body::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: min(100vw, 430px);
+  margin: 0 auto;
+  background: var(--bg);
+  content: '';
+}
+
+.swipe-back-underlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  width: min(100vw, 430px);
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--bg);
+  visibility: hidden;
+  opacity: var(--swipe-back-underlay-opacity, 0.9);
+  pointer-events: none;
+  transform: scale(var(--swipe-back-underlay-scale, 0.985));
+  transform-origin: left center;
+  will-change: opacity, transform;
+}
+
+:root[data-swipe-back-state] .swipe-back-underlay {
+  visibility: visible;
+}
+
+.swipe-back-underlay > .mini-app-frame {
+  min-height: 100%;
+  margin: 0;
+  box-shadow: none;
 }
 
 :root[data-swipe-back-state='tracking'] .mini-app-frame,
 :root[data-swipe-back-state='tracking'] .launch-screen {
   transition: none;
-  box-shadow: -18px 0 38px rgba(0, 0, 0, 0.22);
+  box-shadow: -14px 0 30px rgba(0, 0, 0, 0.18);
 }
 
 :root[data-swipe-back-state='cancel'] .mini-app-frame,
@@ -235,7 +277,7 @@ label {
 }
 
 .top-bar--marketplace {
-  min-height: 60px;
+  min-height: calc(var(--app-header-top-padding) + 50px);
   margin-bottom: 12px;
   padding-top: var(--app-header-top-padding);
   padding-bottom: 10px;
@@ -273,7 +315,12 @@ label {
 
 .top-bar__left {
   min-width: 0;
+  min-height: 40px;
   gap: 8px;
+}
+
+.top-bar__right {
+  min-height: 40px;
 }
 
 .top-bar h1 {
@@ -700,7 +747,7 @@ label {
 .product-card__media-shell {
   position: relative;
   min-width: 0;
-  padding-bottom: 10px;
+  padding-bottom: 18px;
 }
 
 .product-card__media {
@@ -800,7 +847,7 @@ label {
 
 .product-image-carousel--card .product-image-carousel__dots {
   right: 48px;
-  bottom: -8px;
+  bottom: -10px;
   left: 48px;
   justify-content: center;
   max-width: none;
@@ -2594,18 +2641,17 @@ label {
   display: grid;
   align-content: start;
   gap: 20px;
-  padding: 0 14px 34px;
+  padding: 0 12px 34px;
   background:
     radial-gradient(circle at top right, rgba(236, 72, 153, 0.13), transparent 260px),
     var(--bg);
 }
 
 .launch-screen > .top-bar {
-  margin-right: -14px;
-  margin-bottom: 0;
-  margin-left: -14px;
-  padding-right: 14px;
-  padding-left: 14px;
+  margin-right: -12px;
+  margin-left: -12px;
+  padding-right: 12px;
+  padding-left: 12px;
 }
 
 .launch-brand {
@@ -2737,6 +2783,11 @@ label {
 
 @media (max-width: 380px) {
   .page {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .launch-screen {
     padding-right: 10px;
     padding-left: 10px;
   }

@@ -263,6 +263,7 @@ export type Order = {
     expires_at: string;
     submitted_at?: string | null;
     receipt_image_path?: string | null;
+    receipt_image_url?: string | null;
   } | null;
   items: OrderItem[];
   created_at: string;

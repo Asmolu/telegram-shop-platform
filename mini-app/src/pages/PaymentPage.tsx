@@ -16,6 +16,7 @@ import { normalizeAssetUrl } from '../shared/utils/images';
 
 const ACTIVE_STATUSES: ManualPaymentStatus[] = ['PENDING', 'SUBMITTED'];
 const MAX_RECEIPT_SIZE = 5 * 1024 * 1024;
+type Notice = { message: string; tone: 'success' | 'info' | 'warning' | 'danger' };
 
 const STATUS_LABELS: Record<ManualPaymentStatus, string> = {
   PENDING: 'Ожидает оплату',
@@ -33,7 +34,7 @@ export function PaymentPage() {
   const [payment, setPayment] = React.useState<ManualPayment | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
   const [busy, setBusy] = React.useState<'submit' | 'upload' | null>(null);
   const [clockOffsetMs, setClockOffsetMs] = React.useState(0);
   const [nowMs, setNowMs] = React.useState(Date.now());
@@ -84,9 +85,12 @@ export function PaymentPage() {
   async function copyValue(value: string, label: string) {
     try {
       await navigator.clipboard.writeText(value);
-      setNotice(`${label} скопирован.`);
+      setNotice({ message: `${label} скопирован.`, tone: 'success' });
     } catch {
-      setNotice('Не удалось скопировать. Нажмите и удерживайте значение.');
+      setNotice({
+        message: 'Не удалось скопировать. Нажмите и удерживайте значение.',
+        tone: 'warning',
+      });
     }
   }
 
@@ -96,16 +100,18 @@ export function PaymentPage() {
     setNotice(null);
     try {
       const result = await submitOrderPayment(payment.order_id);
-      setPayment(result);
-      setNotice('Оплата отправлена продавцу на проверку.');
+      const refreshed = await loadPayment();
+      setPayment(refreshed ?? result);
+      setNotice({
+        message: 'Оплата отправлена продавцу на проверку.',
+        tone: 'success',
+      });
     } catch (submitError) {
       const errorMessage = toApiErrorMessage(submitError);
       const refreshed = await loadPayment();
-      setNotice(
-        refreshed?.status === 'SUBMITTED'
-          ? 'Оплата отправлена продавцу на проверку.'
-          : errorMessage,
-      );
+      setNotice(refreshed?.status === 'SUBMITTED'
+        ? { message: 'Оплата отправлена продавцу на проверку.', tone: 'success' }
+        : { message: errorMessage, tone: 'danger' });
     } finally {
       setBusy(null);
     }
@@ -116,11 +122,17 @@ export function PaymentPage() {
     event.target.value = '';
     if (!payment || !file || !canAct) return;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setNotice('Загрузите изображение JPEG, PNG или WebP.');
+      setNotice({
+        message: 'Загрузите изображение JPEG, PNG или WebP.',
+        tone: 'warning',
+      });
       return;
     }
     if (file.size > MAX_RECEIPT_SIZE) {
-      setNotice('Размер скриншота не должен превышать 5 МБ.');
+      setNotice({
+        message: 'Размер скриншота не должен превышать 5 МБ.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -129,17 +141,30 @@ export function PaymentPage() {
     const previousReceiptPath = payment.receipt_image_path;
     try {
       const result = await uploadOrderPaymentReceipt(payment.order_id, file);
-      setPayment(result);
-      setNotice('Скриншот сохранен.');
+      if (!result.receipt_image_path || !result.receipt_image_url) {
+        throw new Error('Сервер не подтвердил сохранение скриншота.');
+      }
+      const refreshed = await loadPayment();
+      if (
+        !refreshed?.receipt_image_path
+        || !refreshed.receipt_image_url
+        || refreshed.receipt_image_path !== result.receipt_image_path
+      ) {
+        throw new Error('Не удалось подтвердить сохранение скриншота.');
+      }
+      setPayment(refreshed);
+      setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
     } catch (uploadError) {
       const errorMessage = toApiErrorMessage(uploadError);
       const refreshed = await loadPayment();
-      setNotice(
+      const recovered = Boolean(
         refreshed?.receipt_image_path
-          && refreshed.receipt_image_path !== previousReceiptPath
-          ? 'Скриншот сохранен.'
-          : errorMessage,
+        && refreshed.receipt_image_url
+        && refreshed.receipt_image_path !== previousReceiptPath,
       );
+      setNotice(recovered
+        ? { message: 'Скриншот сохранен.', tone: 'success' }
+        : { message: errorMessage, tone: 'danger' });
     } finally {
       setBusy(null);
     }
@@ -172,8 +197,8 @@ export function PaymentPage() {
       {!loading && !error && payment ? (
         <>
           {notice ? (
-            <InlineNotice tone={notice.includes('сохранен') || notice.includes('скопирован') ? 'success' : 'info'}>
-              <span>{notice}</span>
+            <InlineNotice tone={notice.tone}>
+              <span>{notice.message}</span>
               <button type="button" onClick={() => setNotice(null)}>×</button>
             </InlineNotice>
           ) : null}
