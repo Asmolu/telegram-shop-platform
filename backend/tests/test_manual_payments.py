@@ -159,7 +159,12 @@ class FakeTelegramService:
         self.message_id = message_id
         self.fail_edit = fail_edit
         self.messages: list[tuple[str, str, dict[str, object] | None]] = []
+        self.photos: list[
+            tuple[str, bytes, str, str, str | None, dict[str, object] | None]
+        ] = []
         self.edits: list[tuple[str, int, str, dict[str, object] | None]] = []
+        self.caption_edits: list[tuple[str, int, str, dict[str, object] | None]] = []
+        self.markup_edits: list[tuple[str, int, dict[str, object]]] = []
 
     async def send_message(
         self,
@@ -171,6 +176,21 @@ class FakeTelegramService:
         if self.fail:
             raise RuntimeError("Telegram unavailable")
         self.messages.append((chat_id, message, reply_markup))
+        return self.message_id
+
+    async def send_photo_bytes(
+        self,
+        chat_id: str,
+        photo: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+        reply_markup: dict[str, object] | None = None,
+    ) -> int | None:
+        if self.fail:
+            raise RuntimeError("Telegram unavailable")
+        self.photos.append((chat_id, photo, filename, mime_type, caption, reply_markup))
         return self.message_id
 
     async def edit_message_text(
@@ -185,6 +205,27 @@ class FakeTelegramService:
             raise TelegramDeliveryError("Telegram edit failed")
         self.edits.append((chat_id, message_id, message, reply_markup))
 
+    async def edit_message_caption(
+        self,
+        chat_id: str,
+        message_id: int,
+        caption: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        if self.fail_edit:
+            raise TelegramDeliveryError("Telegram edit failed")
+        self.caption_edits.append((chat_id, message_id, caption, reply_markup))
+
+    async def edit_message_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        *,
+        reply_markup: dict[str, object],
+    ) -> None:
+        self.markup_edits.append((chat_id, message_id, reply_markup))
+
 
 class FakeAuditService:
     def __init__(self) -> None:
@@ -198,14 +239,23 @@ class FakeStorage:
     def __init__(self) -> None:
         self.saved: list[str] = []
         self.deleted: list[str] = []
+        self.files: dict[str, bytes] = {}
 
-    def save_bytes(self, _: bytes, *, folder: str, suffix: str) -> str:
+    def save_bytes(self, content: bytes, *, folder: str, suffix: str) -> str:
         path = f"{folder}/receipt{suffix}"
         self.saved.append(path)
+        self.files[path] = content
         return path
 
     def delete(self, path: str) -> None:
         self.deleted.append(path)
+        self.files.pop(path, None)
+
+    def read_bytes(self, path: str) -> bytes:
+        try:
+            return self.files[path]
+        except KeyError:
+            raise FileNotFoundError(path) from None
 
 
 class FakeUploadsService:
@@ -465,6 +515,7 @@ async def test_submit_attempts_configured_seller_bot_notification() -> None:
     assert len(telegram.messages) == 1
     assert "ORD-00000010" in telegram.messages[0][1]
     assert "Способ доставки: СДЭК" in telegram.messages[0][1]
+    assert "Без фото" in telegram.messages[0][1]
 
 
 @pytest.mark.asyncio
@@ -503,15 +554,18 @@ async def test_missing_seller_bot_configuration_does_not_break_submit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submitted_event_sends_seller_group_review_buttons(
+async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     telegram = FakeTelegramService()
+    storage = FakeStorage()
+    storage.files["payment_receipts/receipt.png"] = b"receipt-image"
     publisher = ManualPaymentEventPublisher(
         DummySession(),
         telegram_service=telegram,
         customer_publisher=FakeEventPublisher(),
+        storage=storage,
     )
 
     await publisher.emit(
@@ -529,19 +583,61 @@ async def test_submitted_event_sends_seller_group_review_buttons(
             "payment_comment": "Заказ #10",
             "expires_at": (NOW + timedelta(minutes=30)).isoformat(),
             "has_receipt": True,
+            "receipt_image_path": "payment_receipts/receipt.png",
         },
     )
 
-    assert telegram.messages[0][0] == "-100"
-    assert "ORD-10" in telegram.messages[0][1]
-    assert "Способ доставки: СДЭК" in telegram.messages[0][1]
-    keyboard = telegram.messages[0][2]
+    assert telegram.messages == []
+    assert telegram.photos[0][0] == "-100"
+    assert telegram.photos[0][1] == b"receipt-image"
+    assert telegram.photos[0][2] == "receipt.png"
+    assert telegram.photos[0][3] == "image/png"
+    caption = telegram.photos[0][4]
+    assert caption is not None
+    assert "ORD-10" in caption
+    assert "Способ доставки: СДЭК" in caption
+    assert "Без фото" not in caption
+    keyboard = telegram.photos[0][5]
     assert keyboard is not None
     buttons = keyboard["inline_keyboard"][0]
     assert buttons[0]["callback_data"] == "manual_payment:approve:17"
     assert buttons[1]["callback_data"] == "manual_payment:reject:17"
     assert buttons[0]["text"] == "✅ Подтвердить"
     assert buttons[1]["text"] == "❌ Отклонить"
+
+
+@pytest.mark.asyncio
+async def test_submitted_event_without_receipt_uses_clean_text_note() -> None:
+    telegram = FakeTelegramService()
+    publisher = ManualPaymentEventPublisher(
+        DummySession(),
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    await publisher.emit(
+        MANUAL_PAYMENT_SUBMITTED,
+        {
+            "payment_id": 18,
+            "order_id": 11,
+            "order_number": "ORD-11",
+            "user_id": 2,
+            "customer_username": None,
+            "customer_phone": "+79991111111",
+            "delivery_method_label": "Курьер",
+            "amount": "2690.00",
+            "payment_comment": "Заказ #11",
+            "expires_at": (NOW + timedelta(minutes=30)).isoformat(),
+            "has_receipt": False,
+            "receipt_image_path": None,
+        },
+    )
+
+    assert telegram.photos == []
+    assert len(telegram.messages) == 1
+    message = telegram.messages[0][1]
+    assert "Без фото" in message
+    assert "Скриншот: нет" not in message
 
 
 @pytest.mark.asyncio
@@ -597,6 +693,54 @@ async def test_seller_panel_decision_edits_original_group_message(
 
 
 @pytest.mark.asyncio
+async def test_seller_panel_approve_finalizes_photo_caption() -> None:
+    service, repository, _, _, audit, storage = _service(with_payment=True)
+    payment = repository.payments[1]
+    payment.receipt_image_path = "payment_receipts/receipt.png"
+    payment.seller_telegram_chat_id = -100
+    payment.seller_telegram_message_id = 704
+    storage.files[payment.receipt_image_path] = b"receipt-image"
+    telegram = FakeTelegramService()
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+        storage=storage,
+    )
+    service.audit_service = audit
+
+    result = await service.approve(1, actor_user_id=9)
+
+    assert result.status == ManualPaymentStatus.APPROVED
+    assert telegram.edits == []
+    assert "✅ Оплата подтверждена" in telegram.caption_edits[0][2]
+    assert telegram.caption_edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+async def test_expiration_finalizes_original_group_message() -> None:
+    service, repository, _, _, _, _ = _service(
+        with_payment=True,
+        payment_expires_at=NOW - timedelta(seconds=1),
+    )
+    payment = repository.payments[1]
+    payment.seller_telegram_chat_id = -100
+    payment.seller_telegram_message_id = 706
+    telegram = FakeTelegramService()
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    expired = await service.expire_due_payment(1)
+
+    assert expired is True
+    assert "⌛ Время оплаты истекло" in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
 async def test_group_message_edit_failure_sends_follow_up_without_rollback() -> None:
     service, repository, session, _, _, _ = _service(with_payment=True)
     payment = repository.payments[1]
@@ -614,7 +758,23 @@ async def test_group_message_edit_failure_sends_follow_up_without_rollback() -> 
     assert result.status == ManualPaymentStatus.APPROVED
     assert telegram.messages
     assert "✅ Оплата подтверждена" in telegram.messages[-1][1]
+    assert telegram.markup_edits == [("-100", 703, {"inline_keyboard": []})]
     assert session.rollback_count == 0
+
+
+def test_payment_event_payload_preserves_receipt_and_message_references() -> None:
+    service, repository, _, _, _, _ = _service(with_payment=True)
+    payment = repository.payments[1]
+    payment.receipt_image_path = "payment_receipts/receipt.png"
+    payment.seller_telegram_chat_id = -100
+    payment.seller_telegram_message_id = 705
+
+    payload = service._event_payload(payment)
+
+    assert payload["has_receipt"] is True
+    assert payload["receipt_image_path"] == "payment_receipts/receipt.png"
+    assert payload["seller_telegram_chat_id"] == -100
+    assert payload["seller_telegram_message_id"] == 705
 
 
 @pytest.mark.asyncio

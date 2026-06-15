@@ -35,6 +35,13 @@ class LocalStorageService:
         base_path = self.base_dir.resolve()
         return target_path.is_relative_to(base_path) and target_path.is_file()
 
+    def read_bytes(self, relative_path: str) -> bytes:
+        target_path = (self.base_dir / relative_path).resolve()
+        base_path = self.base_dir.resolve()
+        if not target_path.is_relative_to(base_path) or not target_path.is_file():
+            raise FileNotFoundError(relative_path)
+        return target_path.read_bytes()
+
     def _safe_target_dir(self, folder: str) -> Path:
         if folder not in settings.upload_subdirs:
             msg = "Unsupported upload folder"

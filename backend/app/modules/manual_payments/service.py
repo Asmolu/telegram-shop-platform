@@ -1,7 +1,9 @@
 import logging
+import mimetypes
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -65,6 +67,7 @@ class ManualPaymentEventPublisher:
         *,
         telegram_service: TelegramService | None = None,
         customer_publisher: PaymentEventPublisher | None = None,
+        storage: LocalStorageService | None = None,
     ) -> None:
         self.session = session
         self.repository = ManualPaymentsRepository(session)
@@ -72,6 +75,7 @@ class ManualPaymentEventPublisher:
         self.customer_publisher = customer_publisher or CustomerServiceNotificationEventPublisher(
             session
         )
+        self.storage = storage or LocalStorageService()
 
     async def emit(self, name: str, payload: Mapping[str, object]) -> None:
         if name == MANUAL_PAYMENT_SUBMITTED:
@@ -119,13 +123,60 @@ class ManualPaymentEventPublisher:
             "seller_chat_id",
             settings.telegram_seller_chat_id,
         )
+        receipt_path = self._receipt_path(payload)
+        logger.info(
+            "manual_payment.seller_bot_notification_attempt",
+            extra={
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "has_receipt": receipt_path is not None,
+            },
+        )
         if not bot_token or not seller_chat_id:
             return
-        message_id = await self.telegram_service.send_message(
-            seller_chat_id,
-            message,
-            reply_markup=reply_markup,
-        )
+        delivery_type = "text"
+        if receipt_path is not None:
+            try:
+                photo = self.storage.read_bytes(receipt_path)
+            except OSError as exc:
+                logger.warning(
+                    "manual_payment.seller_bot_receipt_read_failed",
+                    extra={
+                        "payment_id": payment_id,
+                        "order_id": order_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                message = self._review_message(
+                    {
+                        **payload,
+                        "has_receipt": False,
+                        "receipt_image_path": None,
+                    }
+                )
+                message_id = await self.telegram_service.send_message(
+                    seller_chat_id,
+                    message,
+                    reply_markup=reply_markup,
+                )
+            else:
+                filename = Path(receipt_path).name or f"payment-{payment_id}.jpg"
+                mime_type = mimetypes.guess_type(filename)[0] or "image/jpeg"
+                message_id = await self.telegram_service.send_photo_bytes(
+                    seller_chat_id,
+                    photo,
+                    filename=filename,
+                    mime_type=mime_type,
+                    caption=message,
+                    reply_markup=reply_markup,
+                )
+                delivery_type = "photo"
+        else:
+            message_id = await self.telegram_service.send_message(
+                seller_chat_id,
+                message,
+                reply_markup=reply_markup,
+            )
         if message_id is not None:
             payment = await self.repository.get_by_id(payment_id)
             if payment is not None:
@@ -138,6 +189,8 @@ class ManualPaymentEventPublisher:
                 "payment_id": payment_id,
                 "order_id": order_id,
                 "status": str(payload.get("status", ManualPaymentStatus.SUBMITTED.value)),
+                "has_receipt": receipt_path is not None,
+                "delivery_type": delivery_type,
             },
         )
 
@@ -148,7 +201,8 @@ class ManualPaymentEventPublisher:
         amount_label = f"{amount:,.2f}".replace(",", " ").replace(".00", "")
         username = payload.get("customer_username")
         username_label = f"@{username}" if username else "—"
-        receipt_label = "есть" if payload.get("has_receipt") else "нет"
+        has_receipt = bool(self._receipt_path(payload) or payload.get("has_receipt"))
+        receipt_line = "" if has_receipt else "Без фото\n"
         return (
             "Проверка оплаты\n\n"
             f"Заказ {payload['order_number']}\n"
@@ -157,7 +211,7 @@ class ManualPaymentEventPublisher:
             f"Телефон клиента: {payload.get('customer_phone') or '—'}\n"
             f"Способ доставки: {payload.get('delivery_method_label') or '—'}\n"
             f"Комментарий к переводу: {payload['payment_comment']}\n"
-            f"Скриншот: {receipt_label}\n"
+            f"{receipt_line}"
             f"Резерв до: {expires_at.astimezone(SELLER_TIMEZONE).strftime('%H:%M')}\n"
             f"{SELLER_PANEL_PAYMENT_URL.format(payment_id=payment_id)}"
         )
@@ -173,25 +227,31 @@ class ManualPaymentEventPublisher:
         final_message = f"{self._review_message(payload)}\n\n{final_line}"
 
         if chat_id and message_id:
-            try:
-                await self.telegram_service.edit_message_text(
-                    str(chat_id),
-                    int(message_id),
-                    final_message,
-                    reply_markup={"inline_keyboard": []},
-                )
-                return
-            except TelegramDeliveryError as exc:
-                if "message is not modified" in str(exc).lower():
-                    return
-                logger.warning(
-                    "manual_payment.seller_bot_edit_failed",
+            edit_result = await self._edit_seller_message(
+                chat_id=str(chat_id),
+                message_id=int(message_id),
+                message=final_message,
+                prefer_caption=bool(self._receipt_path(payload) or payload.get("has_receipt")),
+                payment_id=payload.get("payment_id"),
+                order_id=payload.get("order_id"),
+            )
+            if edit_result is not None:
+                logger.info(
+                    "manual_payment.seller_bot_finalization_result",
                     extra={
                         "payment_id": payload.get("payment_id"),
                         "order_id": payload.get("order_id"),
-                        "error_type": type(exc).__name__,
+                        "status": payload.get("status"),
+                        "result": edit_result,
                     },
                 )
+                return
+            await self._remove_seller_message_actions(
+                chat_id=str(chat_id),
+                message_id=int(message_id),
+                payment_id=payload.get("payment_id"),
+                order_id=payload.get("order_id"),
+            )
 
         if chat_id:
             await self.telegram_service.send_message(
@@ -202,6 +262,104 @@ class ManualPaymentEventPublisher:
                     f"Оплата: #{payload['payment_id']}"
                 ),
             )
+            logger.info(
+                "manual_payment.seller_bot_finalization_result",
+                extra={
+                    "payment_id": payload.get("payment_id"),
+                    "order_id": payload.get("order_id"),
+                    "status": payload.get("status"),
+                    "result": "follow_up",
+                },
+            )
+
+    async def _edit_seller_message(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        message: str,
+        prefer_caption: bool,
+        payment_id: object,
+        order_id: object,
+    ) -> str | None:
+        edit_methods = (
+            (
+                ("caption", self.telegram_service.edit_message_caption),
+                ("text", self.telegram_service.edit_message_text),
+            )
+            if prefer_caption
+            else (
+                ("text", self.telegram_service.edit_message_text),
+                ("caption", self.telegram_service.edit_message_caption),
+            )
+        )
+        for edit_type, edit_method in edit_methods:
+            try:
+                await edit_method(
+                    chat_id,
+                    message_id,
+                    message,
+                    reply_markup={"inline_keyboard": []},
+                )
+                return f"edited_{edit_type}"
+            except TelegramDeliveryError as exc:
+                if self._is_message_not_modified(exc):
+                    return "already_finalized"
+                logger.warning(
+                    "manual_payment.seller_bot_edit_failed",
+                    extra={
+                        "payment_id": payment_id,
+                        "order_id": order_id,
+                        "edit_type": edit_type,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+        return None
+
+    async def _remove_seller_message_actions(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        payment_id: object,
+        order_id: object,
+    ) -> None:
+        try:
+            await self.telegram_service.edit_message_reply_markup(
+                chat_id,
+                message_id,
+                reply_markup={"inline_keyboard": []},
+            )
+        except TelegramDeliveryError as exc:
+            if self._is_message_not_modified(exc):
+                return
+            logger.warning(
+                "manual_payment.seller_bot_button_removal_failed",
+                extra={
+                    "payment_id": payment_id,
+                    "order_id": order_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        else:
+            logger.info(
+                "manual_payment.seller_bot_buttons_removed",
+                extra={
+                    "payment_id": payment_id,
+                    "order_id": order_id,
+                },
+            )
+
+    @staticmethod
+    def _is_message_not_modified(exc: TelegramDeliveryError) -> bool:
+        return "message is not modified" in str(exc).lower()
+
+    @staticmethod
+    def _receipt_path(payload: Mapping[str, object]) -> str | None:
+        value = payload.get("receipt_image_path")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
 
     def _final_payment_line(self, name: str, payload: Mapping[str, object]) -> str:
         if name == MANUAL_PAYMENT_APPROVED:
@@ -663,6 +821,7 @@ class ManualPaymentsService:
             "payment_comment": payment.payment_comment,
             "expires_at": payment.expires_at.isoformat(),
             "has_receipt": bool(payment.receipt_image_path),
+            "receipt_image_path": payment.receipt_image_path,
             "reject_reason": payment.reject_reason,
             "status": payment.status.value,
             "seller_telegram_chat_id": payment.seller_telegram_chat_id,

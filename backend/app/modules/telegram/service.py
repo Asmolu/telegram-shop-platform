@@ -1,3 +1,4 @@
+import json
 import logging
 import mimetypes
 import re
@@ -160,10 +161,13 @@ class TelegramService:
         filename: str,
         mime_type: str,
         caption: str | None = None,
+        reply_markup: dict[str, object] | None = None,
     ) -> int | None:
         data: dict[str, str] = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         body = await self._post_multipart(
             "sendPhoto",
             data=data,
@@ -194,6 +198,43 @@ class TelegramService:
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         body = await self._post("editMessageText", payload)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+
+    async def edit_message_caption(
+        self,
+        chat_id: str,
+        message_id: int,
+        caption: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "caption": caption,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        body = await self._post("editMessageCaption", payload)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+
+    async def edit_message_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        *,
+        reply_markup: dict[str, object],
+    ) -> None:
+        body = await self._post(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": reply_markup,
+            },
+        )
         if not body.get("ok", False):
             raise self._delivery_error_from_body(body)
 
@@ -610,29 +651,84 @@ class SellerBotWebhookService:
         else:
             final_line = f"Статус оплаты: {payment_status_label(payment.status)}"
 
-        original_text = callback_query.message.text or "Проверка оплаты"
+        original_text = (
+            callback_query.message.caption
+            or callback_query.message.text
+            or "Проверка оплаты"
+        )
         final_message = (
             original_text
             if final_line in original_text
             else f"{original_text.rstrip()}\n\n{final_line}"
         )
         if callback_query.message.message_id is None:
-            await self._send_chat_message(
+            sent = await self._send_chat_message(
                 callback_query.message.chat.id,
                 f"{final_line}\nОплата: #{payment.id}",
             )
-            return
-        try:
-            await self.telegram_service.edit_message_text(
-                str(callback_query.message.chat.id),
-                callback_query.message.message_id,
-                final_message,
-                reply_markup={"inline_keyboard": []},
+            self._log_payment_callback_finalization(
+                payment_id=payment.id,
+                chat_id=callback_query.message.chat.id,
+                message_id=None,
+                result="follow_up" if sent else "follow_up_failed",
             )
+            return
+        has_photo = bool(callback_query.message.photo or callback_query.message.caption)
+        try:
+            if has_photo:
+                await self.telegram_service.edit_message_caption(
+                    str(callback_query.message.chat.id),
+                    callback_query.message.message_id,
+                    final_message,
+                    reply_markup={"inline_keyboard": []},
+                )
+            else:
+                await self.telegram_service.edit_message_text(
+                    str(callback_query.message.chat.id),
+                    callback_query.message.message_id,
+                    final_message,
+                    reply_markup={"inline_keyboard": []},
+                )
         except TelegramDeliveryError as exc:
             if "message is not modified" in str(exc).lower():
+                self._log_payment_callback_finalization(
+                    payment_id=payment.id,
+                    chat_id=callback_query.message.chat.id,
+                    message_id=callback_query.message.message_id,
+                    result="already_finalized",
+                )
                 return
-            await self._send_chat_message(
+            logger.warning(
+                "manual_payment.seller_bot_callback_edit_failed",
+                extra={
+                    "payment_id": payment.id,
+                    "chat_id": callback_query.message.chat.id,
+                    "message_id": callback_query.message.message_id,
+                    "edit_type": "caption" if has_photo else "text",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            actions_removed = False
+            try:
+                await self.telegram_service.edit_message_reply_markup(
+                    str(callback_query.message.chat.id),
+                    callback_query.message.message_id,
+                    reply_markup={"inline_keyboard": []},
+                )
+            except TelegramDeliveryError as markup_exc:
+                if "message is not modified" not in str(markup_exc).lower():
+                    logger.warning(
+                        "manual_payment.seller_bot_callback_button_removal_failed",
+                        extra={
+                            "payment_id": payment.id,
+                            "chat_id": callback_query.message.chat.id,
+                            "message_id": callback_query.message.message_id,
+                            "error_type": type(markup_exc).__name__,
+                        },
+                    )
+            else:
+                actions_removed = True
+            sent = await self._send_chat_message(
                 callback_query.message.chat.id,
                 (
                     f"{final_line}\n"
@@ -640,6 +736,40 @@ class SellerBotWebhookService:
                     f"Оплата: #{payment.id}"
                 ),
             )
+            self._log_payment_callback_finalization(
+                payment_id=payment.id,
+                chat_id=callback_query.message.chat.id,
+                message_id=callback_query.message.message_id,
+                result="follow_up" if sent else "follow_up_failed",
+                actions_removed=actions_removed,
+            )
+            return
+        self._log_payment_callback_finalization(
+            payment_id=payment.id,
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            result="edited_caption" if has_photo else "edited_text",
+        )
+
+    @staticmethod
+    def _log_payment_callback_finalization(
+        *,
+        payment_id: int,
+        chat_id: int,
+        message_id: int | None,
+        result: str,
+        actions_removed: bool | None = None,
+    ) -> None:
+        logger.info(
+            "manual_payment.seller_bot_callback_finalization_result",
+            extra={
+                "payment_id": payment_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "result": result,
+                "actions_removed": actions_removed,
+            },
+        )
 
     async def _handle_seller_group_command(
         self,

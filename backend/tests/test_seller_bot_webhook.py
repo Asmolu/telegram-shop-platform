@@ -49,6 +49,8 @@ class FakeTelegramService:
         self.reply_markups: list[dict[str, object]] = []
         self.callback_answers: list[tuple[str, str | None]] = []
         self.edits: list[tuple[str, int, str, dict[str, object] | None]] = []
+        self.caption_edits: list[tuple[str, int, str, dict[str, object] | None]] = []
+        self.markup_edits: list[tuple[str, int, dict[str, object]]] = []
 
     async def send_message(
         self,
@@ -81,6 +83,25 @@ class FakeTelegramService:
     ) -> None:
         self.edits.append((chat_id, message_id, message, reply_markup))
 
+    async def edit_message_caption(
+        self,
+        chat_id: str,
+        message_id: int,
+        caption: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        self.caption_edits.append((chat_id, message_id, caption, reply_markup))
+
+    async def edit_message_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        *,
+        reply_markup: dict[str, object],
+    ) -> None:
+        self.markup_edits.append((chat_id, message_id, reply_markup))
+
 
 class FakeManualPaymentsService:
     def __init__(
@@ -92,6 +113,7 @@ class FakeManualPaymentsService:
         self.actions: list[tuple[str, int, int | None, int]] = []
         self.actor_user_id = actor_user_id
         self.terminal_status = terminal_status
+        self.current_status = terminal_status or ManualPaymentStatus.SUBMITTED
 
     async def actor_user_id_for_telegram(self, telegram_id: int) -> int | None:
         assert telegram_id == 500
@@ -112,7 +134,9 @@ class FakeManualPaymentsService:
         assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be approved", status.HTTP_409_CONFLICT)
-        self.actions.append(("approve", payment_id, actor_user_id, actor_telegram_user_id))
+        if self.current_status != ManualPaymentStatus.APPROVED:
+            self.actions.append(("approve", payment_id, actor_user_id, actor_telegram_user_id))
+            self.current_status = ManualPaymentStatus.APPROVED
         return SimpleNamespace(
             id=payment_id,
             order_number="ORD-17",
@@ -137,7 +161,9 @@ class FakeManualPaymentsService:
         assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be rejected", status.HTTP_409_CONFLICT)
-        self.actions.append(("reject", payment_id, actor_user_id, actor_telegram_user_id))
+        if self.current_status != ManualPaymentStatus.REJECTED:
+            self.actions.append(("reject", payment_id, actor_user_id, actor_telegram_user_id))
+            self.current_status = ManualPaymentStatus.REJECTED
         return SimpleNamespace(
             id=payment_id,
             order_number="ORD-17",
@@ -337,13 +363,16 @@ async def test_seller_bot_manual_payment_callback_uses_shared_service(
         telegram_service=telegram,
     )
 
-    first = await service.handle_update(_callback_update(f"manual_payment:{action}:17"))
-    second = await service.handle_update(_callback_update(f"manual_payment:{action}:17"))
+    first = await service.handle_update(
+        _callback_update(f"manual_payment:{action}:17", with_photo=True)
+    )
+    second = await service.handle_update(
+        _callback_update(f"manual_payment:{action}:17", with_photo=True)
+    )
 
     assert first.result == f"manual_payment_{expected_status.value.lower()}"
     assert second.result == first.result
     assert payments.actions == [
-        (action, 17, 9, 500),
         (action, 17, 9, 500),
     ]
     assert telegram.callback_answers[-1] == (
@@ -354,8 +383,9 @@ async def test_seller_bot_manual_payment_callback_uses_shared_service(
             else "Статус оплаты: Отклонено"
         ),
     )
-    assert telegram.edits[-1][1] == 11
-    assert telegram.edits[-1][3] == {"inline_keyboard": []}
+    assert telegram.edits == []
+    assert telegram.caption_edits[-1][1] == 11
+    assert telegram.caption_edits[-1][3] == {"inline_keyboard": []}
 
 
 @pytest.mark.asyncio
@@ -948,18 +978,34 @@ def _telegram_start_update() -> TelegramUpdate:
     )
 
 
-def _callback_update(callback_data: str, *, chat_id: int = -100) -> TelegramUpdate:
+def _callback_update(
+    callback_data: str,
+    *,
+    chat_id: int = -100,
+    with_photo: bool = False,
+) -> TelegramUpdate:
+    message: dict[str, object] = {
+        "message_id": 11,
+        "chat": {"id": chat_id, "type": "supergroup"},
+    }
+    if with_photo:
+        message["caption"] = "Проверка оплаты"
+        message["photo"] = [
+            {
+                "file_id": "receipt-photo",
+                "width": 800,
+                "height": 600,
+            }
+        ]
+    else:
+        message["text"] = "approval"
     return TelegramUpdate.model_validate(
         {
             "update_id": 2,
             "callback_query": {
                 "id": "callback-id",
                 "from": {"id": 500, "username": "approver"},
-                "message": {
-                    "message_id": 11,
-                    "text": "approval",
-                    "chat": {"id": chat_id, "type": "supergroup"},
-                },
+                "message": message,
                 "data": callback_data,
             },
         }
