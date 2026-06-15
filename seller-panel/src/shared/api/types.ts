@@ -278,6 +278,15 @@ export interface Order {
   updated_at: string;
 }
 
+export interface CustomerOrderMessageResponse {
+  ok: boolean;
+  order_id: number;
+  delivery_id: number;
+  telegram_message_id: number | null;
+  sent_text: boolean;
+  sent_photo: boolean;
+}
+
 export interface SellerPaymentSettings {
   is_manual_sbp_enabled: boolean;
   seller_phone_e164: string | null;

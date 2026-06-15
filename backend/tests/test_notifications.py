@@ -97,15 +97,15 @@ async def test_order_created_event_creates_and_sends_seller_notification() -> No
     assert stored.sent_at is not None
     assert len(telegram.messages) == 1
     message = telegram.messages[0]
-    assert "Order ID: 1" in message
-    assert "Order number: ORD-00000001" in message
-    assert "Customer ID: 1" in message
-    assert "Products:" in message
-    assert "Promo code: SAVE10" in message
-    assert "Discount: 20.00" in message
-    assert "Final total: 99.80" in message
+    assert "🛍 Новый заказ #ORD-00000001" in message
+    assert "ID заказа: 1" in message
+    assert "ID клиента: 1" in message
+    assert "📦 Товары" in message
+    assert "Промокод: SAVE10" in message
+    assert "Скидка: 20 ₽" in message
+    assert "К оплате: 99,80 ₽" in message
     assert "Способ доставки: СДЭК" in message
-    assert "Seller Panel: https://seller.tsplatform.ru/orders" in message
+    assert "Панель продавца: https://seller.tsplatform.ru/orders" in message
     assert session.commits == 2
 
 
@@ -151,8 +151,8 @@ async def test_order_created_seller_notification_can_send_photo_caption() -> Non
     photo_url, caption = telegram.photos[0]
     assert photo_url == "https://api.tsplatform.ru/uploads/products/hoodie.jpg"
     assert caption is not None
-    assert "Product ID: 10" in caption
-    assert "Image: https://api.tsplatform.ru/uploads/products/hoodie.jpg" in caption
+    assert "ID товара: 10" in caption
+    assert "Фото: https://api.tsplatform.ru/uploads/products/hoodie.jpg" in caption
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_order_created_seller_notification_formats_ru_shoe_size() -> None:
 
     assert notification is not None
     assert telegram.photos
-    assert "size=RU 39" in (telegram.photos[0][1] or "")
+    assert "Размер: RU 39" in (telegram.photos[0][1] or "")
 
 
 @pytest.mark.asyncio
@@ -235,8 +235,10 @@ async def test_order_status_changed_event_creates_seller_notification() -> None:
     assert stored.channel == NotificationChannel.TELEGRAM
     assert stored.status == NotificationStatus.SENT
     assert telegram.messages == [
-        "Order ORD-00000001 status changed\n\n"
-        "Order ORD-00000001 changed from NEW to PROCESSING."
+        "🔄 Статус заказа изменён\n\n"
+        "Заказ: ORD-00000001\n"
+        "Было: Новый\n"
+        "Стало: В обработке"
     ]
 
 
@@ -394,6 +396,7 @@ def _detailed_order_created_payload() -> dict[str, object]:
     payload.update(
         {
             "status": "NEW",
+            "payment_status": "PENDING",
             "created_at": "2026-05-27T12:00:00+00:00",
             "customer": {
                 "user_id": 1,

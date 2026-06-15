@@ -4,6 +4,7 @@ import { Link } from '../router/RouterProvider';
 import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge } from '../utils/images';
 import { displaySize, sortVariants } from '../utils/sizes';
+import { CartIcon } from './Icons';
 import { ProductImageCarousel } from './ProductImageCarousel';
 
 export function ProductCard({
@@ -33,7 +34,7 @@ export function ProductCard({
     .filter((variant) => variant.is_active && variant.available_quantity > 0)
     .map((variant) => variant.size)
     .filter((size, index, all) => all.indexOf(size) === index)
-    .slice(0, 4);
+    .slice(0, 3);
 
   async function runAction(action: 'favorite' | 'cart', callback?: (product: Product) => void | Promise<void>) {
     if (!callback) {
@@ -72,37 +73,38 @@ export function ProductCard({
           {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
         </button>
       ) : null}
-      <Link className="product-card__body" to={`/product/${product.id}`}>
-        <span className="product-card__price-row">
-          <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
-          {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
-        </span>
-        <span className="product-card__title">{product.name}</span>
-        <span className="product-card__meta">
-          {product.is_available ? 'В наличии' : 'Нет в наличии'}
-        </span>
-        {sizes.length > 0 ? (
-          <span className="size-row">
-            {sizes.map((size) => (
-              <span className="size-pill" key={size}>
-                {displaySize(product.size_grid, size)}
-              </span>
-            ))}
+      <div className={`product-card__body ${onAddToCart ? '' : 'product-card__body--no-action'}`}>
+        <Link className="product-card__info" to={`/product/${product.id}`}>
+          <span className="product-card__price-row">
+            <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
+            {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
           </span>
-        ) : null}
-      </Link>
-      {onAddToCart ? (
-        <div className="product-card__actions">
+          <span className="product-card__title">{product.name}</span>
+          <span className="product-card__meta">
+            {product.is_available ? 'В наличии' : 'Нет в наличии'}
+          </span>
+          {sizes.length > 0 ? (
+            <span className="size-row">
+              {sizes.map((size) => (
+                <span className="size-pill" key={size}>
+                  {displaySize(product.size_grid, size)}
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </Link>
+        {onAddToCart ? (
           <button
-            className="add-cart-button"
+            className="product-card__cart-button"
             type="button"
+            aria-label="Добавить в корзину"
             disabled={busyAction !== null || !product.is_available}
             onClick={() => void runAction('cart', onAddToCart)}
           >
-            {busyAction === 'cart' ? '…' : 'В корзину'}
+            {busyAction === 'cart' ? <span aria-hidden="true">…</span> : <CartIcon />}
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </article>
   );
 }

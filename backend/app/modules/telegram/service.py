@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from app.common.labels import payment_status_label
 from app.core.config import settings
 from app.core.errors import AppError
 from app.modules.seller_auth.callbacks import parse_seller_registration_callback_data
@@ -151,6 +152,51 @@ class TelegramService:
         message_id = result.get("message_id")
         return int(message_id) if isinstance(message_id, int) else None
 
+    async def send_photo_bytes(
+        self,
+        chat_id: str,
+        photo: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+    ) -> int | None:
+        data: dict[str, str] = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+        body = await self._post_multipart(
+            "sendPhoto",
+            data=data,
+            files={"photo": (filename, photo, mime_type)},
+        )
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        message_id = result.get("message_id")
+        return int(message_id) if isinstance(message_id, int) else None
+
+    async def edit_message_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": message,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        body = await self._post("editMessageText", payload)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+
     async def get_file(self, file_id: str) -> dict[str, object]:
         body = await self._post("getFile", {"file_id": file_id})
         if not body.get("ok", False):
@@ -288,6 +334,46 @@ class TelegramService:
             raise TelegramDeliveryError("Telegram API returned invalid JSON")
         return body
 
+    async def _post_multipart(
+        self,
+        method: str,
+        *,
+        data: dict[str, str],
+        files: dict[str, tuple[str, bytes, str]],
+    ) -> dict[str, object]:
+        if not self.bot_token:
+            raise TelegramDeliveryError(
+                "Telegram bot token is not configured",
+                error_code="configuration_error",
+            )
+        url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(url, data=data, files=files)
+        except httpx.HTTPError as exc:
+            raise TelegramDeliveryError(
+                "Telegram API request failed",
+                error_code="request_failed",
+            ) from exc
+        if response.status_code >= 400:
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                raise self._delivery_error_from_body(body, status_code=response.status_code)
+            raise TelegramDeliveryError(
+                f"Telegram API returned HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise TelegramDeliveryError("Telegram API returned invalid JSON") from exc
+        if not isinstance(body, dict):
+            raise TelegramDeliveryError("Telegram API returned invalid JSON")
+        return body
+
     def _delivery_error_from_body(
         self,
         body: dict[str, object],
@@ -346,6 +432,7 @@ class SellerBotWebhookService:
                 "/unblock_seller",
                 "/new_product",
                 "/new_product_help",
+                "/active_orders",
             }:
                 return await self._handle_seller_group_command(
                     command=command,
@@ -397,7 +484,7 @@ class SellerBotWebhookService:
         if not self._is_seller_group_chat(callback_query.message.chat.id):
             await self._send_chat_message(
                 callback_query.message.chat.id,
-                "Seller callback actions are available only in the seller group.",
+                "Действия продавца доступны только в группе продавцов.",
             )
             return self._response(handled=True, result="approval_rejected_outside_seller_group")
 
@@ -461,6 +548,8 @@ class SellerBotWebhookService:
                     actor_user_id=actor_user_id,
                     source="seller_bot",
                     actor_telegram_user_id=callback_query.from_user.id,
+                    seller_chat_id=callback_query.message.chat.id,
+                    seller_message_id=callback_query.message.message_id,
                 )
             else:
                 payment = await self.manual_payments_service.reject(
@@ -469,6 +558,8 @@ class SellerBotWebhookService:
                     reject_reason="Деньги не поступили",
                     source="seller_bot",
                     actor_telegram_user_id=callback_query.from_user.id,
+                    seller_chat_id=callback_query.message.chat.id,
+                    seller_message_id=callback_query.message.message_id,
                 )
         except AppError as exc:
             try:
@@ -481,11 +572,11 @@ class SellerBotWebhookService:
             }:
                 await self.telegram_service.answer_callback_query(
                     callback_query.id,
-                    text=f"Payment status: {current_payment.status.value}",
+                    text=f"Статус оплаты: {payment_status_label(current_payment.status)}",
                 )
-                await self._send_chat_message(
-                    callback_query.message.chat.id,
-                    f"Payment #{current_payment.id}: {current_payment.status.value}",
+                await self._finalize_payment_callback_message(
+                    callback_query,
+                    current_payment,
                 )
                 return self._response(
                     handled=True,
@@ -499,16 +590,56 @@ class SellerBotWebhookService:
 
         await self.telegram_service.answer_callback_query(
             callback_query.id,
-            text=f"Payment status: {payment.status.value}",
+            text=f"Статус оплаты: {payment_status_label(payment.status)}",
         )
-        await self._send_chat_message(
-            callback_query.message.chat.id,
-            f"Payment #{payment.id}: {payment.status.value}",
-        )
+        await self._finalize_payment_callback_message(callback_query, payment)
         return self._response(
             handled=True,
             result=f"manual_payment_{payment.status.value.lower()}",
         )
+
+    async def _finalize_payment_callback_message(self, callback_query, payment) -> None:
+        status_value = payment.status.value
+        if status_value == "APPROVED":
+            final_line = "✅ Оплата подтверждена"
+        elif status_value == "REJECTED":
+            reason = getattr(payment, "reject_reason", None) or "причина не указана"
+            final_line = f"❌ Оплата отклонена\nПричина: {reason}"
+        elif status_value == "EXPIRED":
+            final_line = "⌛ Время оплаты истекло"
+        else:
+            final_line = f"Статус оплаты: {payment_status_label(payment.status)}"
+
+        original_text = callback_query.message.text or "Проверка оплаты"
+        final_message = (
+            original_text
+            if final_line in original_text
+            else f"{original_text.rstrip()}\n\n{final_line}"
+        )
+        if callback_query.message.message_id is None:
+            await self._send_chat_message(
+                callback_query.message.chat.id,
+                f"{final_line}\nОплата: #{payment.id}",
+            )
+            return
+        try:
+            await self.telegram_service.edit_message_text(
+                str(callback_query.message.chat.id),
+                callback_query.message.message_id,
+                final_message,
+                reply_markup={"inline_keyboard": []},
+            )
+        except TelegramDeliveryError as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+            await self._send_chat_message(
+                callback_query.message.chat.id,
+                (
+                    f"{final_line}\n"
+                    f"Заказ: {getattr(payment, 'order_number', '—')}\n"
+                    f"Оплата: #{payment.id}"
+                ),
+            )
 
     async def _handle_seller_group_command(
         self,
@@ -534,6 +665,14 @@ class SellerBotWebhookService:
                 )
                 await self._send_chat_message(message.chat.id, response_text)
                 return self._response(handled=True, result="sellers_list_sent")
+
+            if command == "/active_orders":
+                response_parts = await self.seller_bot_service.format_active_orders_command(
+                    chat_id=message.chat.id,
+                )
+                for response_text in response_parts:
+                    await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="active_orders_sent")
 
             actor_user = message.from_user
             if command == "/new_product_help":

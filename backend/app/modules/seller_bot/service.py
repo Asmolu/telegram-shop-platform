@@ -9,6 +9,14 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.labels import (
+    MISSING_VALUE,
+    delivery_method_label,
+    format_datetime_moscow,
+    format_rubles,
+    order_status_label,
+    payment_status_label,
+)
 from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
@@ -30,7 +38,11 @@ from app.modules.products.schemas import (
 )
 from app.modules.products.search import normalize_search_aliases
 from app.modules.products.service import ProductsService
-from app.modules.products.size_grids import SizeGridValidationError, normalize_size
+from app.modules.products.size_grids import (
+    SizeGridValidationError,
+    format_size_for_display,
+    normalize_size,
+)
 from app.modules.seller_bot.repository import SellerBotRepository
 from app.modules.seller_bot.schemas import (
     SellerBotActionResponse,
@@ -50,6 +62,8 @@ SELLER_BOT_UNBLOCK_SELLER = "seller_unblocked"
 SELLER_BOT_PRODUCT_DRAFT_CREATED = "bot_product_draft_created"
 SELLER_BOT_PRODUCT_POST_REJECTED = "bot_product_post_rejected"
 SELLER_BOT_COMMAND_LIMIT = 20
+ACTIVE_ORDERS_COMMAND_LIMIT = 10
+TELEGRAM_MESSAGE_LIMIT = 4096
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
 POSTGRES_INT32_MAX = 2_147_483_647
 SELLER_PANEL_PRODUCT_EDIT_URL = "https://seller.tsplatform.ru/products/{product_id}/edit"
@@ -307,6 +321,25 @@ class SellerBotService:
         )
         return "\n\n".join(lines)
 
+    async def format_active_orders_command(self, *, chat_id: int) -> list[str]:
+        self._require_seller_group(chat_id)
+        orders, total = await self.repository.list_active_orders(
+            limit=ACTIVE_ORDERS_COMMAND_LIMIT
+        )
+        if not orders:
+            return ["Активных заказов нет."]
+
+        header = f"📋 Активные заказы: {len(orders)}"
+        if total > len(orders):
+            header += f" из {total}"
+        blocks = [self._format_active_order(order) for order in orders]
+        footer = (
+            f"Показаны первые {len(orders)} из {total} заказов."
+            if total > len(orders)
+            else None
+        )
+        return self._chunk_command_message(header, blocks, footer=footer)
+
     async def block_seller_command(
         self,
         *,
@@ -338,6 +371,100 @@ class SellerBotService:
             actor_telegram_user_id=actor_telegram_user_id,
             actor_username=actor_username,
         )
+
+    def _format_active_order(self, order) -> str:
+        user = order.user
+        username = f"@{user.username}" if user is not None and user.username else MISSING_VALUE
+        telegram_name = (
+            " ".join(
+                part
+                for part in (
+                    getattr(user, "first_name", None),
+                    getattr(user, "last_name", None),
+                )
+                if part
+            )
+            or order.contact_name
+            or MISSING_VALUE
+        )
+        payment = order.manual_payment
+        lines = [
+            f"🛍 {order.order_number} (ID {order.id})",
+            f"Статус заказа: {order_status_label(order.status)}",
+            (
+                f"Статус оплаты: {payment_status_label(payment.status)}"
+                if payment is not None
+                else f"Статус оплаты: {MISSING_VALUE}"
+            ),
+            f"Доставка: {delivery_method_label(order.delivery_method)}",
+            f"Клиент: {username}, {telegram_name}",
+            f"Создан: {format_datetime_moscow(order.created_at)}",
+            "",
+            "Товары:",
+        ]
+        for index, item in enumerate(order.items, start=1):
+            try:
+                size = format_size_for_display(item.variant_size_grid.value, item.variant_size)
+            except ValueError:
+                size = item.variant_size or MISSING_VALUE
+            attributes = ", ".join(
+                (
+                    f"размер {size}",
+                    f"цвет {item.variant_color or MISSING_VALUE}",
+                    f"SKU {item.variant_sku or MISSING_VALUE}",
+                )
+            )
+            lines.extend(
+                (
+                    f"{index}) {item.product_name}",
+                    f"   {attributes}",
+                    (
+                        f"   {item.quantity} × {format_rubles(item.unit_price)} = "
+                        f"{format_rubles(item.subtotal)}"
+                    ),
+                )
+            )
+        lines.extend(
+            (
+                "",
+                f"К оплате: {format_rubles(order.total_amount)}",
+                f"Панель продавца: https://seller.tsplatform.ru/orders?order={order.id}",
+            )
+        )
+        return "\n".join(lines)
+
+    def _chunk_command_message(
+        self,
+        header: str,
+        blocks: list[str],
+        *,
+        footer: str | None = None,
+    ) -> list[str]:
+        messages: list[str] = []
+        current = header
+        for block in blocks:
+            candidate = f"{current}\n\n{block}"
+            if len(candidate) <= TELEGRAM_MESSAGE_LIMIT:
+                current = candidate
+                continue
+            messages.append(current)
+            current = block
+            while len(current) > TELEGRAM_MESSAGE_LIMIT:
+                split_at = current.rfind("\n", 0, TELEGRAM_MESSAGE_LIMIT)
+                if split_at <= 0:
+                    split_at = TELEGRAM_MESSAGE_LIMIT
+                messages.append(current[:split_at].rstrip())
+                current = current[split_at:].lstrip()
+        if footer:
+            candidate = f"{current}\n\n{footer}"
+            if len(candidate) <= TELEGRAM_MESSAGE_LIMIT:
+                current = candidate
+            else:
+                messages.append(current)
+                current = footer
+        if current:
+            messages.append(current)
+        return messages
 
     async def create_quick_product_draft_command(
         self,

@@ -720,3 +720,21 @@ def test_order_delivery_method_migration_and_model_contract() -> None:
     ]
     assert migration.ORDER_DELIVERY_METHOD_ENUM.create_type is False
     assert Order.__table__.c.delivery_method.nullable is True
+
+
+def test_manual_payment_telegram_message_refs_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260615_0029_add_manual_payment_telegram_message_refs.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_manual_payment_message_refs", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    assert migration.down_revision == "20260615_0028"
+    assert ManualPayment.__table__.c.seller_telegram_chat_id.nullable is True
+    assert ManualPayment.__table__.c.seller_telegram_message_id.nullable is True

@@ -48,6 +48,7 @@ class FakeTelegramService:
         self.parse_modes: list[str | None] = []
         self.reply_markups: list[dict[str, object]] = []
         self.callback_answers: list[tuple[str, str | None]] = []
+        self.edits: list[tuple[str, int, str, dict[str, object] | None]] = []
 
     async def send_message(
         self,
@@ -69,6 +70,16 @@ class FakeTelegramService:
         text: str | None = None,
     ) -> None:
         self.callback_answers.append((callback_query_id, text))
+
+    async def edit_message_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        self.edits.append((chat_id, message_id, message, reply_markup))
 
 
 class FakeManualPaymentsService:
@@ -93,12 +104,21 @@ class FakeManualPaymentsService:
         actor_user_id: int | None,
         source: str,
         actor_telegram_user_id: int,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
     ) -> SimpleNamespace:
         assert source == "seller_bot"
+        assert seller_chat_id == -100
+        assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be approved", status.HTTP_409_CONFLICT)
         self.actions.append(("approve", payment_id, actor_user_id, actor_telegram_user_id))
-        return SimpleNamespace(id=payment_id, status=ManualPaymentStatus.APPROVED)
+        return SimpleNamespace(
+            id=payment_id,
+            order_number="ORD-17",
+            status=ManualPaymentStatus.APPROVED,
+            reject_reason=None,
+        )
 
     async def reject(
         self,
@@ -108,18 +128,32 @@ class FakeManualPaymentsService:
         reject_reason: str,
         source: str,
         actor_telegram_user_id: int,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
     ) -> SimpleNamespace:
         assert source == "seller_bot"
         assert reject_reason == "Деньги не поступили"
+        assert seller_chat_id == -100
+        assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be rejected", status.HTTP_409_CONFLICT)
         self.actions.append(("reject", payment_id, actor_user_id, actor_telegram_user_id))
-        return SimpleNamespace(id=payment_id, status=ManualPaymentStatus.REJECTED)
+        return SimpleNamespace(
+            id=payment_id,
+            order_number="ORD-17",
+            status=ManualPaymentStatus.REJECTED,
+            reject_reason=reject_reason,
+        )
 
     async def get_for_seller(self, payment_id: int) -> SimpleNamespace:
         if self.terminal_status is None:
             raise AppError("Payment not found", status.HTTP_404_NOT_FOUND)
-        return SimpleNamespace(id=payment_id, status=self.terminal_status)
+        return SimpleNamespace(
+            id=payment_id,
+            order_number="ORD-17",
+            status=self.terminal_status,
+            reject_reason=None,
+        )
 
 
 class FakeAuditService:
@@ -314,8 +348,14 @@ async def test_seller_bot_manual_payment_callback_uses_shared_service(
     ]
     assert telegram.callback_answers[-1] == (
         "callback-id",
-        f"Payment status: {expected_status.value}",
+        (
+            "Статус оплаты: Оплачено"
+            if expected_status == ManualPaymentStatus.APPROVED
+            else "Статус оплаты: Отклонено"
+        ),
     )
+    assert telegram.edits[-1][1] == 11
+    assert telegram.edits[-1][3] == {"inline_keyboard": []}
 
 
 @pytest.mark.asyncio
@@ -379,7 +419,10 @@ async def test_seller_bot_stale_payment_callback_reports_terminal_state(
 
     assert response.result == "manual_payment_expired"
     assert payments.actions == []
-    assert telegram.callback_answers[-1] == ("callback-id", "Payment status: EXPIRED")
+    assert telegram.callback_answers[-1] == (
+        "callback-id",
+        "Статус оплаты: Время оплаты истекло",
+    )
 
 
 @pytest.mark.asyncio
@@ -431,6 +474,19 @@ async def test_new_product_caption_command_is_routed(
     assert response.result == "bot_product_draft_created"
     assert seller_bot.product_messages == ["White Hoodie"]
     assert telegram.messages == [("-100", "Product draft created.")]
+
+
+@pytest.mark.asyncio
+async def test_active_orders_command_is_routed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/active_orders"))
+
+    assert response.result == "active_orders_sent"
+    assert telegram.messages == [("-100", "Active orders for -100")]
 
 
 @pytest.mark.asyncio
@@ -725,6 +781,9 @@ class FakeSellerBotCommandService:
 
     async def format_sellers_command(self, *, chat_id: int) -> str:
         return f"Seller list for {chat_id}"
+
+    async def format_active_orders_command(self, *, chat_id: int) -> list[str]:
+        return [f"Active orders for {chat_id}"]
 
     async def block_seller_command(
         self,

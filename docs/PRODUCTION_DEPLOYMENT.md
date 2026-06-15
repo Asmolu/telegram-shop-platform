@@ -162,10 +162,21 @@ Manual SBP payment verification:
 3. Upload a receipt and click `Я оплатил`.
 4. Confirm Bot 2 posts only to `TELEGRAM_SELLER_CHAT_ID`, then approve or reject
    with an active seller/admin account.
-5. Confirm approval moves the order to processing without returning stock.
-6. Confirm rejection or expiry cancels the order and returns stock exactly once.
-7. Change seller payment settings and confirm the existing payment snapshot is
+5. Confirm the original Bot 2 review message loses its inline buttons and shows
+   the final approval/rejection result. If Telegram cannot edit it, confirm a
+   final-state follow-up appears.
+6. Confirm approval moves the order to processing without returning stock.
+7. Confirm rejection or expiry cancels the order and returns stock exactly once.
+8. Change seller payment settings and confirm the existing payment snapshot is
    unchanged while a new checkout uses the new values.
+
+Order customer messaging:
+
+1. Apply Alembic revision `20260615_0029`.
+2. Open an order in Seller Panel and use `Отправить сообщение`.
+3. Verify text-only and photo-only sends arrive in the customer's Bot 1 chat.
+4. Verify a customer without an active Bot 1 private chat returns a clear seller
+   error and no Bot 2 customer message is attempted.
 
 Bot 2 token and seller group configuration are required for Telegram review
 buttons. Seller Panel review remains available without Telegram delivery. Bot 1

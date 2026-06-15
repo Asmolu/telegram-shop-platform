@@ -16,6 +16,20 @@ export type TelegramUser = {
   photo_url?: string;
 };
 
+type TelegramSafeAreaInset = {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+};
+
+type TelegramWebAppEvent =
+  | 'themeChanged'
+  | 'viewportChanged'
+  | 'fullscreenChanged'
+  | 'safeAreaChanged'
+  | 'contentSafeAreaChanged';
+
 export type TelegramWebApp = {
   initData: string;
   initDataUnsafe?: {
@@ -24,8 +38,11 @@ export type TelegramWebApp = {
   themeParams?: TelegramThemeParams;
   colorScheme?: 'light' | 'dark';
   platform?: string;
-  onEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
-  offEvent?: (eventType: 'themeChanged', eventHandler: () => void) => void;
+  isFullscreen?: boolean;
+  safeAreaInset?: TelegramSafeAreaInset;
+  contentSafeAreaInset?: TelegramSafeAreaInset;
+  onEvent?: (eventType: TelegramWebAppEvent, eventHandler: () => void) => void;
+  offEvent?: (eventType: TelegramWebAppEvent, eventHandler: () => void) => void;
   ready?: () => void;
   expand?: () => void;
   requestFullscreen?: () => void;
@@ -119,16 +136,49 @@ function shouldRequestTelegramFullscreen(webApp: TelegramWebApp | undefined) {
   return isMobileTelegramPlatform && isLikelyPhoneViewport;
 }
 
+function normalizeInset(value: number | undefined) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(Number(value), 0), 180);
+}
+
+function syncTelegramViewportCss(webApp: TelegramWebApp | undefined, fullscreenRequested: boolean) {
+  const root = document.documentElement;
+  const platform = String(webApp?.platform ?? '').toLowerCase();
+  const mobileTelegram = platform === 'ios'
+    || platform === 'android'
+    || platform === 'android_x';
+  const fullscreen = mobileTelegram && Boolean(webApp?.isFullscreen ?? fullscreenRequested);
+
+  root.dataset.telegramPlatform = platform || 'browser';
+  root.dataset.telegramMobile = mobileTelegram ? 'true' : 'false';
+  root.dataset.telegramFullscreen = fullscreen ? 'true' : 'false';
+  root.style.setProperty('--tg-safe-area-top', `${normalizeInset(webApp?.safeAreaInset?.top)}px`);
+  root.style.setProperty(
+    '--tg-content-safe-area-top',
+    `${normalizeInset(webApp?.contentSafeAreaInset?.top)}px`,
+  );
+  root.style.setProperty(
+    '--tg-fullscreen-top-offset',
+    fullscreen ? 'clamp(76px, 20vw, 88px)' : '0px',
+  );
+}
+
 export function initTelegramApp() {
   const webApp = getTelegramWebApp();
+  let fullscreenRequested = false;
 
   try {
     webApp?.ready?.();
     webApp?.expand?.();
     if (shouldRequestTelegramFullscreen(webApp)) {
       try {
+        fullscreenRequested = true;
         webApp?.requestFullscreen?.();
       } catch {
+        fullscreenRequested = false;
         // Fullscreen can be unsupported or rejected without blocking startup.
       }
     }
@@ -138,6 +188,30 @@ export function initTelegramApp() {
   } catch {
     // Telegram WebApp methods can be unavailable in ordinary browsers.
   }
+
+  const syncViewport = () => {
+    if (typeof webApp?.isFullscreen === 'boolean') {
+      fullscreenRequested = webApp.isFullscreen;
+    }
+    syncTelegramViewportCss(webApp, fullscreenRequested);
+  };
+  const viewportEvents: TelegramWebAppEvent[] = [
+    'viewportChanged',
+    'fullscreenChanged',
+    'safeAreaChanged',
+    'contentSafeAreaChanged',
+  ];
+
+  syncViewport();
+  viewportEvents.forEach((eventType) => webApp?.onEvent?.(eventType, syncViewport));
+  window.addEventListener('resize', syncViewport);
+  window.visualViewport?.addEventListener('resize', syncViewport);
+
+  return () => {
+    viewportEvents.forEach((eventType) => webApp?.offEvent?.(eventType, syncViewport));
+    window.removeEventListener('resize', syncViewport);
+    window.visualViewport?.removeEventListener('resize', syncViewport);
+  };
 }
 
 const themeOverrideTokens = [

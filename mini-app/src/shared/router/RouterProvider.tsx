@@ -9,19 +9,62 @@ type RouterContextValue = {
   pathname: string;
   searchParams: URLSearchParams;
   navigate: (to: string, options?: NavigateOptions) => void;
+  goBack: (fallback?: string) => void;
 };
 
 const RouterContext = React.createContext<RouterContextValue | null>(null);
+const HISTORY_INDEX_KEY = '__telegramShopIndex';
+const SWIPE_EDGE_WIDTH = 32;
+const SWIPE_MIN_DISTANCE = 72;
+const SWIPE_MAX_VERTICAL_DISTANCE = 48;
+const SWIPE_BACK_IGNORE_SELECTOR = [
+  '[data-swipe-back-ignore]',
+  '[role="dialog"][aria-modal="true"]',
+  'input',
+  'textarea',
+  'select',
+  '[contenteditable="true"]',
+  '.banner-carousel__track',
+  '.vertical-banner-grid',
+  '.product-image-carousel__track',
+  '.variant-carousel',
+  '.related-products-carousel',
+  '.aggressive-popup__track',
+  '.chip-row',
+  '.feed-chips',
+  '.sort-row',
+  '.tab-row',
+  '.segmented-control',
+].join(',');
 
 function getCurrentPath() {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+function getHistoryIndex() {
+  const index = window.history.state?.[HISTORY_INDEX_KEY];
+  return typeof index === 'number' && Number.isFinite(index) ? index : 0;
+}
+
 export function RouterProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = React.useState(getCurrentPath);
+  const historyIndexRef = React.useRef(getHistoryIndex());
 
   React.useEffect(() => {
-    const onPopState = () => setLocation(getCurrentPath());
+    if (window.history.state?.[HISTORY_INDEX_KEY] === undefined) {
+      window.history.replaceState(
+        { ...(window.history.state ?? {}), [HISTORY_INDEX_KEY]: historyIndexRef.current },
+        '',
+        getCurrentPath(),
+      );
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const onPopState = () => {
+      historyIndexRef.current = getHistoryIndex();
+      setLocation(getCurrentPath());
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -32,14 +75,128 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (options.replace) {
-      window.history.replaceState({}, '', to);
+      window.history.replaceState(
+        { ...(window.history.state ?? {}), [HISTORY_INDEX_KEY]: historyIndexRef.current },
+        '',
+        to,
+      );
     } else {
-      window.history.pushState({}, '', to);
+      historyIndexRef.current += 1;
+      window.history.pushState({ [HISTORY_INDEX_KEY]: historyIndexRef.current }, '', to);
     }
 
     setLocation(getCurrentPath());
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  const goBack = React.useCallback((fallback = '/main') => {
+    if (historyIndexRef.current > 0) {
+      window.history.back();
+      return;
+    }
+
+    if (getCurrentPath() !== fallback) {
+      window.history.replaceState(
+        { ...(window.history.state ?? {}), [HISTORY_INDEX_KEY]: 0 },
+        '',
+        fallback,
+      );
+      historyIndexRef.current = 0;
+      setLocation(getCurrentPath());
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    let gesture:
+      | {
+          startX: number;
+          startY: number;
+          latestX: number;
+          latestY: number;
+          startedAt: number;
+        }
+      | null = null;
+
+    const resetGesture = () => {
+      gesture = null;
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        event.touches.length !== 1
+        || !touch
+        || touch.clientX > SWIPE_EDGE_WIDTH
+        || target?.closest(SWIPE_BACK_IGNORE_SELECTOR)
+        || document.querySelector('[role="dialog"][aria-modal="true"]')
+      ) {
+        resetGesture();
+        return;
+      }
+
+      gesture = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        latestX: touch.clientX,
+        latestY: touch.clientY,
+        startedAt: Date.now(),
+      };
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!gesture || event.touches.length !== 1 || !touch) {
+        return;
+      }
+
+      gesture.latestX = touch.clientX;
+      gesture.latestY = touch.clientY;
+      const deltaX = gesture.latestX - gesture.startX;
+      const deltaY = Math.abs(gesture.latestY - gesture.startY);
+
+      if (deltaX < -8 || deltaY > SWIPE_MAX_VERTICAL_DISTANCE) {
+        resetGesture();
+        return;
+      }
+
+      if (deltaX > 14 && deltaX > deltaY * 1.5) {
+        event.preventDefault();
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (!gesture) {
+        return;
+      }
+
+      const deltaX = gesture.latestX - gesture.startX;
+      const deltaY = Math.abs(gesture.latestY - gesture.startY);
+      const duration = Date.now() - gesture.startedAt;
+      const shouldGoBack = deltaX >= SWIPE_MIN_DISTANCE
+        && deltaY <= SWIPE_MAX_VERTICAL_DISTANCE
+        && deltaX > deltaY * 1.5
+        && duration <= 900;
+
+      resetGesture();
+      if (shouldGoBack) {
+        goBack();
+      }
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', resetGesture, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', resetGesture);
+    };
+  }, [goBack]);
 
   const value = React.useMemo(() => {
     const url = new URL(location, window.location.origin);
@@ -48,8 +205,9 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
       pathname: url.pathname,
       searchParams: url.searchParams,
       navigate,
+      goBack,
     };
-  }, [location, navigate]);
+  }, [goBack, location, navigate]);
 
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }

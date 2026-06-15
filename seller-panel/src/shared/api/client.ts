@@ -16,6 +16,7 @@ import type {
   Category,
   CategoryPayload,
   CustomerNotificationSubscription,
+  CustomerOrderMessageResponse,
   ManualPayment,
   ManualPaymentStatus,
   NotificationTemplate,
@@ -307,6 +308,19 @@ export const api = {
         method: 'PATCH',
         body: { status },
       }),
+    sendCustomerMessage: (orderId: number, text: string, photo?: File | null) => {
+      const formData = new FormData();
+      if (text.trim()) {
+        formData.append('text', text.trim());
+      }
+      if (photo) {
+        formData.append('photo', photo);
+      }
+      return apiRequest<CustomerOrderMessageResponse>(
+        `/orders/admin/${orderId}/customer-message`,
+        { method: 'POST', formData },
+      );
+    },
   },
   paymentSettings: {
     get: () => apiRequest<SellerPaymentSettings>('/seller/settings/payment'),

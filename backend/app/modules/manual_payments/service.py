@@ -38,7 +38,7 @@ from app.modules.manual_payments.schemas import (
     SellerPaymentSettingsUpdate,
 )
 from app.modules.orders.delivery import delivery_method_label
-from app.modules.telegram.service import TelegramService
+from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
 
@@ -66,6 +66,8 @@ class ManualPaymentEventPublisher:
         telegram_service: TelegramService | None = None,
         customer_publisher: PaymentEventPublisher | None = None,
     ) -> None:
+        self.session = session
+        self.repository = ManualPaymentsRepository(session)
         self.telegram_service = telegram_service or TelegramService()
         self.customer_publisher = customer_publisher or CustomerServiceNotificationEventPublisher(
             session
@@ -80,38 +82,32 @@ class ManualPaymentEventPublisher:
             MANUAL_PAYMENT_REJECTED,
             MANUAL_PAYMENT_EXPIRED,
         }:
+            try:
+                await self._finalize_seller_message(name, payload)
+            except Exception:
+                logger.warning(
+                    "manual_payment.seller_bot_finalization_failed",
+                    exc_info=True,
+                    extra={
+                        "payment_id": payload.get("payment_id"),
+                        "order_id": payload.get("order_id"),
+                    },
+                )
             await self.customer_publisher.emit(name, payload)
 
     async def _notify_seller(self, payload: Mapping[str, object]) -> None:
         payment_id = int(payload["payment_id"])
         order_id = int(payload["order_id"])
-        expires_at = datetime.fromisoformat(str(payload["expires_at"]))
-        amount = Decimal(str(payload["amount"]))
-        amount_label = f"{amount:,.2f}".replace(",", " ").replace(".00", "")
-        username = payload.get("customer_username")
-        username_label = f"@{username}" if username else "-"
-        receipt_label = "есть" if payload.get("has_receipt") else "нет"
-        message = (
-            "Проверка оплаты\n\n"
-            f"Заказ {payload['order_number']}\n"
-            f"Сумма: {amount_label} ₽\n"
-            f"Клиент: {username_label} / ID {payload['user_id']}\n"
-            f"Телефон клиента: {payload.get('customer_phone') or '-'}\n"
-            f"Способ доставки: {payload.get('delivery_method_label') or '-'}\n"
-            f"Комментарий к переводу: {payload['payment_comment']}\n"
-            f"Скриншот: {receipt_label}\n"
-            f"Резерв до: {expires_at.astimezone(SELLER_TIMEZONE).strftime('%H:%M')}\n"
-            f"{SELLER_PANEL_PAYMENT_URL.format(payment_id=payment_id)}"
-        )
+        message = self._review_message(payload)
         reply_markup = {
             "inline_keyboard": [
                 [
                     {
-                        "text": "\u2705 Approve",
+                        "text": "✅ Подтвердить",
                         "callback_data": f"manual_payment:approve:{payment_id}",
                     },
                     {
-                        "text": "\u274c Reject",
+                        "text": "❌ Отклонить",
                         "callback_data": f"manual_payment:reject:{payment_id}",
                     },
                 ]
@@ -125,11 +121,17 @@ class ManualPaymentEventPublisher:
         )
         if not bot_token or not seller_chat_id:
             return
-        await self.telegram_service.send_message(
+        message_id = await self.telegram_service.send_message(
             seller_chat_id,
             message,
             reply_markup=reply_markup,
         )
+        if message_id is not None:
+            payment = await self.repository.get_by_id(payment_id)
+            if payment is not None:
+                payment.seller_telegram_chat_id = int(seller_chat_id)
+                payment.seller_telegram_message_id = message_id
+                await self.session.commit()
         logger.info(
             "manual_payment.seller_bot_notification_sent",
             extra={
@@ -138,6 +140,76 @@ class ManualPaymentEventPublisher:
                 "status": str(payload.get("status", ManualPaymentStatus.SUBMITTED.value)),
             },
         )
+
+    def _review_message(self, payload: Mapping[str, object]) -> str:
+        payment_id = int(payload["payment_id"])
+        expires_at = datetime.fromisoformat(str(payload["expires_at"]))
+        amount = Decimal(str(payload["amount"]))
+        amount_label = f"{amount:,.2f}".replace(",", " ").replace(".00", "")
+        username = payload.get("customer_username")
+        username_label = f"@{username}" if username else "—"
+        receipt_label = "есть" if payload.get("has_receipt") else "нет"
+        return (
+            "Проверка оплаты\n\n"
+            f"Заказ {payload['order_number']}\n"
+            f"Сумма: {amount_label} ₽\n"
+            f"Клиент: {username_label} / ID {payload['user_id']}\n"
+            f"Телефон клиента: {payload.get('customer_phone') or '—'}\n"
+            f"Способ доставки: {payload.get('delivery_method_label') or '—'}\n"
+            f"Комментарий к переводу: {payload['payment_comment']}\n"
+            f"Скриншот: {receipt_label}\n"
+            f"Резерв до: {expires_at.astimezone(SELLER_TIMEZONE).strftime('%H:%M')}\n"
+            f"{SELLER_PANEL_PAYMENT_URL.format(payment_id=payment_id)}"
+        )
+
+    async def _finalize_seller_message(
+        self,
+        name: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        chat_id = payload.get("seller_telegram_chat_id") or settings.telegram_seller_chat_id
+        message_id = payload.get("seller_telegram_message_id")
+        final_line = self._final_payment_line(name, payload)
+        final_message = f"{self._review_message(payload)}\n\n{final_line}"
+
+        if chat_id and message_id:
+            try:
+                await self.telegram_service.edit_message_text(
+                    str(chat_id),
+                    int(message_id),
+                    final_message,
+                    reply_markup={"inline_keyboard": []},
+                )
+                return
+            except TelegramDeliveryError as exc:
+                if "message is not modified" in str(exc).lower():
+                    return
+                logger.warning(
+                    "manual_payment.seller_bot_edit_failed",
+                    extra={
+                        "payment_id": payload.get("payment_id"),
+                        "order_id": payload.get("order_id"),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        if chat_id:
+            await self.telegram_service.send_message(
+                str(chat_id),
+                (
+                    f"{final_line}\n"
+                    f"Заказ: {payload['order_number']}\n"
+                    f"Оплата: #{payload['payment_id']}"
+                ),
+            )
+
+    def _final_payment_line(self, name: str, payload: Mapping[str, object]) -> str:
+        if name == MANUAL_PAYMENT_APPROVED:
+            return "✅ Оплата подтверждена"
+        if name == MANUAL_PAYMENT_REJECTED:
+            reason = payload.get("reject_reason") or "причина не указана"
+            return f"❌ Оплата отклонена\nПричина: {reason}"
+        return "⌛ Время оплаты истекло"
 
 
 class ManualPaymentsService:
@@ -366,6 +438,8 @@ class ManualPaymentsService:
         actor_user_id: int | None,
         source: str = "seller_panel",
         actor_telegram_user_id: int | None = None,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
     ) -> ManualPaymentRead:
         payment = await self.repository.get_by_id(payment_id, for_update=True)
         if payment is None:
@@ -406,7 +480,12 @@ class ManualPaymentsService:
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_APPROVED, payment)
         response = self._payment_response(payment, server_now=now)
-        await self._emit(MANUAL_PAYMENT_APPROVED, payment)
+        await self._emit(
+            MANUAL_PAYMENT_APPROVED,
+            payment,
+            seller_chat_id=seller_chat_id,
+            seller_message_id=seller_message_id,
+        )
         return response
 
     async def reject(
@@ -417,6 +496,8 @@ class ManualPaymentsService:
         reject_reason: str | None = None,
         source: str = "seller_panel",
         actor_telegram_user_id: int | None = None,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
     ) -> ManualPaymentRead:
         payment = await self.repository.get_by_id(payment_id, for_update=True)
         if payment is None:
@@ -463,7 +544,12 @@ class ManualPaymentsService:
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_REJECTED, payment)
         response = self._payment_response(payment, server_now=now)
-        await self._emit(MANUAL_PAYMENT_REJECTED, payment)
+        await self._emit(
+            MANUAL_PAYMENT_REJECTED,
+            payment,
+            seller_chat_id=seller_chat_id,
+            seller_message_id=seller_message_id,
+        )
         return response
 
     async def expire_due_payment(self, payment_id: int) -> bool:
@@ -523,9 +609,21 @@ class ManualPaymentsService:
             variant.stock_quantity += item.quantity
         payment.stock_released_at = now
 
-    async def _emit(self, name: str, payment: ManualPayment) -> None:
+    async def _emit(
+        self,
+        name: str,
+        payment: ManualPayment,
+        *,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
+    ) -> None:
+        payload = self._event_payload(payment)
+        if seller_chat_id is not None:
+            payload["seller_telegram_chat_id"] = seller_chat_id
+        if seller_message_id is not None:
+            payload["seller_telegram_message_id"] = seller_message_id
         try:
-            await self.event_publisher.emit(name, self._event_payload(payment))
+            await self.event_publisher.emit(name, payload)
         except Exception as exc:
             if name == MANUAL_PAYMENT_SUBMITTED:
                 logger.warning(
@@ -567,6 +665,8 @@ class ManualPaymentsService:
             "has_receipt": bool(payment.receipt_image_path),
             "reject_reason": payment.reject_reason,
             "status": payment.status.value,
+            "seller_telegram_chat_id": payment.seller_telegram_chat_id,
+            "seller_telegram_message_id": payment.seller_telegram_message_id,
         }
 
     def _payment_response(

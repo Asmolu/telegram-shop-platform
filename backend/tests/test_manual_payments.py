@@ -34,6 +34,7 @@ from app.modules.manual_payments.phone import normalize_russian_phone
 from app.modules.manual_payments.router import get_manual_payments_service
 from app.modules.manual_payments.schemas import SellerPaymentSettingsUpdate
 from app.modules.manual_payments.service import ManualPaymentEventPublisher, ManualPaymentsService
+from app.modules.telegram.service import TelegramDeliveryError
 
 NOW = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
 
@@ -149,11 +150,16 @@ class FakeTelegramService:
         bot_token: str | None = "seller-bot-token",
         seller_chat_id: str | None = "-100",
         fail: bool = False,
+        message_id: int | None = None,
+        fail_edit: bool = False,
     ) -> None:
         self.bot_token = bot_token
         self.seller_chat_id = seller_chat_id
         self.fail = fail
+        self.message_id = message_id
+        self.fail_edit = fail_edit
         self.messages: list[tuple[str, str, dict[str, object] | None]] = []
+        self.edits: list[tuple[str, int, str, dict[str, object] | None]] = []
 
     async def send_message(
         self,
@@ -161,10 +167,23 @@ class FakeTelegramService:
         message: str,
         *,
         reply_markup: dict[str, object] | None = None,
-    ) -> None:
+    ) -> int | None:
         if self.fail:
             raise RuntimeError("Telegram unavailable")
         self.messages.append((chat_id, message, reply_markup))
+        return self.message_id
+
+    async def edit_message_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> None:
+        if self.fail_edit:
+            raise TelegramDeliveryError("Telegram edit failed")
+        self.edits.append((chat_id, message_id, message, reply_markup))
 
 
 class FakeAuditService:
@@ -521,6 +540,81 @@ async def test_submitted_event_sends_seller_group_review_buttons(
     buttons = keyboard["inline_keyboard"][0]
     assert buttons[0]["callback_data"] == "manual_payment:approve:17"
     assert buttons[1]["callback_data"] == "manual_payment:reject:17"
+    assert buttons[0]["text"] == "✅ Подтвердить"
+    assert buttons[1]["text"] == "❌ Отклонить"
+
+
+@pytest.mark.asyncio
+async def test_submitted_event_stores_seller_group_message_reference() -> None:
+    service, repository, _, _, _, _ = _service(with_payment=True)
+    telegram = FakeTelegramService(message_id=701)
+    publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+    publisher.repository = repository
+
+    await publisher.emit(MANUAL_PAYMENT_SUBMITTED, service._event_payload(repository.payments[1]))
+
+    payment = repository.payments[1]
+    assert payment.seller_telegram_chat_id == -100
+    assert payment.seller_telegram_message_id == 701
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "expected_text"),
+    [
+        ("approve", "✅ Оплата подтверждена"),
+        ("reject", "❌ Оплата отклонена"),
+    ],
+)
+async def test_seller_panel_decision_edits_original_group_message(
+    action: str,
+    expected_text: str,
+) -> None:
+    service, repository, _, _, audit, _ = _service(with_payment=True)
+    payment = repository.payments[1]
+    payment.seller_telegram_chat_id = -100
+    payment.seller_telegram_message_id = 702
+    telegram = FakeTelegramService()
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+    service.audit_service = audit
+
+    if action == "approve":
+        await service.approve(1, actor_user_id=9)
+    else:
+        await service.reject(1, actor_user_id=9, reject_reason="Неверная сумма")
+
+    assert telegram.edits
+    assert expected_text in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+async def test_group_message_edit_failure_sends_follow_up_without_rollback() -> None:
+    service, repository, session, _, _, _ = _service(with_payment=True)
+    payment = repository.payments[1]
+    payment.seller_telegram_chat_id = -100
+    payment.seller_telegram_message_id = 703
+    telegram = FakeTelegramService(fail_edit=True)
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    result = await service.approve(1, actor_user_id=9)
+
+    assert result.status == ManualPaymentStatus.APPROVED
+    assert telegram.messages
+    assert "✅ Оплата подтверждена" in telegram.messages[-1][1]
+    assert session.rollback_count == 0
 
 
 @pytest.mark.asyncio

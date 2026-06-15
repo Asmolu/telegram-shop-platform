@@ -6,6 +6,13 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.labels import (
+    MISSING_VALUE,
+    format_datetime_moscow,
+    format_rubles,
+    order_status_label,
+    payment_status_label,
+)
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import Notification, NotificationChannel, NotificationStatus
@@ -164,7 +171,7 @@ class NotificationsService:
 
     async def _create_order_created(self, payload: Mapping[str, object]) -> NotificationRead:
         order_number = self._order_label(payload)
-        title = f"New order {order_number}"
+        title = f"🛍 Новый заказ #{order_number}"
         message = self._format_seller_order_created_message(payload)
         notification = await self.create_notification(
             type=ORDER_CREATED,
@@ -181,10 +188,14 @@ class NotificationsService:
         payload: Mapping[str, object],
     ) -> NotificationRead:
         order_number = self._order_label(payload)
-        previous_status = self._payload_value(payload, "previous_status", fallback="unknown")
-        new_status = self._payload_value(payload, "new_status", fallback="unknown")
-        title = f"Order {order_number} status changed"
-        message = f"Order {order_number} changed from {previous_status} to {new_status}."
+        previous_status = self._payload_value(payload, "previous_status", fallback="")
+        new_status = self._payload_value(payload, "new_status", fallback="")
+        title = "🔄 Статус заказа изменён"
+        message = (
+            f"Заказ: {order_number}\n"
+            f"Было: {order_status_label(previous_status)}\n"
+            f"Стало: {order_status_label(new_status)}"
+        )
         notification = await self.create_notification(
             type=ORDER_STATUS_CHANGED,
             title=title,
@@ -258,14 +269,14 @@ class NotificationsService:
             await self.telegram_service.send_seller_notification(part)
 
     def _format_seller_order_created_message(self, payload: Mapping[str, object]) -> str:
-        order_id = self._payload_value(payload, "order_id", fallback="unknown")
-        order_number = self._order_label(payload)
-        status_value = self._payload_value(payload, "status", fallback="unknown")
-        created_at = self._payload_value(payload, "created_at", fallback="unknown")
+        order_id = self._payload_value(payload, "order_id", fallback=MISSING_VALUE)
+        status_value = self._payload_value(payload, "status", fallback="")
+        payment_status = self._payload_value(payload, "payment_status", fallback="")
+        created_at = self._payload_value(payload, "created_at", fallback="")
         subtotal = self._payload_value(payload, "subtotal_amount", fallback="0.00")
         discount = self._payload_value(payload, "discount_amount", fallback="0.00")
         total = self._payload_value(payload, "total_amount", fallback="0.00")
-        promo = self._payload_value(payload, "promo_code", fallback="-")
+        promo = self._payload_value(payload, "promo_code", fallback=MISSING_VALUE)
         seller_panel_url = self._payload_value(
             payload,
             "seller_panel_url",
@@ -273,49 +284,49 @@ class NotificationsService:
         )
 
         lines = [
-            f"Order ID: {order_id}",
-            f"Order number: {order_number}",
-            f"Status: {status_value}",
-            f"Created at: {created_at}",
+            f"ID заказа: {order_id}",
+            f"Статус заказа: {order_status_label(status_value)}",
+            f"Статус оплаты: {payment_status_label(payment_status)}",
+            f"Создан: {format_datetime_moscow(created_at)}",
             "",
-            "Customer:",
+            "👤 Клиент",
             *self._customer_lines(payload.get("customer")),
             "",
-            "Products:",
+            "📦 Товары",
             *self._product_lines(payload.get("items")),
             "",
-            "Totals:",
-            f"Subtotal: {subtotal}",
-            f"Promo code: {promo or '-'}",
-            f"Discount: {discount}",
-            f"Final total: {total}",
+            "💰 Сумма",
+            f"Товары: {format_rubles(subtotal)}",
+            f"Промокод: {promo or MISSING_VALUE}",
+            f"Скидка: {format_rubles(discount)}",
+            f"К оплате: {format_rubles(total)}",
             "",
-            "Delivery/contact:",
-            *self._contact_lines(payload.get("contact")),
+            "🚚 Доставка и контакты",
+            *self._contact_lines(payload.get("contact"), payload.get("customer")),
             "",
-            f"Seller Panel: {seller_panel_url}",
+            f"Панель продавца: {seller_panel_url}",
         ]
         return "\n".join(lines)
 
     def _customer_lines(self, customer: object) -> list[str]:
         if not isinstance(customer, dict):
-            return ["-"]
+            return [MISSING_VALUE]
         username = customer.get("username")
-        telegram_tag = f"@{username}" if username else "-"
+        telegram_tag = f"@{username}" if username else MISSING_VALUE
         name = customer.get("name") or self._join_name(
             customer.get("first_name"),
             customer.get("last_name"),
         )
         return [
             f"Telegram: {telegram_tag}",
-            f"Customer ID: {customer.get('user_id') or '-'}",
-            f"Telegram ID: {customer.get('telegram_id') or '-'}",
-            f"Mini App name: {name or '-'}",
+            f"Имя в Mini App: {name or MISSING_VALUE}",
+            f"ID клиента: {customer.get('user_id') or MISSING_VALUE}",
+            f"Telegram ID: {customer.get('telegram_id') or MISSING_VALUE}",
         ]
 
     def _product_lines(self, items: object) -> list[str]:
         if not isinstance(items, list) or not items:
-            return ["-"]
+            return [MISSING_VALUE]
         lines: list[str] = []
         for index, item in enumerate(items, start=1):
             if not isinstance(item, dict):
@@ -323,37 +334,40 @@ class NotificationsService:
             size = item.get("variant_size")
             size_grid = item.get("variant_size_grid") or "clothing_alpha"
             try:
-                display_size = format_size_for_display(str(size_grid), str(size)) if size else "-"
+                display_size = (
+                    format_size_for_display(str(size_grid), str(size))
+                    if size
+                    else MISSING_VALUE
+                )
             except ValueError:
-                display_size = str(size) if size else "-"
-            variant_parts = [
-                f"size={display_size}",
-                f"color={item.get('variant_color') or '-'}",
-                f"sku={item.get('variant_sku') or '-'}",
-            ]
+                display_size = str(size) if size else MISSING_VALUE
             lines.extend(
                 [
-                    f"{index}. {item.get('product_title') or '-'}",
-                    f"   Product ID: {item.get('product_id') or '-'}",
-                    f"   Link: {item.get('product_link') or '-'}",
-                    f"   Image: {item.get('product_image_url') or '-'}",
-                    f"   Variant: {', '.join(variant_parts)}",
-                    f"   Quantity: {item.get('quantity') or '-'}",
-                    f"   Unit price: {item.get('unit_price') or '0.00'}",
-                    f"   Item total: {item.get('item_total') or '0.00'}",
+                    f"{index}) {item.get('product_title') or MISSING_VALUE}",
+                    f"   ID товара: {item.get('product_id') or MISSING_VALUE}",
+                    f"   Размер: {display_size}",
+                    f"   Цвет: {item.get('variant_color') or MISSING_VALUE}",
+                    f"   SKU: {item.get('variant_sku') or MISSING_VALUE}",
+                    f"   Количество: {item.get('quantity') or MISSING_VALUE}",
+                    f"   Цена: {format_rubles(item.get('unit_price') or '0.00')}",
+                    f"   Итого: {format_rubles(item.get('item_total') or '0.00')}",
+                    f"   Ссылка: {item.get('product_link') or MISSING_VALUE}",
+                    f"   Фото: {item.get('product_image_url') or MISSING_VALUE}",
                 ]
             )
-        return lines or ["-"]
+        return lines or [MISSING_VALUE]
 
-    def _contact_lines(self, contact: object) -> list[str]:
+    def _contact_lines(self, contact: object, customer: object) -> list[str]:
         if not isinstance(contact, dict):
-            return ["-"]
+            return [MISSING_VALUE]
+        username = customer.get("username") if isinstance(customer, dict) else None
         return [
-            f"Name: {contact.get('name') or '-'}",
-            f"Phone: {contact.get('phone') or '-'}",
-            f"Способ доставки: {contact.get('delivery_method_label') or '-'}",
-            f"Address: {contact.get('delivery_address') or '-'}",
-            f"Comment: {contact.get('delivery_comment') or '-'}",
+            f"Способ доставки: {contact.get('delivery_method_label') or MISSING_VALUE}",
+            f"Имя: {contact.get('name') or MISSING_VALUE}",
+            f"Телефон: {contact.get('phone') or MISSING_VALUE}",
+            f"Адрес/город: {contact.get('delivery_address') or MISSING_VALUE}",
+            f"Комментарий: {contact.get('delivery_comment') or MISSING_VALUE}",
+            f"Telegram: @{username}" if username else f"Telegram: {MISSING_VALUE}",
         ]
 
     def _split_telegram_message(

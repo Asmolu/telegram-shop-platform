@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  addCartItem,
   getCart,
   getFavorites,
   getOrders,
@@ -134,6 +135,26 @@ export function CartPage() {
     }
   }
 
+  async function addFavoriteProductToCart(product: Product) {
+    const activeVariants = product.variants.filter(
+      (variant) => variant.is_active && variant.available_quantity > 0,
+    );
+
+    if (activeVariants.length !== 1) {
+      setNotice('Выберите размер в карточке товара.');
+      navigate(`/product/${product.id}`);
+      return;
+    }
+
+    try {
+      await addCartItem(product.id, activeVariants[0].id, 1);
+      window.dispatchEvent(new Event('miniapp:cart-updated'));
+      setNotice('Товар добавлен в корзину.');
+    } catch (actionError) {
+      setNotice(toApiErrorMessage(actionError));
+    }
+  }
+
   async function applyPromo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPromoValidation(null);
@@ -210,7 +231,7 @@ export function CartPage() {
       </div>
 
       {notice ? (
-        <InlineNotice tone={notice.includes('применен') ? 'success' : 'warning'}>
+        <InlineNotice tone={notice.includes('применен') || notice.includes('добавлен') ? 'success' : 'warning'}>
           <span>{notice}</span>
           <button type="button" onClick={() => setNotice(null)}>×</button>
         </InlineNotice>
@@ -219,7 +240,12 @@ export function CartPage() {
       {loading ? <PageLoader text="Загружаем покупки..." /> : null}
       {!loading && error ? <ErrorState message={error} actionLabel="Повторить" onAction={() => void load()} /> : null}
       {!loading && !error && activeTab === 'favorites' ? (
-        <FavoritesTab products={favoriteProducts} favorites={favorites} onRemove={removeFavoriteProduct} />
+        <FavoritesTab
+          products={favoriteProducts}
+          favorites={favorites}
+          onAddToCart={addFavoriteProductToCart}
+          onRemove={removeFavoriteProduct}
+        />
       ) : null}
       {!loading && !error && activeTab === 'cart' ? (
         <CartItemsTab
@@ -255,10 +281,12 @@ function UnauthorizedBlock({ onAuth }: { onAuth: () => void }) {
 function FavoritesTab({
   products,
   favorites,
+  onAddToCart,
   onRemove,
 }: {
   products: Product[];
   favorites: Favorite[];
+  onAddToCart: (product: Product) => Promise<void>;
   onRemove: (productId: number) => Promise<void>;
 }) {
   const { navigate } = useRouter();
@@ -282,6 +310,7 @@ function FavoritesTab({
           favorite={favoriteIds.has(product.id)}
           key={product.id}
           product={product}
+          onAddToCart={onAddToCart}
           onFavoriteToggle={() => onRemove(product.id)}
         />
       ))}

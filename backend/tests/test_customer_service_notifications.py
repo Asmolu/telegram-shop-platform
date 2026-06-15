@@ -215,7 +215,7 @@ async def test_telegram_429_records_sanitized_rate_limit_metadata() -> None:
         (
             OrderStatus.NEW.value,
             ORDER_STATUS_CHANGED_CUSTOMER,
-            "Статус заказа изменён\n\nСтатус заказа ORD-00000001: NEW.",
+            "Статус заказа изменён\n\nСтатус заказа ORD-00000001: Новый.",
         ),
     ],
 )

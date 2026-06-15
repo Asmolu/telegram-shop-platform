@@ -21,7 +21,7 @@ import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } fr
 import { displaySize, sortVariants } from '../shared/utils/sizes';
 
 export function ProductDetailPage() {
-  const { currentPath, pathname, navigate } = useRouter();
+  const { currentPath, pathname, navigate, goBack } = useRouter();
   const { isAuthenticated } = useAuth();
   const productId = getNumericRouteParam(pathname, '/product/');
   const [product, setProduct] = React.useState<Product | null>(null);
@@ -169,6 +169,30 @@ export function ProductDetailPage() {
     }
   }
 
+  async function addRelatedProductToCart(relatedProduct: Product) {
+    if (!isAuthenticated) {
+      navigate(getAuthPath(currentPath));
+      return;
+    }
+
+    const activeVariants = relatedProduct.variants.filter(
+      (variant) => variant.is_active && variant.available_quantity > 0,
+    );
+    if (activeVariants.length !== 1) {
+      setNotice('Выберите размер в карточке товара.');
+      navigate(`/product/${relatedProduct.id}`);
+      return;
+    }
+
+    try {
+      await addCartItem(relatedProduct.id, activeVariants[0].id, 1);
+      window.dispatchEvent(new Event('miniapp:cart-updated'));
+      setNotice('Товар добавлен в корзину.');
+    } catch (actionError) {
+      setNotice(toApiErrorMessage(actionError));
+    }
+  }
+
   async function submitReview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!product || !reviewText.trim()) return;
@@ -220,7 +244,7 @@ export function ProductDetailPage() {
     <div className="page page--detail">
       <TopBar
         title="Товар"
-        onBack={() => window.history.length > 1 ? window.history.back() : navigate('/main')}
+        onBack={() => goBack()}
         right={
           <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" onClick={() => void toggleFavorite()}>
             {favorite ? '♥' : '♡'}
@@ -286,7 +310,11 @@ export function ProductDetailPage() {
           <h2>Похожие товары</h2>
           <div className="related-products-carousel">
             {product.related_products.map((relatedProduct) => (
-              <ProductCard key={relatedProduct.id} product={relatedProduct} />
+              <ProductCard
+                key={relatedProduct.id}
+                product={relatedProduct}
+                onAddToCart={addRelatedProductToCart}
+              />
             ))}
           </div>
         </section>

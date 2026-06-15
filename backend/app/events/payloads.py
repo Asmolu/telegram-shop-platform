@@ -14,6 +14,9 @@ def order_created_payload(order: Order) -> dict[str, object]:
         "order_id": order.id,
         "order_number": order.order_number,
         "status": order.status.value,
+        "payment_status": (
+            order.manual_payment.status.value if order.manual_payment is not None else None
+        ),
         "created_at": _datetime(order.created_at),
         "user_id": order.user_id,
         "customer": _customer_payload(order),

@@ -20,6 +20,12 @@ from urllib.parse import urlencode
 
 import httpx
 
+from app.common.labels import (
+    backup_restore_status_label,
+    backup_retention_label,
+    backup_status_label,
+)
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - production runs on Linux
@@ -1221,21 +1227,30 @@ def upload_backup_archive(
 
 
 def build_notification_message(result: BackupRunResult) -> str:
+    is_success = result.status == "success"
     lines = [
-        "Telegram Shop Platform backup",
-        f"backup_id: {result.backup_id}",
-        f"environment: {result.environment}",
-        f"status: {result.status}",
-        f"restore_verification: {result.restore_verification_status}",
-        f"remote_path: {result.remote_path or 'not_available'}",
-        f"archive_size: {format_bytes(result.archive_size)}",
-        f"local_retention: {result.local_retention_result}",
-        f"remote_retention: {result.remote_retention_result}",
+        (
+            "✅ Резервная копия Telegram Shop Platform создана"
+            if is_success
+            else "❌ Ошибка резервного копирования Telegram Shop Platform"
+        ),
+        "",
+        f"ID копии: {result.backup_id}",
+        f"Среда: {result.environment}",
+        f"Статус: {backup_status_label(result.status)}",
+        (
+            "Проверка восстановления: "
+            f"{backup_restore_status_label(result.restore_verification_status)}"
+        ),
+        f"Файл в Yandex Disk: {result.remote_path or 'не загружен'}",
+        f"Размер архива: {format_bytes(result.archive_size)}",
+        f"Локальная очистка: {backup_retention_label(result.local_retention_result)}",
+        f"Удалённая очистка: {backup_retention_label(result.remote_retention_result)}",
     ]
     if result.failed_step:
-        lines.append(f"failed_step: {result.failed_step}")
+        lines.append(f"Этап ошибки: {result.failed_step}")
     if result.error:
-        lines.append(f"error: {sanitize_text(result.error, configured_secret_values())}")
+        lines.append(f"Ошибка: {sanitize_text(result.error, configured_secret_values())}")
     return sanitize_text("\n".join(lines), configured_secret_values())
 
 

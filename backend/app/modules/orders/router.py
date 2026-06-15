@@ -1,12 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
 from app.db.models import OrderStatus, User, UserRole
 from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.audit.service import AuditService
+from app.modules.customer_notifications.schemas import CustomerOrderMessageRead
+from app.modules.customer_notifications.service import SellerCustomerOrderMessageService
 from app.modules.orders.schemas import (
     OrderCheckoutCreate,
     OrderList,
@@ -22,6 +24,15 @@ def get_orders_service(session: Annotated[AsyncSession, Depends(get_db_session)]
     return OrdersService(
         session,
         analytics_tracker=IsolatedAnalyticsTracker(),
+        audit_service=AuditService(session),
+    )
+
+
+def get_seller_customer_message_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> SellerCustomerOrderMessageService:
+    return SellerCustomerOrderMessageService(
+        session,
         audit_service=AuditService(session),
     )
 
@@ -81,6 +92,28 @@ async def update_order_status(
     service: Annotated[OrdersService, Depends(get_orders_service)],
 ) -> OrderRead:
     return await service.update_order_status(order_id, payload, actor_user_id=current_user.id)
+
+
+@router.post(
+    "/admin/{order_id}/customer-message",
+    response_model=CustomerOrderMessageRead,
+)
+async def send_order_customer_message(
+    order_id: int,
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[
+        SellerCustomerOrderMessageService,
+        Depends(get_seller_customer_message_service),
+    ],
+    text: Annotated[str | None, Form()] = None,
+    photo: Annotated[UploadFile | None, File()] = None,
+) -> CustomerOrderMessageRead:
+    return await service.send(
+        order_id=order_id,
+        actor_user_id=current_user.id,
+        text=text,
+        photo=photo,
+    )
 
 
 @router.get("/{order_id}", response_model=OrderRead)

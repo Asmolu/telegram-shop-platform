@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+from decimal import Decimal
+from types import SimpleNamespace
 from xml.etree import ElementTree
 
 import pytest
@@ -76,6 +78,32 @@ class FakeSellerBotRepository:
         if user_id == self.user.id:
             return self.user
         return None
+
+    async def list_active_orders(self, *, limit: int):
+        assert limit == 10
+        item = SimpleNamespace(
+            product_name="Футболка",
+            variant_size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+            variant_size="M",
+            variant_color="Green",
+            variant_sku="TEE-M-G",
+            quantity=2,
+            unit_price=Decimal("700.00"),
+            subtotal=Decimal("1400.00"),
+        )
+        order = SimpleNamespace(
+            id=10,
+            order_number="ORD-10",
+            status="PROCESSING",
+            delivery_method="CDEK",
+            contact_name="Иван",
+            total_amount=Decimal("1400.00"),
+            created_at=_now(),
+            user=SimpleNamespace(username="buyer", first_name="Иван", last_name=None),
+            manual_payment=SimpleNamespace(status="SUBMITTED"),
+            items=[item],
+        )
+        return [order], 1
 
 
 class FakeAuditService:
@@ -329,6 +357,28 @@ async def test_sellers_command_rejects_outside_seller_group(
 
     with pytest.raises(AppError, match="seller group"):
         await service.format_sellers_command(chat_id=100)
+
+
+@pytest.mark.asyncio
+async def test_active_orders_command_is_russian_and_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    messages = await service.format_active_orders_command(chat_id=-100)
+
+    assert len(messages) == 1
+    message = messages[0]
+    assert "📋 Активные заказы: 1" in message
+    assert "ORD-10 (ID 10)" in message
+    assert "Статус заказа: В обработке" in message
+    assert "Статус оплаты: Оплата на проверке" in message
+    assert "Доставка: СДЭК" in message
+    assert "Клиент: @buyer, Иван" in message
+    assert "2 × 700 ₽ = 1 400 ₽" in message
+    assert "https://seller.tsplatform.ru/orders?order=10" in message
+    assert len(message) <= 4096
 
 
 @pytest.mark.asyncio

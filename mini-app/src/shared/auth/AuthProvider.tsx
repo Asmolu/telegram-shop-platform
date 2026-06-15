@@ -94,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let cancelled = false;
     let unsubscribeTheme: (() => void) | undefined;
+    let unsubscribeViewport: (() => void) | undefined;
 
     async function bootstrap() {
       await waitForTelegramWebApp();
@@ -101,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      initTelegramApp();
+      unsubscribeViewport = initTelegramApp();
       applyTelegramTheme();
       unsubscribeTheme = subscribeTelegramThemeChanges(applyTelegramTheme);
       setTelegramUser(getTelegramUser());
@@ -139,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
       unsubscribeTheme?.();
+      unsubscribeViewport?.();
     };
   }, [runTelegramAuth]);
 

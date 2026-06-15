@@ -174,6 +174,8 @@ In the seller group, Bot 2 also supports `/sellers`,
 `/block_seller <Seller ID>`, and `/unblock_seller <Seller ID>` for seller
 visibility and safe deactivation. `/sellers` shows `Seller ID for commands`;
 use that internal ID, not the Telegram user id or chat id.
+`/active_orders` returns up to ten non-final orders with Russian status labels,
+customer, delivery, item snapshots, totals, and Seller Panel links.
 
 Bot 2 product creation uses one strict, stateless photo-caption flow. Send one
 photo with `/new_product`, Russian field labels, `Тип размеров: одежда` or
@@ -211,6 +213,8 @@ and uses:
   status listing
 - `GET /api/v1/customer-notifications/service-deliveries` for SELLER/ADMIN
   read-only service delivery attempt listing
+- `POST /api/v1/orders/admin/{order_id}/customer-message` for SELLER/ADMIN
+  text and/or JPEG, PNG, or WebP delivery to the order customer through Bot 1
 - `GET/POST/PATCH /api/v1/customer-notifications/templates` for SELLER/ADMIN
   template management
 - `GET/POST/PATCH /api/v1/customer-notifications/campaigns` plus
@@ -226,6 +230,9 @@ Customer Notifications area for recipients, templates, campaigns, and delivery
 reports. Order service notifications and campaign sends use
 `TELEGRAM_CUSTOMER_BOT_TOKEN`; customer campaigns must not use
 `TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBAPP_BOT_TOKEN`.
+Seller-to-customer order messages use the same Bot 1 subscription and delivery
+audit path. Images are validated up to 5 MB and sent directly to Telegram
+without storing a second uploaded copy.
 
 Phase 2 deliberately keeps recipient exports, arbitrary database field
 interpolation, non-plain Telegram parse modes, and a separate worker process out
@@ -253,6 +260,9 @@ buttons when configured; Bot 1 is used only for optional customer payment
 notifications. The backend lifespan expiration worker is controlled by
 `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED` and
 `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS`.
+The Bot 2 review message chat/message IDs are stored on the manual payment.
+Seller Panel and Bot 2 approve/reject actions edit that message to remove stale
+buttons and show the final result; if editing fails, Bot 2 sends a follow-up.
 
 ## Production hardening
 

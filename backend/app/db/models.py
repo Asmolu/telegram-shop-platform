@@ -1101,6 +1101,8 @@ class ManualPayment(Base):
         index=True,
     )
     receipt_image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    seller_telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    seller_telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(

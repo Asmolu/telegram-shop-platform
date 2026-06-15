@@ -126,7 +126,30 @@ def test_telegram_notification_sanitizes_known_secret_env_values(
     assert "https://" not in message
     assert ".env.production" not in message
     assert "<redacted>" in message
-    assert "failed_step: yandex_upload" in message
+    assert "Этап ошибки: yandex_upload" in message
+    assert "❌ Ошибка резервного копирования" in message
+
+
+def test_successful_telegram_notification_is_russian() -> None:
+    result = BackupRunResult(
+        backup_id="telegram-shop-prod-20260615-060011",
+        environment="production",
+        status="success",
+        restore_verification_status="passed",
+        remote_path="/TelegramShopPlatform/storage/backup.tar.gz",
+        archive_size=108_527_616,
+        local_retention_result="deleted 1 local archive(s)",
+        remote_retention_result="deleted 1 remote archive(s)",
+    )
+
+    message = build_notification_message(result)
+
+    assert "✅ Резервная копия Telegram Shop Platform создана" in message
+    assert "Статус: успешно" in message
+    assert "Проверка восстановления: пройдена" in message
+    assert "Размер архива: 103.5 MiB" in message
+    assert "Локальная очистка: удалено 1 архив(ов)" in message
+    assert "Удалённая очистка: удалено 1 архив(ов)" in message
 
 
 def test_config_validation_requires_restore_verification_and_policy_values() -> None:
@@ -324,7 +347,7 @@ def test_yandex_timeout_uses_bounded_timeout_and_skips_retention(
     assert results[-1].local_retention_result == "not_run"
     assert results[-1].remote_retention_result == "not_run"
     assert "timed out" in captured.err
-    assert "failed_step: yandex_upload" in captured.err
+    assert "Этап ошибки: yandex_upload" in captured.err
     assert http_client.upload_attempts == 3
     assert all(timeout.connect == 20.0 for timeout in http_client.timeouts)
     assert all(timeout.read == 120.0 for timeout in http_client.timeouts)

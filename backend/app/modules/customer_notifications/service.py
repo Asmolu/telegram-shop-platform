@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import status
+from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.labels import order_status_label
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
@@ -37,11 +38,13 @@ from app.events.names import (
     ORDER_SHIPPED_CUSTOMER,
     ORDER_STATUS_CHANGED,
     ORDER_STATUS_CHANGED_CUSTOMER,
+    SELLER_CUSTOMER_MESSAGE,
 )
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.customer_notifications.repository import CustomerNotificationsRepository
 from app.modules.customer_notifications.schemas import (
     CustomerBotWebhookResponse,
+    CustomerOrderMessageRead,
     CustomerServiceNotificationDeliveryList,
     CustomerServiceNotificationDeliveryRead,
     CustomerSubscriptionAdminRead,
@@ -50,8 +53,10 @@ from app.modules.customer_notifications.schemas import (
     CustomerSubscriptionStartLink,
     CustomerSubscriptionUpdate,
 )
+from app.modules.orders.repository import OrdersRepository
 from app.modules.telegram.schemas import TelegramCallbackQuery, TelegramMessage, TelegramUpdate
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
+from app.modules.uploads.service import UploadsService
 from app.modules.users.repository import UsersRepository
 
 logger = logging.getLogger(__name__)
@@ -97,6 +102,265 @@ class CustomerTelegramSender:
 
     async def send_message(self, chat_id: int, message: str) -> int | None:
         return await self.telegram_service.send_message(str(chat_id), message)
+
+    async def send_photo(
+        self,
+        chat_id: int,
+        photo: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+    ) -> int | None:
+        return await self.telegram_service.send_photo_bytes(
+            str(chat_id),
+            photo,
+            filename=filename,
+            mime_type=mime_type,
+            caption=caption,
+        )
+
+
+class SellerCustomerOrderMessageService:
+    """Seller/admin delivery of an order-specific Bot 1 message."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        repository: CustomerNotificationsRepository | None = None,
+        orders_repository: OrdersRepository | None = None,
+        sender: CustomerTelegramSender | None = None,
+        uploads_service: UploadsService | None = None,
+        audit_service: AuditService | NoopAuditService | None = None,
+        now_factory: Any | None = None,
+    ) -> None:
+        self.session = session
+        self.repository = repository or CustomerNotificationsRepository(session)
+        self.orders_repository = orders_repository or OrdersRepository(session)
+        self.sender = sender or CustomerTelegramSender()
+        self.uploads_service = uploads_service or UploadsService(session)
+        self.audit_service = audit_service or AuditService(session)
+        self.now_factory = now_factory or (lambda: datetime.now(UTC))
+
+    async def send(
+        self,
+        *,
+        order_id: int,
+        actor_user_id: int,
+        text: str | None,
+        photo: UploadFile | None,
+    ) -> CustomerOrderMessageRead:
+        clean_text = text.strip() if text else None
+        if not clean_text and photo is None:
+            raise AppError(
+                "Введите текст или выберите фотографию",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        if photo is None and clean_text and len(clean_text) > 4096:
+            raise AppError(
+                "Текст сообщения не должен превышать 4096 символов",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        if photo is not None and clean_text and len(clean_text) > 1024:
+            raise AppError(
+                "Подпись к фотографии не должна превышать 1024 символа",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+
+        order = await self.orders_repository.get_by_id(order_id)
+        if order is None:
+            raise AppError("Заказ не найден", status.HTTP_404_NOT_FOUND)
+        subscription = await self.repository.get_by_user_id(order.user_id)
+        unavailable = self._unavailable_reason(subscription, user_id=order.user_id)
+
+        delivery = CustomerServiceNotificationDelivery(
+            user_id=order.user_id,
+            order_id=order.id,
+            subscription_id=subscription.id if subscription is not None else None,
+            event_name=SELLER_CUSTOMER_MESSAGE,
+            channel=NotificationChannel.TELEGRAM,
+            status=CustomerServiceNotificationDeliveryStatus.PENDING,
+        )
+        if unavailable is not None:
+            error_code, error_message = unavailable
+            delivery.status = CustomerServiceNotificationDeliveryStatus.SKIPPED
+            delivery.error_code = error_code
+            delivery.error_message = error_message
+            self.repository.add_delivery(delivery)
+            await self._flush_if_supported()
+            await self._audit(delivery, actor_user_id=actor_user_id)
+            await self._commit("Не удалось записать попытку отправки сообщения")
+            raise AppError(error_message, status.HTTP_409_CONFLICT)
+
+        validated_photo = None
+        if photo is not None:
+            validated_photo = await self.uploads_service.validate_and_read_image(photo)
+
+        self.repository.add_delivery(delivery)
+        await self._commit("Не удалось создать попытку отправки сообщения")
+
+        assert subscription is not None
+        assert subscription.telegram_chat_id is not None
+        try:
+            if validated_photo is not None:
+                telegram_message_id = await self.sender.send_photo(
+                    subscription.telegram_chat_id,
+                    validated_photo.content,
+                    filename=validated_photo.original_filename,
+                    mime_type=validated_photo.mime_type,
+                    caption=clean_text,
+                )
+            else:
+                assert clean_text is not None
+                telegram_message_id = await self.sender.send_message(
+                    subscription.telegram_chat_id,
+                    clean_text,
+                )
+        except TelegramDeliveryError as exc:
+            self._mark_failed(delivery, subscription, exc)
+            await self._audit(delivery, actor_user_id=actor_user_id)
+            await self._commit("Не удалось сохранить ошибку отправки сообщения")
+            raise AppError(
+                self._seller_error_message(delivery),
+                status.HTTP_502_BAD_GATEWAY,
+            ) from exc
+
+        delivery.status = CustomerServiceNotificationDeliveryStatus.SENT
+        delivery.telegram_message_id = telegram_message_id
+        delivery.error_code = None
+        delivery.error_message = None
+        delivery.sent_at = self.now_factory()
+        subscription.last_delivery_error = None
+        await self._audit(delivery, actor_user_id=actor_user_id)
+        await self._commit("Не удалось сохранить результат отправки сообщения")
+        return CustomerOrderMessageRead(
+            order_id=order.id,
+            delivery_id=delivery.id,
+            telegram_message_id=telegram_message_id,
+            sent_text=bool(clean_text),
+            sent_photo=validated_photo is not None,
+        )
+
+    def _unavailable_reason(
+        self,
+        subscription: CustomerTelegramSubscription | None,
+        *,
+        user_id: int,
+    ) -> tuple[str, str] | None:
+        if subscription is None or subscription.user_id != user_id:
+            return (
+                "subscription_missing",
+                "Покупатель не открыл Bot 1. Отправка сообщения недоступна.",
+            )
+        if subscription.blocked_at is not None:
+            return ("subscription_blocked", "Покупатель заблокировал Bot 1.")
+        if (
+            not subscription.has_chat
+            or subscription.telegram_chat_id is None
+            or subscription.chat_type != PRIVATE_CHAT_TYPE
+        ):
+            return (
+                "chat_unavailable",
+                "У покупателя нет активного личного чата с Bot 1.",
+            )
+        if not subscription.service_opt_in:
+            return (
+                "service_opt_out",
+                "Покупатель отключил сервисные сообщения Bot 1.",
+            )
+        return None
+
+    def _mark_failed(
+        self,
+        delivery: CustomerServiceNotificationDelivery,
+        subscription: CustomerTelegramSubscription,
+        error: TelegramDeliveryError,
+    ) -> None:
+        error_code = self._delivery_error_code(error)
+        delivery.status = (
+            CustomerServiceNotificationDeliveryStatus.BLOCKED
+            if error_code == "blocked"
+            else CustomerServiceNotificationDeliveryStatus.FAILED
+        )
+        delivery.error_code = error_code
+        delivery.error_message = self._sanitize_error_message(error)
+        delivery.retry_after_seconds = error.retry_after_seconds
+        if error_code == "blocked":
+            subscription.blocked_at = self.now_factory()
+            subscription.has_chat = False
+        subscription.last_delivery_error = delivery.error_message
+
+    def _delivery_error_code(self, error: TelegramDeliveryError) -> str:
+        message = str(error).lower()
+        if (
+            error.status_code == status.HTTP_403_FORBIDDEN
+            or str(error.error_code) == "403"
+            or "forbidden" in message
+            or "blocked" in message
+        ):
+            return "blocked"
+        if (
+            error.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+            or str(error.error_code) == "429"
+            or error.retry_after_seconds is not None
+        ):
+            return "rate_limited"
+        return "telegram_error"
+
+    def _sanitize_error_message(self, error: TelegramDeliveryError) -> str:
+        message = " ".join((str(error) or "Telegram delivery failed").split())
+        for secret in (settings.telegram_customer_bot_token, settings.telegram_bot_token):
+            if secret:
+                message = message.replace(secret, "[redacted]")
+        return message[:TELEGRAM_ERROR_MESSAGE_MAX_LENGTH]
+
+    def _seller_error_message(
+        self,
+        delivery: CustomerServiceNotificationDelivery,
+    ) -> str:
+        if delivery.error_code == "blocked":
+            return "Покупатель заблокировал Bot 1. Сообщение не отправлено."
+        if delivery.error_code == "rate_limited":
+            return "Telegram временно ограничил отправку. Повторите попытку позже."
+        return "Bot 1 не смог доставить сообщение. Повторите попытку позже."
+
+    async def _audit(
+        self,
+        delivery: CustomerServiceNotificationDelivery,
+        *,
+        actor_user_id: int,
+    ) -> None:
+        await self.audit_service.record_action(
+            actor_user_id=actor_user_id,
+            action=(
+                "seller_customer_message_sent"
+                if delivery.status == CustomerServiceNotificationDeliveryStatus.SENT
+                else "seller_customer_message_failed"
+            ),
+            entity_type="customer_service_notification_delivery",
+            entity_id=delivery.id,
+            after_data={
+                "order_id": delivery.order_id,
+                "user_id": delivery.user_id,
+                "status": delivery.status.value,
+                "error_code": delivery.error_code,
+            },
+            metadata={"bot": "customer_bot_1"},
+            commit=False,
+        )
+
+    async def _flush_if_supported(self) -> None:
+        flush = getattr(self.session, "flush", None)
+        if callable(flush):
+            await flush()
+
+    async def _commit(self, error_message: str) -> None:
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError(error_message, status.HTTP_409_CONFLICT) from exc
 
 
 class CustomerServiceNotificationDeliveryService:
@@ -399,7 +663,7 @@ class CustomerServiceNotificationDeliveryService:
         return (
             ORDER_STATUS_CHANGED_CUSTOMER,
             f"{ORDER_STATUS_CHANGED_CUSTOMER_MESSAGE}\n\n"
-            f"Статус заказа {order_label}: {new_status}.",
+            f"Статус заказа {order_label}: {order_status_label(new_status)}.",
         )
 
     def _order_label(self, payload: Mapping[str, object]) -> str:

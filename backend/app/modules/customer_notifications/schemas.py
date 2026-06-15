@@ -82,3 +82,12 @@ class CustomerBotWebhookResponse(BaseModel):
     ok: bool = True
     handled: bool
     result: str = Field(..., min_length=1)
+
+
+class CustomerOrderMessageRead(BaseModel):
+    ok: bool = True
+    order_id: int
+    delivery_id: int
+    telegram_message_id: int | None
+    sent_text: bool
+    sent_photo: bool

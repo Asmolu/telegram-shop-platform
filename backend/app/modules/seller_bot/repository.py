@@ -1,8 +1,16 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
-from app.db.models import SellerCredential, User, UserRole
+from app.db.models import (
+    Order,
+    OrderItem,
+    OrderStatus,
+    Product,
+    SellerCredential,
+    User,
+    UserRole,
+)
 
 
 class SellerBotRepository:
@@ -34,3 +42,23 @@ class SellerBotRepository:
             .where(User.id == user_id, User.role.in_((UserRole.SELLER, UserRole.ADMIN)))
         )
         return result.scalar_one_or_none()
+
+    async def list_active_orders(self, *, limit: int) -> tuple[list[Order], int]:
+        filters = (Order.status.notin_((OrderStatus.DELIVERED, OrderStatus.CANCELLED)),)
+        orders_result = await self.session.execute(
+            select(Order)
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.items)
+                .selectinload(OrderItem.product)
+                .selectinload(Product.images),
+                selectinload(Order.manual_payment),
+            )
+            .where(*filters)
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .limit(limit)
+        )
+        count_result = await self.session.execute(
+            select(func.count(Order.id)).where(*filters)
+        )
+        return list(orders_result.scalars().all()), count_result.scalar_one()

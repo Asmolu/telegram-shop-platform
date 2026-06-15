@@ -43,6 +43,13 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   const [rejectReason, setRejectReason] = useState('Деньги не поступили');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
+  const [messageOrder, setMessageOrder] = useState<Order | null>(null);
+  const [messageText, setMessageText] = useState('');
+  const [messagePhoto, setMessagePhoto] = useState<File | null>(null);
+  const [messageBusy, setMessageBusy] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageSuccess, setMessageSuccess] = useState<string | null>(null);
+  const [messageFileKey, setMessageFileKey] = useState(0);
   const [filters, setFilters] = useState<OrderFilters>(initialFilters);
   const [draftFilters, setDraftFilters] = useState<OrderFilters>(initialFilters);
   const [loading, setLoading] = useState(true);
@@ -218,6 +225,48 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     setActionError(
       `${formatRequestError(requestError)} ${recoveryMessage}`,
     );
+  }
+
+  function openCustomerMessage(order: Order) {
+    setMessageOrder(order);
+    setMessageText('');
+    setMessagePhoto(null);
+    setMessageError(null);
+    setMessageSuccess(null);
+    setMessageFileKey((current) => current + 1);
+  }
+
+  function closeCustomerMessage() {
+    if (messageBusy) return;
+    setMessageOrder(null);
+  }
+
+  async function sendCustomerMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!messageOrder) return;
+    if (!messageText.trim() && !messagePhoto) {
+      setMessageError('Введите текст или выберите фотографию.');
+      return;
+    }
+    if (messagePhoto && messagePhoto.size > 5 * 1024 * 1024) {
+      setMessageError('Фотография не должна превышать 5 МБ.');
+      return;
+    }
+
+    setMessageBusy(true);
+    setMessageError(null);
+    setMessageSuccess(null);
+    try {
+      await api.orders.sendCustomerMessage(messageOrder.id, messageText, messagePhoto);
+      setMessageSuccess('Сообщение отправлено покупателю через Bot 1.');
+      setMessageText('');
+      setMessagePhoto(null);
+      setMessageFileKey((current) => current + 1);
+    } catch (requestError) {
+      setMessageError(formatRequestError(requestError));
+    } finally {
+      setMessageBusy(false);
+    }
   }
 
   if (loading) return <LoadingState title={t('orders.loading')} />;
@@ -497,6 +546,13 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   <h2>{selectedOrder.order_number}</h2>
                   <p>{t('orders.created', { date: formatDate(selectedOrder.created_at, language) })}</p>
                 </div>
+                <button
+                  className="button button-secondary button-compact"
+                  type="button"
+                  onClick={() => openCustomerMessage(selectedOrder)}
+                >
+                  Отправить сообщение
+                </button>
               </div>
               <div className="order-status-summary">
                 <div>
@@ -638,6 +694,80 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
           )}
         </aside>
       </div>
+      {messageOrder ? (
+        <div
+          className="customer-message-modal"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCustomerMessage();
+          }}
+        >
+          <form
+            aria-labelledby="customer-message-title"
+            className="customer-message-modal__surface"
+            role="dialog"
+            onSubmit={sendCustomerMessage}
+          >
+            <div className="section-heading">
+              <div>
+                <h2 id="customer-message-title">Сообщение покупателю</h2>
+                <p>{messageOrder.order_number} · Bot 1</p>
+              </div>
+              <button
+                aria-label="Закрыть"
+                className="customer-message-modal__close"
+                disabled={messageBusy}
+                type="button"
+                onClick={closeCustomerMessage}
+              >
+                ×
+              </button>
+            </div>
+
+            <label>
+              <span>Текст</span>
+              <textarea
+                maxLength={messagePhoto ? 1024 : 4096}
+                rows={6}
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+              />
+            </label>
+
+            <label>
+              <span>Фотография</span>
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                key={messageFileKey}
+                type="file"
+                onChange={(event) => setMessagePhoto(event.target.files?.[0] ?? null)}
+              />
+              {messagePhoto ? <small>{messagePhoto.name}</small> : null}
+            </label>
+
+            {messageSuccess ? <div className="success-banner">{messageSuccess}</div> : null}
+            {messageError ? <div className="error-banner">{messageError}</div> : null}
+
+            <div className="form-actions">
+              <button
+                className="button button-secondary"
+                disabled={messageBusy}
+                type="button"
+                onClick={closeCustomerMessage}
+              >
+                Закрыть
+              </button>
+              <button
+                className="button button-primary"
+                disabled={messageBusy || (!messageText.trim() && !messagePhoto)}
+                type="submit"
+              >
+                {messageBusy ? 'Отправляем...' : 'Отправить'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
