@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { api, resolveMediaUrl } from '../../shared/api';
+import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   ManualPayment,
   ManualPaymentStatus,
@@ -47,35 +47,38 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   const [draftFilters, setDraftFilters] = useState<OrderFilters>(initialFilters);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  function loadOrders() {
-    setLoading(true);
+  async function loadOrders(showLoader = true) {
+    if (showLoader) setLoading(true);
     setError(null);
 
-    Promise.all([
-      api.orders.listAdmin({
+    try {
+      const [orderList, paymentList] = await Promise.all([
+        api.orders.listAdmin({
           limit: 100,
           offset: 0,
           search: filters.search,
           status: filters.status,
         }),
-      api.manualPayments.list(paymentFilter || undefined),
-    ])
-      .then(([orderList, paymentList]) => {
-        setOrders(orderList.items);
-        setPayments(paymentList.items);
-        const requestedPaymentId = Number(new URLSearchParams(window.location.search).get('payment'));
-        if (Number.isFinite(requestedPaymentId) && requestedPaymentId > 0) {
-          void selectPaymentDetails(requestedPaymentId);
-        }
-      })
-      .catch(setError)
-      .finally(() => setLoading(false));
+        api.manualPayments.list(paymentFilter || undefined),
+      ]);
+      setOrders(orderList.items);
+      setPayments(paymentList.items);
+      const requestedPaymentId = Number(new URLSearchParams(window.location.search).get('payment'));
+      if (Number.isFinite(requestedPaymentId) && requestedPaymentId > 0) {
+        void selectPaymentDetails(requestedPaymentId);
+      }
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    loadOrders();
+    void loadOrders();
   }, [filters, paymentFilter]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
@@ -89,13 +92,15 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
     }
 
     setNotice(null);
+    setActionError(null);
     try {
       const updated = await api.orders.updateStatus(order.id, status);
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setSelectedOrder((current) => (current?.id === updated.id ? updated : current));
       setNotice(t('orders.updated', { orderNumber: updated.order_number }));
     } catch (requestError) {
-      setError(requestError);
+      setActionError(formatRequestError(requestError));
+      await refreshOrder(order.id);
     }
   }
 
@@ -112,6 +117,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   async function selectPaymentDetails(paymentId: number) {
     setPaymentBusy(true);
     setError(null);
+    setActionError(null);
     try {
       const payment = await api.manualPayments.get(paymentId);
       setSelectedPayment(payment);
@@ -126,14 +132,14 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   async function approvePayment(payment: ManualPayment) {
     if (!window.confirm(`Подтвердить оплату заказа ${payment.order_number}?`)) return;
     setPaymentBusy(true);
-    setError(null);
+    setActionError(null);
+    setNotice(null);
     try {
       const updated = await api.manualPayments.approve(payment.id);
       updatePaymentState(updated);
       setNotice(`Оплата заказа ${updated.order_number} подтверждена.`);
-      loadOrders();
     } catch (requestError) {
-      setError(requestError);
+      await recoverPaymentMutation(payment, 'APPROVED', requestError);
     } finally {
       setPaymentBusy(false);
     }
@@ -142,22 +148,76 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
   async function rejectPayment(payment: ManualPayment) {
     if (!window.confirm(`Отклонить оплату заказа ${payment.order_number}?`)) return;
     setPaymentBusy(true);
-    setError(null);
+    setActionError(null);
+    setNotice(null);
     try {
       const updated = await api.manualPayments.reject(payment.id, rejectReason);
       updatePaymentState(updated);
       setNotice(`Оплата заказа ${updated.order_number} отклонена, резерв снят.`);
-      loadOrders();
     } catch (requestError) {
-      setError(requestError);
+      await recoverPaymentMutation(payment, 'REJECTED', requestError);
     } finally {
       setPaymentBusy(false);
     }
   }
 
   function updatePaymentState(updated: ManualPayment) {
-    setPayments((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setPayments((current) => {
+      if (paymentFilter && updated.status !== paymentFilter) {
+        return current.filter((item) => item.id !== updated.id);
+      }
+      return current.map((item) => (item.id === updated.id ? updated : item));
+    });
     setSelectedPayment(updated);
+    setOrders((current) => current.map((order) => updateOrderFromPayment(order, updated)));
+    setSelectedOrder((current) => (
+      current ? updateOrderFromPayment(current, updated) : current
+    ));
+  }
+
+  async function refreshOrder(orderId: number) {
+    try {
+      const refreshed = await api.orders.getAdmin(orderId);
+      setOrders((current) => current.map((order) => (
+        order.id === refreshed.id ? refreshed : order
+      )));
+      setSelectedOrder((current) => (
+        current?.id === refreshed.id ? refreshed : current
+      ));
+      return refreshed;
+    } catch {
+      return null;
+    }
+  }
+
+  async function recoverPaymentMutation(
+    payment: ManualPayment,
+    expectedStatus: ManualPaymentStatus,
+    requestError: unknown,
+  ) {
+    const [paymentResult, orderResult] = await Promise.allSettled([
+      api.manualPayments.get(payment.id),
+      refreshOrder(payment.order_id),
+    ]);
+    if (paymentResult.status === 'fulfilled') {
+      updatePaymentState(paymentResult.value);
+      if (paymentResult.value.status === expectedStatus) {
+        setActionError(null);
+        setNotice(
+          expectedStatus === 'APPROVED'
+            ? `Оплата заказа ${paymentResult.value.order_number} подтверждена.`
+            : `Оплата заказа ${paymentResult.value.order_number} отклонена, резерв снят.`,
+        );
+        return;
+      }
+    }
+    const recoveryMessage = paymentResult.status === 'fulfilled'
+      || (orderResult.status === 'fulfilled' && orderResult.value !== null)
+      ? 'Состояние оплаты и заказа обновлено повторным запросом.'
+      : 'Не удалось повторно загрузить состояние оплаты и заказа.';
+    setActionError(
+      `${formatRequestError(requestError)} ${recoveryMessage}`,
+    );
   }
 
   if (loading) return <LoadingState title={t('orders.loading')} />;
@@ -205,6 +265,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
       </div>
 
       {notice ? <div className="success-banner">{notice}</div> : null}
+      {actionError ? <div className="error-banner">{actionError}</div> : null}
 
       <section className="panel payment-review-panel">
         <div className="section-heading">
@@ -261,9 +322,20 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     <h3>{selectedPayment.order_number}</h3>
                     <p>{paymentStatusLabel(selectedPayment.status)}</p>
                   </div>
-                  <StatusBadge status={selectedPayment.status} />
+                  <StatusBadge
+                    status={selectedPayment.status}
+                    label={paymentStatusLabel(selectedPayment.status)}
+                  />
                 </div>
                 <dl className="details-list payment-details-list">
+                  <div>
+                    <dt>Статус оплаты</dt>
+                    <dd><StatusBadge status={selectedPayment.status} label={paymentStatusLabel(selectedPayment.status)} /></dd>
+                  </div>
+                  <div>
+                    <dt>Статус заказа</dt>
+                    <dd><StatusBadge status={selectedPayment.order_status} /></dd>
+                  </div>
                   <div><dt>Клиент</dt><dd>{selectedPayment.customer_name}</dd></div>
                   <div><dt>Телефон клиента</dt><dd>{selectedPayment.customer_phone}</dd></div>
                   <div><dt>Сумма</dt><dd>{formatMoney(selectedPayment.amount, language)}</dd></div>
@@ -340,7 +412,8 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                 <th>{t('orders.contact')}</th>
                 <th>{t('common.total')}</th>
                 <th>{t('orders.promo')}</th>
-                <th>{t('common.status')}</th>
+                <th>Статус оплаты</th>
+                <th>Статус заказа</th>
                 <th>{t('common.date')}</th>
                 <th>{t('common.actions')}</th>
               </tr>
@@ -348,7 +421,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
             <tbody>
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className="empty-table">{t('orders.empty')}</div>
                   </td>
                 </tr>
@@ -370,10 +443,15 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     <td>{formatMoney(order.total_amount, language)}</td>
                     <td>{order.promo_code_code ?? t('common.none')}</td>
                     <td>
-                      <StatusBadge
-                        status={order.manual_payment?.status ?? order.status}
-                        label={order.manual_payment ? paymentStatusLabel(order.manual_payment.status) : undefined}
-                      />
+                      {order.manual_payment ? (
+                        <StatusBadge
+                          status={order.manual_payment.status}
+                          label={paymentStatusLabel(order.manual_payment.status)}
+                        />
+                      ) : <span className="muted-inline">—</span>}
+                    </td>
+                    <td>
+                      <StatusBadge status={order.status} />
                     </td>
                     <td>{formatDate(order.created_at, language)}</td>
                     <td>
@@ -417,10 +495,21 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   <h2>{selectedOrder.order_number}</h2>
                   <p>{t('orders.created', { date: formatDate(selectedOrder.created_at, language) })}</p>
                 </div>
-                <StatusBadge
-                  status={selectedOrder.manual_payment?.status ?? selectedOrder.status}
-                  label={selectedOrder.manual_payment ? paymentStatusLabel(selectedOrder.manual_payment.status) : undefined}
-                />
+              </div>
+              <div className="order-status-summary">
+                <div>
+                  <span>Статус оплаты</span>
+                  {selectedOrder.manual_payment ? (
+                    <StatusBadge
+                      status={selectedOrder.manual_payment.status}
+                      label={paymentStatusLabel(selectedOrder.manual_payment.status)}
+                    />
+                  ) : <span className="muted-inline">—</span>}
+                </div>
+                <div>
+                  <span>Статус заказа</span>
+                  <StatusBadge status={selectedOrder.status} />
+                </div>
               </div>
               <dl className="details-list">
                 <div>
@@ -561,4 +650,26 @@ function paymentStatusLabel(status: ManualPaymentStatus): string {
     EXPIRED: 'Истекло время оплаты',
     CANCELLED: 'Отменено',
   }[status];
+}
+
+function updateOrderFromPayment(order: Order, payment: ManualPayment): Order {
+  if (order.id !== payment.order_id) return order;
+  return {
+    ...order,
+    status: payment.order_status,
+    manual_payment: {
+      id: payment.id,
+      status: payment.status,
+      expires_at: payment.expires_at,
+      submitted_at: payment.submitted_at,
+      receipt_image_path: payment.receipt_image_path,
+    },
+  };
+}
+
+function formatRequestError(error: unknown): string {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+  return 'Запрос не выполнен. Повторите попытку.';
 }

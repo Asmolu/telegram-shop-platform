@@ -53,10 +53,13 @@ class ManualPaymentsRepository:
         payment_id: int,
         *,
         for_update: bool = False,
+        populate_existing: bool = False,
     ) -> ManualPayment | None:
         query = self._payment_query().where(ManualPayment.id == payment_id)
         if for_update:
             query = query.with_for_update()
+        if populate_existing:
+            query = query.execution_options(populate_existing=True)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 

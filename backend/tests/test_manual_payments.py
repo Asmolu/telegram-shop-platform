@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from app.events.names import (
 )
 from app.main import create_app
 from app.modules.manual_payments.phone import normalize_russian_phone
+from app.modules.manual_payments.router import get_manual_payments_service
 from app.modules.manual_payments.schemas import SellerPaymentSettingsUpdate
 from app.modules.manual_payments.service import ManualPaymentEventPublisher, ManualPaymentsService
 
@@ -39,9 +41,12 @@ class DummySession:
     def __init__(self) -> None:
         self.commit_count = 0
         self.rollback_count = 0
+        self.on_commit: Callable[[], None] | None = None
 
     async def commit(self) -> None:
         self.commit_count += 1
+        if self.on_commit is not None:
+            self.on_commit()
 
     async def rollback(self) -> None:
         self.rollback_count += 1
@@ -57,6 +62,7 @@ class FakeRepository:
         self.variants: dict[int, ProductVariant] = {}
         self.users: dict[int, User] = {}
         self.next_payment_id = 1
+        self.populate_existing_ids: list[int] = []
 
     async def get_settings(self) -> SellerPaymentSettings | None:
         return self.settings
@@ -82,9 +88,14 @@ class FakeRepository:
         payment_id: int,
         *,
         for_update: bool = False,
+        populate_existing: bool = False,
     ) -> ManualPayment | None:
         del for_update
-        return self.payments.get(payment_id)
+        payment = self.payments.get(payment_id)
+        if payment is not None and populate_existing:
+            self.populate_existing_ids.append(payment_id)
+            payment.updated_at = NOW + timedelta(seconds=len(self.populate_existing_ids))
+        return payment
 
     async def list_all(self, **_: object) -> list[ManualPayment]:
         return list(self.payments.values())
@@ -131,7 +142,16 @@ class FakeEventPublisher:
 
 
 class FakeTelegramService:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        bot_token: str | None = "seller-bot-token",
+        seller_chat_id: str | None = "-100",
+        fail: bool = False,
+    ) -> None:
+        self.bot_token = bot_token
+        self.seller_chat_id = seller_chat_id
+        self.fail = fail
         self.messages: list[tuple[str, str, dict[str, object] | None]] = []
 
     async def send_message(
@@ -141,6 +161,8 @@ class FakeTelegramService:
         *,
         reply_markup: dict[str, object] | None = None,
     ) -> None:
+        if self.fail:
+            raise RuntimeError("Telegram unavailable")
         self.messages.append((chat_id, message, reply_markup))
 
 
@@ -262,6 +284,7 @@ async def test_submit_is_owner_only_and_idempotent() -> None:
     assert first.status == ManualPaymentStatus.SUBMITTED
     assert second.submitted_at == first.submitted_at
     assert session.commit_count == 1
+    assert repository.populate_existing_ids == [1]
     assert [event[0] for event in events.events] == [MANUAL_PAYMENT_SUBMITTED]
 
 
@@ -284,6 +307,7 @@ async def test_approve_moves_order_to_processing_without_releasing_stock() -> No
     result = await service.approve(1, actor_user_id=9)
 
     assert result.status == ManualPaymentStatus.APPROVED
+    assert result.order_status == OrderStatus.PROCESSING
     assert payment.order.status == OrderStatus.PROCESSING
     assert variant.stock_quantity == 3
     assert payment.stock_released_at is None
@@ -306,6 +330,7 @@ async def test_reject_releases_stock_once_and_is_idempotent() -> None:
     assert variant.stock_quantity == 5
     assert payment.stock_released_at == NOW
     assert session.commit_count == 1
+    assert repository.populate_existing_ids == [1]
     assert [event[0] for event in events.events] == [MANUAL_PAYMENT_REJECTED]
 
 
@@ -344,6 +369,7 @@ async def test_expiration_releases_stock_once_and_skips_approved_payment(
     assert payment.order.status == OrderStatus.CANCELLED
     assert variant.stock_quantity == 5
     assert session.commit_count == 1
+    assert repository.populate_existing_ids == [1]
     assert [event[0] for event in events.events] == [MANUAL_PAYMENT_EXPIRED]
 
     payment.status = ManualPaymentStatus.APPROVED
@@ -375,6 +401,7 @@ async def test_receipt_upload_replaces_old_file_without_submitting() -> None:
 
     assert result.status == ManualPaymentStatus.PENDING
     assert result.receipt_image_path == "payment_receipts/receipt.png"
+    assert repository.populate_existing_ids == [1]
     assert storage.deleted == ["payment_receipts/old.png"]
 
 
@@ -399,6 +426,58 @@ async def test_notification_failure_does_not_rollback_payment_state() -> None:
     assert repository.payments[1].status == ManualPaymentStatus.SUBMITTED
     assert session.commit_count == 1
     assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_submit_attempts_configured_seller_bot_notification() -> None:
+    service, _, _, _, _, _ = _service(with_payment=True)
+    telegram = FakeTelegramService()
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    result = await service.submit(order_id=10, user_id=1)
+
+    assert result.status == ManualPaymentStatus.SUBMITTED
+    assert len(telegram.messages) == 1
+    assert "ORD-00000010" in telegram.messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_send_failure_does_not_rollback_submit() -> None:
+    service, repository, session, _, _, _ = _service(with_payment=True)
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=FakeTelegramService(fail=True),
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    result = await service.submit(order_id=10, user_id=1)
+
+    assert result.status == ManualPaymentStatus.SUBMITTED
+    assert repository.payments[1].status == ManualPaymentStatus.SUBMITTED
+    assert session.commit_count == 1
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_seller_bot_configuration_does_not_break_submit() -> None:
+    service, repository, session, _, _, _ = _service(with_payment=True)
+    telegram = FakeTelegramService(bot_token=None, seller_chat_id=None)
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+
+    result = await service.submit(order_id=10, user_id=1)
+
+    assert result.status == ManualPaymentStatus.SUBMITTED
+    assert repository.payments[1].status == ManualPaymentStatus.SUBMITTED
+    assert telegram.messages == []
+    assert session.rollback_count == 0
 
 
 @pytest.mark.asyncio
@@ -492,6 +571,50 @@ def test_seller_payment_routes_reject_regular_user() -> None:
     assert response.status_code == 403
 
 
+def test_manual_payment_mutation_routes_return_fresh_success_responses() -> None:
+    service, _, _, _, _, _ = _service(with_payment=True)
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_manual_payments_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            receipt_response = client.post(
+                "/api/v1/orders/10/payment/receipt",
+                files={"file": ("receipt.png", b"image", "image/png")},
+            )
+            submit_response = client.post("/api/v1/orders/10/payment/submit")
+            approve_response = client.post("/api/v1/seller/payments/1/approve")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert receipt_response.status_code == 200
+    assert receipt_response.json()["receipt_image_path"] == "payment_receipts/receipt.png"
+    assert submit_response.status_code == 200
+    assert submit_response.json()["status"] == "SUBMITTED"
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "APPROVED"
+    assert approve_response.json()["order_status"] == "PROCESSING"
+
+
+def test_manual_payment_reject_route_returns_fresh_success_response() -> None:
+    service, _, _, _, _, _ = _service(with_payment=True)
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_manual_payments_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/seller/payments/1/reject",
+                json={"reject_reason": "No payment"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"
+    assert response.json()["order_status"] == "CANCELLED"
+
+
 def _service(
     *,
     with_settings: bool = False,
@@ -522,6 +645,12 @@ def _service(
     )
     repository = FakeRepository()
     service.repository = repository
+
+    def expire_payment_updated_at() -> None:
+        for payment in repository.payments.values():
+            payment.__dict__.pop("updated_at", None)
+
+    session.on_commit = expire_payment_updated_at
     if with_settings or with_payment:
         repository.settings = _settings()
     if with_payment:
@@ -548,14 +677,14 @@ def _settings() -> SellerPaymentSettings:
     )
 
 
-def _user() -> User:
+def _user(role: UserRole = UserRole.USER) -> User:
     return User(
         id=1,
         telegram_id=100,
         username="customer",
         first_name="Ivan",
         last_name=None,
-        role=UserRole.USER,
+        role=role,
         is_active=True,
         created_at=NOW,
         updated_at=NOW,

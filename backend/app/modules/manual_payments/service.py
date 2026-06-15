@@ -83,6 +83,7 @@ class ManualPaymentEventPublisher:
 
     async def _notify_seller(self, payload: Mapping[str, object]) -> None:
         payment_id = int(payload["payment_id"])
+        order_id = int(payload["order_id"])
         expires_at = datetime.fromisoformat(str(payload["expires_at"]))
         amount = Decimal(str(payload["amount"]))
         amount_label = f"{amount:,.2f}".replace(",", " ").replace(".00", "")
@@ -114,12 +115,26 @@ class ManualPaymentEventPublisher:
                 ]
             ]
         }
-        if not settings.telegram_seller_chat_id:
-            raise RuntimeError("Telegram seller chat is not configured")
-        await self.telegram_service.send_message(
+        bot_token = getattr(self.telegram_service, "bot_token", settings.telegram_bot_token)
+        seller_chat_id = getattr(
+            self.telegram_service,
+            "seller_chat_id",
             settings.telegram_seller_chat_id,
+        )
+        if not bot_token or not seller_chat_id:
+            return
+        await self.telegram_service.send_message(
+            seller_chat_id,
             message,
             reply_markup=reply_markup,
+        )
+        logger.info(
+            "manual_payment.seller_bot_notification_sent",
+            extra={
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "status": str(payload.get("status", ManualPaymentStatus.SUBMITTED.value)),
+            },
         )
 
 
@@ -252,7 +267,10 @@ class ManualPaymentsService:
 
         now = self._now()
         if await self._expire_if_due(payment, now=now):
+            payment_id = payment.id
             await self._commit("Payment expiration failed")
+            payment = await self._reload_payment(payment_id)
+            self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
             await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
             raise AppError("Payment has expired", status.HTTP_409_CONFLICT)
         if payment.status == ManualPaymentStatus.SUBMITTED:
@@ -262,7 +280,10 @@ class ManualPaymentsService:
 
         payment.status = ManualPaymentStatus.SUBMITTED
         payment.submitted_at = payment.submitted_at or now
+        payment_id = payment.id
         await self._commit("Payment submission failed")
+        payment = await self._reload_payment(payment_id)
+        self._log_persisted(MANUAL_PAYMENT_SUBMITTED, payment)
         response = self._payment_response(payment, server_now=now)
         await self._emit(MANUAL_PAYMENT_SUBMITTED, payment)
         return response
@@ -284,7 +305,10 @@ class ManualPaymentsService:
 
         now = self._now()
         if await self._expire_if_due(payment, now=now):
+            payment_id = payment.id
             await self._commit("Payment expiration failed")
+            payment = await self._reload_payment(payment_id)
+            self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
             await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
             raise AppError("Payment has expired", status.HTTP_409_CONFLICT)
         if payment.status not in ACTIVE_PAYMENT_STATUSES:
@@ -298,6 +322,7 @@ class ManualPaymentsService:
         )
         old_path = payment.receipt_image_path
         payment.receipt_image_path = new_path
+        payment_id = payment.id
         try:
             await self._commit("Payment receipt update failed")
         except Exception:
@@ -305,6 +330,8 @@ class ManualPaymentsService:
             raise
         if old_path and old_path != new_path:
             self.storage.delete(old_path)
+        payment = await self._reload_payment(payment_id)
+        self._log_persisted("manual_payment.receipt_uploaded", payment)
         return self._payment_response(payment, server_now=now)
 
     async def list_for_seller(
@@ -346,7 +373,10 @@ class ManualPaymentsService:
         if payment.status == ManualPaymentStatus.APPROVED:
             return self._payment_response(payment, server_now=now)
         if await self._expire_if_due(payment, now=now):
+            payment_id = payment.id
             await self._commit("Payment expiration failed")
+            payment = await self._reload_payment(payment_id)
+            self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
             await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
             raise AppError("Payment has expired", status.HTTP_409_CONFLICT)
         if payment.status not in ACTIVE_PAYMENT_STATUSES:
@@ -369,7 +399,10 @@ class ManualPaymentsService:
                 "actor_telegram_user_id": actor_telegram_user_id,
             },
         )
+        payment_id = payment.id
         await self._commit("Payment approval failed")
+        payment = await self._reload_payment(payment_id)
+        self._log_persisted(MANUAL_PAYMENT_APPROVED, payment)
         response = self._payment_response(payment, server_now=now)
         await self._emit(MANUAL_PAYMENT_APPROVED, payment)
         return response
@@ -391,7 +424,10 @@ class ManualPaymentsService:
         if payment.status == ManualPaymentStatus.REJECTED:
             return self._payment_response(payment, server_now=now)
         if await self._expire_if_due(payment, now=now):
+            payment_id = payment.id
             await self._commit("Payment expiration failed")
+            payment = await self._reload_payment(payment_id)
+            self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
             await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
             raise AppError("Payment has expired", status.HTTP_409_CONFLICT)
         if payment.status not in ACTIVE_PAYMENT_STATUSES:
@@ -420,7 +456,10 @@ class ManualPaymentsService:
                 "actor_telegram_user_id": actor_telegram_user_id,
             },
         )
+        payment_id = payment.id
         await self._commit("Payment rejection failed")
+        payment = await self._reload_payment(payment_id)
+        self._log_persisted(MANUAL_PAYMENT_REJECTED, payment)
         response = self._payment_response(payment, server_now=now)
         await self._emit(MANUAL_PAYMENT_REJECTED, payment)
         return response
@@ -433,7 +472,10 @@ class ManualPaymentsService:
         if payment.expires_at > now:
             return False
         await self._mark_expired(payment, now=now)
+        payment_id = payment.id
         await self._commit("Payment expiration failed")
+        payment = await self._reload_payment(payment_id)
+        self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
         await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
         return True
 
@@ -482,8 +524,23 @@ class ManualPaymentsService:
     async def _emit(self, name: str, payment: ManualPayment) -> None:
         try:
             await self.event_publisher.emit(name, self._event_payload(payment))
-        except Exception:
-            logger.warning("Failed to process post-commit payment event %s", name, exc_info=True)
+        except Exception as exc:
+            if name == MANUAL_PAYMENT_SUBMITTED:
+                logger.warning(
+                    "manual_payment.seller_bot_notification_failed",
+                    extra={
+                        "payment_id": payment.id,
+                        "order_id": payment.order_id,
+                        "status": payment.status.value,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+            else:
+                logger.warning(
+                    "Failed to process post-commit payment event %s",
+                    name,
+                    exc_info=True,
+                )
             try:
                 await self.session.rollback()
             except Exception:
@@ -523,6 +580,7 @@ class ManualPaymentsService:
             id=payment.id,
             order_id=payment.order_id,
             order_number=order.order_number,
+            order_status=order.status,
             customer_user_id=order.user_id,
             customer_name=order.contact_name,
             customer_phone=order.contact_phone,
@@ -546,6 +604,26 @@ class ManualPaymentsService:
             stock_released_at=payment.stock_released_at,
             created_at=payment.created_at,
             updated_at=payment.updated_at,
+        )
+
+    async def _reload_payment(self, payment_id: int) -> ManualPayment:
+        payment = await self.repository.get_by_id(
+            payment_id,
+            populate_existing=True,
+        )
+        if payment is None:
+            raise RuntimeError(f"Manual payment {payment_id} disappeared after commit")
+        return payment
+
+    @staticmethod
+    def _log_persisted(event_name: str, payment: ManualPayment) -> None:
+        logger.info(
+            event_name,
+            extra={
+                "payment_id": payment.id,
+                "order_id": payment.order_id,
+                "status": payment.status.value,
+            },
         )
 
     def _settings_response(

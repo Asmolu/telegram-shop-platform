@@ -702,6 +702,28 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
 
 
 @pytest.mark.asyncio
+async def test_approved_manual_payment_order_status_can_advance() -> None:
+    service, repository, _, _ = _orders_service()
+    order = _order(order_id=10, user_id=1, status_value=OrderStatus.PROCESSING)
+    manual_payments = FakeManualPaymentsService()
+    payment = await manual_payments.create_for_checkout(
+        order,
+        payment_settings=manual_payments.settings,
+    )
+    payment.status = ManualPaymentStatus.APPROVED
+    repository.orders[10] = order
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.SHIPPED),
+    )
+
+    assert updated.status == OrderStatus.SHIPPED
+    assert updated.manual_payment is not None
+    assert updated.manual_payment.status == ManualPaymentStatus.APPROVED
+
+
+@pytest.mark.asyncio
 async def test_order_status_update_does_not_fail_when_seller_notification_fails() -> None:
     service, repository, session, _ = _orders_service()
     customer_events = FakeOrderEventPublisher(session)

@@ -296,6 +296,7 @@ export interface ManualPayment {
   id: number;
   order_id: number;
   order_number: string;
+  order_status: OrderStatus;
   customer_user_id: number;
   customer_name: string;
   customer_phone: string;

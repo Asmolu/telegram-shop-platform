@@ -19,7 +19,7 @@ const MAX_RECEIPT_SIZE = 5 * 1024 * 1024;
 const STATUS_LABELS: Record<ManualPaymentStatus, string> = {
   PENDING: 'Ожидает оплату',
   SUBMITTED: 'Оплата на проверке',
-  APPROVED: 'Оплата подтверждена',
+  APPROVED: 'Оплачено',
   REJECTED: 'Отклонено',
   EXPIRED: 'Истекло время оплаты',
   CANCELLED: 'Оплата отменена',
@@ -40,7 +40,7 @@ export function PaymentPage() {
   const loadPayment = React.useCallback(async (showLoader = false) => {
     if (!isAuthenticated || orderId === null) {
       setLoading(false);
-      return;
+      return null;
     }
     if (showLoader) setLoading(true);
     try {
@@ -48,8 +48,10 @@ export function PaymentPage() {
       setPayment(result);
       setClockOffsetMs(new Date(result.server_now).getTime() - Date.now());
       setError(null);
+      return result;
     } catch (loadError) {
       setError(toApiErrorMessage(loadError));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -96,8 +98,13 @@ export function PaymentPage() {
       setPayment(result);
       setNotice('Оплата отправлена продавцу на проверку.');
     } catch (submitError) {
-      setNotice(toApiErrorMessage(submitError));
-      await loadPayment();
+      const errorMessage = toApiErrorMessage(submitError);
+      const refreshed = await loadPayment();
+      setNotice(
+        refreshed?.status === 'SUBMITTED'
+          ? 'Оплата отправлена продавцу на проверку.'
+          : errorMessage,
+      );
     } finally {
       setBusy(null);
     }
@@ -118,12 +125,20 @@ export function PaymentPage() {
 
     setBusy('upload');
     setNotice(null);
+    const previousReceiptPath = payment.receipt_image_path;
     try {
       const result = await uploadOrderPaymentReceipt(payment.order_id, file);
       setPayment(result);
       setNotice('Скриншот сохранен.');
     } catch (uploadError) {
-      setNotice(toApiErrorMessage(uploadError));
+      const errorMessage = toApiErrorMessage(uploadError);
+      const refreshed = await loadPayment();
+      setNotice(
+        refreshed?.receipt_image_path
+          && refreshed.receipt_image_path !== previousReceiptPath
+          ? 'Скриншот сохранен.'
+          : errorMessage,
+      );
     } finally {
       setBusy(null);
     }

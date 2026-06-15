@@ -1165,6 +1165,25 @@ textarea:focus {
   margin-top: 18px;
 }
 
+.order-status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.order-status-summary > div {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.order-status-summary > div > span:first-child {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .order-detail-actions select {
   width: min(100%, 190px);
 }
