@@ -37,7 +37,7 @@ export function CheckoutPage() {
   const initialPromoCode = React.useRef(searchParams.get('promo_code') ?? '');
   const [promoCode, setPromoCode] = React.useState(initialPromoCode.current);
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
-  const [deliveryMethod, setDeliveryMethod] = React.useState<OrderDeliveryMethod | ''>('');
+  const [deliveryMethod, setDeliveryMethod] = React.useState<OrderDeliveryMethod>('CDEK');
   const [deliveryMethodError, setDeliveryMethodError] = React.useState<string | null>(null);
   const [form, setForm] = React.useState({
     contactName: getUserDisplayName(user ?? telegramUser),
@@ -276,37 +276,33 @@ export function CheckoutPage() {
             <label>Получатель<input value={form.contactName} onChange={(event) => updateField('contactName', event.target.value)} required /></label>
             <label>Телефон<input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} required inputMode="tel" /></label>
             <label>Город<input value={form.city} onChange={(event) => updateField('city', event.target.value)} required /></label>
-            <fieldset
-              className="delivery-method-fieldset"
+            <label
+              className="delivery-method-field"
               aria-invalid={deliveryMethodError ? 'true' : undefined}
               aria-describedby={deliveryMethodError ? 'delivery-method-error' : undefined}
             >
-              <legend>Способ доставки</legend>
-              <div className="delivery-method-options">
-                {DELIVERY_METHODS.map((method) => (
-                  <label
-                    className={`delivery-method-option ${deliveryMethod === method.value ? 'is-selected' : ''}`}
-                    key={method.value}
-                  >
-                    <input
-                      type="radio"
-                      name="delivery-method"
-                      value={method.value}
-                      checked={deliveryMethod === method.value}
-                      onChange={() => {
-                        setDeliveryMethod(method.value);
-                        setDeliveryMethodError(null);
-                        setNotice(null);
-                      }}
-                    />
-                    <span>{method.label}</span>
-                  </label>
-                ))}
-              </div>
+              <span>Способ доставки</span>
+              <span className="delivery-method-select">
+                <select
+                  name="delivery-method"
+                  value={deliveryMethod}
+                  onChange={(event) => {
+                    setDeliveryMethod(event.target.value as OrderDeliveryMethod);
+                    setDeliveryMethodError(null);
+                    setNotice(null);
+                  }}
+                >
+                  {DELIVERY_METHODS.map((method) => (
+                    <option value={method.value} key={method.value}>
+                      {method.label}
+                    </option>
+                  ))}
+                </select>
+              </span>
               {deliveryMethodError ? (
                 <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
               ) : null}
-            </fieldset>
+            </label>
             <div className="two-inputs">
               <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
               <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>

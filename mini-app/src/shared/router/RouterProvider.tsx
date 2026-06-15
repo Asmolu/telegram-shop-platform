@@ -17,6 +17,8 @@ const HISTORY_INDEX_KEY = '__telegramShopIndex';
 const SWIPE_EDGE_WIDTH = 32;
 const SWIPE_MIN_DISTANCE = 72;
 const SWIPE_MAX_VERTICAL_DISTANCE = 48;
+const SWIPE_FINISH_DURATION = 190;
+const SWIPE_CANCEL_DURATION = 220;
 const SWIPE_BACK_IGNORE_SELECTOR = [
   '[data-swipe-back-ignore]',
   '[role="dialog"][aria-modal="true"]',
@@ -46,6 +48,12 @@ function getHistoryIndex() {
   return typeof index === 'number' && Number.isFinite(index) ? index : 0;
 }
 
+function clearSwipeBackVisual() {
+  const root = document.documentElement;
+  root.removeAttribute('data-swipe-back-state');
+  root.style.removeProperty('--swipe-back-x');
+}
+
 export function RouterProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = React.useState(getCurrentPath);
   const historyIndexRef = React.useRef(getHistoryIndex());
@@ -62,6 +70,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     const onPopState = () => {
+      clearSwipeBackVisual();
       historyIndexRef.current = getHistoryIndex();
       setLocation(getCurrentPath());
     };
@@ -108,6 +117,8 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   React.useEffect(() => {
+    let animationFrame = 0;
+    let finishTimer = 0;
     let gesture:
       | {
           startX: number;
@@ -118,17 +129,38 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         }
       | null = null;
 
+    const setSwipeOffset = (offset: number) => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        document.documentElement.style.setProperty('--swipe-back-x', `${Math.max(offset, 0)}px`);
+      });
+    };
+
     const resetGesture = () => {
       gesture = null;
+    };
+
+    const cancelGesture = () => {
+      if (!gesture) {
+        return;
+      }
+
+      resetGesture();
+      document.documentElement.dataset.swipeBackState = 'cancel';
+      setSwipeOffset(0);
+      window.clearTimeout(finishTimer);
+      finishTimer = window.setTimeout(clearSwipeBackVisual, SWIPE_CANCEL_DURATION);
     };
 
     const onTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
       const target = event.target instanceof Element ? event.target : null;
+      const currentPath = getCurrentPath();
       if (
         event.touches.length !== 1
         || !touch
         || touch.clientX > SWIPE_EDGE_WIDTH
+        || (historyIndexRef.current <= 0 && (currentPath === '/' || currentPath === '/main'))
         || target?.closest(SWIPE_BACK_IGNORE_SELECTOR)
         || document.querySelector('[role="dialog"][aria-modal="true"]')
       ) {
@@ -136,6 +168,8 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      window.clearTimeout(finishTimer);
+      clearSwipeBackVisual();
       gesture = {
         startX: touch.clientX,
         startY: touch.clientY,
@@ -157,12 +191,14 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
       const deltaY = Math.abs(gesture.latestY - gesture.startY);
 
       if (deltaX < -8 || deltaY > SWIPE_MAX_VERTICAL_DISTANCE) {
-        resetGesture();
+        cancelGesture();
         return;
       }
 
       if (deltaX > 14 && deltaX > deltaY * 1.5) {
         event.preventDefault();
+        document.documentElement.dataset.swipeBackState = 'tracking';
+        setSwipeOffset(Math.min(deltaX, window.innerWidth));
       }
     };
 
@@ -179,22 +215,34 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         && deltaX > deltaY * 1.5
         && duration <= 900;
 
-      resetGesture();
       if (shouldGoBack) {
-        goBack();
+        resetGesture();
+        document.documentElement.dataset.swipeBackState = 'complete';
+        setSwipeOffset(window.innerWidth);
+        window.clearTimeout(finishTimer);
+        finishTimer = window.setTimeout(() => {
+          goBack();
+          window.setTimeout(clearSwipeBackVisual, 40);
+        }, SWIPE_FINISH_DURATION);
+        return;
       }
+
+      cancelGesture();
     };
 
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     document.addEventListener('touchend', onTouchEnd, { passive: true });
-    document.addEventListener('touchcancel', resetGesture, { passive: true });
+    document.addEventListener('touchcancel', cancelGesture, { passive: true });
 
     return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(finishTimer);
+      clearSwipeBackVisual();
       document.removeEventListener('touchstart', onTouchStart);
       document.removeEventListener('touchmove', onTouchMove);
       document.removeEventListener('touchend', onTouchEnd);
-      document.removeEventListener('touchcancel', resetGesture);
+      document.removeEventListener('touchcancel', cancelGesture);
     };
   }, [goBack]);
 

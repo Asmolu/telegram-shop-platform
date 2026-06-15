@@ -51,28 +51,41 @@ export function ProductCard({
 
   return (
     <article className="product-card">
-      <Link className="product-card__media" to={`/product/${product.id}`}>
-        <ProductImageCarousel product={product} variant="card" />
-        {badge ? (
-          <span
-            className={`product-badge product-badge--${badgeType} product-badge--${badgePosition}`}
+      <div className="product-card__media-shell">
+        <Link className="product-card__media" to={`/product/${product.id}`}>
+          <ProductImageCarousel product={product} variant="card" />
+          {badge ? (
+            <span
+              className={`product-badge product-badge--${badgeType} product-badge--${badgePosition}`}
+            >
+              {badge}
+            </span>
+          ) : null}
+          {discount ? <span className="product-discount-badge">{discount}</span> : null}
+        </Link>
+        {onFavoriteToggle ? (
+          <button
+            className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
+            type="button"
+            aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+            disabled={busyAction !== null}
+            onClick={() => void runAction('favorite', onFavoriteToggle)}
           >
-            {badge}
-          </span>
+            {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
+          </button>
         ) : null}
-        {discount ? <span className="product-discount-badge">{discount}</span> : null}
-      </Link>
-      {onFavoriteToggle ? (
-        <button
-          className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`}
-          type="button"
-          aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
-          disabled={busyAction !== null}
-          onClick={() => void runAction('favorite', onFavoriteToggle)}
-        >
-          {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
-        </button>
-      ) : null}
+        {onAddToCart ? (
+          <button
+            className="product-card__cart-button"
+            type="button"
+            aria-label="Добавить в корзину"
+            disabled={busyAction !== null || !product.is_available}
+            onClick={() => void runAction('cart', onAddToCart)}
+          >
+            {busyAction === 'cart' ? <span aria-hidden="true">…</span> : <CartIcon />}
+          </button>
+        ) : null}
+      </div>
       <div className={`product-card__body ${onAddToCart ? '' : 'product-card__body--no-action'}`}>
         <Link className="product-card__info" to={`/product/${product.id}`}>
           <span className="product-card__price-row">
@@ -93,17 +106,6 @@ export function ProductCard({
             </span>
           ) : null}
         </Link>
-        {onAddToCart ? (
-          <button
-            className="product-card__cart-button"
-            type="button"
-            aria-label="Добавить в корзину"
-            disabled={busyAction !== null || !product.is_available}
-            onClick={() => void runAction('cart', onAddToCart)}
-          >
-            {busyAction === 'cart' ? <span aria-hidden="true">…</span> : <CartIcon />}
-          </button>
-        ) : null}
       </div>
     </article>
   );

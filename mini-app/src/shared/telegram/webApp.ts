@@ -162,7 +162,7 @@ function syncTelegramViewportCss(webApp: TelegramWebApp | undefined, fullscreenR
   );
   root.style.setProperty(
     '--tg-fullscreen-top-offset',
-    fullscreen ? 'clamp(76px, 20vw, 88px)' : '0px',
+    fullscreen ? 'clamp(124px, 31vw, 136px)' : '0px',
   );
 }
 
