@@ -351,6 +351,7 @@ class NotificationsService:
         return [
             f"Name: {contact.get('name') or '-'}",
             f"Phone: {contact.get('phone') or '-'}",
+            f"Способ доставки: {contact.get('delivery_method_label') or '-'}",
             f"Address: {contact.get('delivery_address') or '-'}",
             f"Comment: {contact.get('delivery_comment') or '-'}",
         ]

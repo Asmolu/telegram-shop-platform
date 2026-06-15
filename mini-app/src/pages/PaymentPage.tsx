@@ -6,6 +6,7 @@ import {
   uploadOrderPaymentReceipt,
   type ManualPayment,
   type ManualPaymentStatus,
+  type OrderDeliveryMethod,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
@@ -202,6 +203,12 @@ export function PaymentPage() {
               value={formatPrice(payment.amount)}
               onCopy={() => copyValue(payment.amount, 'Сумма')}
             />
+            {payment.delivery_method ? (
+              <PaymentRow
+                label="Способ доставки"
+                value={deliveryMethodLabel(payment.delivery_method)}
+              />
+            ) : null}
             <PaymentRow
               label="Телефон продавца"
               value={payment.seller_phone_display}
@@ -310,4 +317,14 @@ function formatCountdown(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function deliveryMethodLabel(method: OrderDeliveryMethod): string {
+  return {
+    ROUTE_TAXI: 'Маршруткой',
+    CITY_DELIVERY: 'Доставка по городу (Хасавюрт)',
+    OZON: 'Озон доставка',
+    WB: 'ВБ доставка',
+    CDEK: 'СДЭК',
+  }[method];
 }

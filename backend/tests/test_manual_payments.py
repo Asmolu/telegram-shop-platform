@@ -15,6 +15,7 @@ from app.db.models import (
     ManualPaymentMethod,
     ManualPaymentStatus,
     Order,
+    OrderDeliveryMethod,
     OrderItem,
     OrderStatus,
     ProductVariant,
@@ -441,8 +442,10 @@ async def test_submit_attempts_configured_seller_bot_notification() -> None:
     result = await service.submit(order_id=10, user_id=1)
 
     assert result.status == ManualPaymentStatus.SUBMITTED
+    assert result.delivery_method == OrderDeliveryMethod.CDEK
     assert len(telegram.messages) == 1
     assert "ORD-00000010" in telegram.messages[0][1]
+    assert "Способ доставки: СДЭК" in telegram.messages[0][1]
 
 
 @pytest.mark.asyncio
@@ -501,6 +504,8 @@ async def test_submitted_event_sends_seller_group_review_buttons(
             "user_id": 1,
             "customer_username": "customer",
             "customer_phone": "+79990000000",
+            "delivery_method": "CDEK",
+            "delivery_method_label": "СДЭК",
             "amount": "180.00",
             "payment_comment": "Заказ #10",
             "expires_at": (NOW + timedelta(minutes=30)).isoformat(),
@@ -510,6 +515,7 @@ async def test_submitted_event_sends_seller_group_review_buttons(
 
     assert telegram.messages[0][0] == "-100"
     assert "ORD-10" in telegram.messages[0][1]
+    assert "Способ доставки: СДЭК" in telegram.messages[0][1]
     keyboard = telegram.messages[0][2]
     assert keyboard is not None
     buttons = keyboard["inline_keyboard"][0]
@@ -727,6 +733,7 @@ def _order_and_variant() -> tuple[Order, ProductVariant]:
         total_amount=Decimal("180.00"),
         contact_name="Ivan Ivanov",
         contact_phone="+79990000000",
+        delivery_method=OrderDeliveryMethod.CDEK,
         delivery_address="Moscow",
         delivery_comment=None,
         items=[item],

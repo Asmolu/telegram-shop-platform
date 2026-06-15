@@ -13,7 +13,7 @@ from pydantic import (
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import NoInspectionAvailable
 
-from app.db.models import OrderStatus, ProductSizeGrid
+from app.db.models import OrderDeliveryMethod, OrderStatus, ProductSizeGrid
 from app.modules.manual_payments.schemas import ManualPaymentSummary
 
 
@@ -22,6 +22,7 @@ class OrderCheckoutCreate(BaseModel):
 
     contact_name: str = Field(min_length=1, max_length=255)
     contact_phone: str = Field(min_length=1, max_length=32)
+    delivery_method: OrderDeliveryMethod
     delivery_address: str = Field(min_length=1)
     delivery_comment: str | None = None
     promo_code: str | None = Field(
@@ -118,6 +119,7 @@ class OrderRead(BaseModel):
     total_amount: Decimal
     contact_name: str
     contact_phone: str
+    delivery_method: OrderDeliveryMethod | None = None
     delivery_address: str
     delivery_comment: str | None = None
     manual_payment: ManualPaymentSummary | None = None

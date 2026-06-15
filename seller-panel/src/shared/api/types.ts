@@ -3,6 +3,7 @@ export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
 export type ManualPaymentStatus =
   | 'PENDING'
   | 'SUBMITTED'
@@ -262,6 +263,7 @@ export interface Order {
   total_amount: ApiDecimal;
   contact_name: string;
   contact_phone: string;
+  delivery_method: OrderDeliveryMethod | null;
   delivery_address: string;
   delivery_comment: string | null;
   manual_payment?: {
@@ -300,6 +302,7 @@ export interface ManualPayment {
   customer_user_id: number;
   customer_name: string;
   customer_phone: string;
+  delivery_method: OrderDeliveryMethod | null;
   method: 'SBP_PHONE';
   amount: ApiDecimal;
   currency: 'RUB';

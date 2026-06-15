@@ -6,6 +6,7 @@ import {
   toApiErrorMessage,
   validatePromoCode,
   type Cart,
+  type OrderDeliveryMethod,
   type PersonalData,
   type PromoValidation,
 } from '../shared/api';
@@ -14,6 +15,14 @@ import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { formatPrice, getUserDisplayName } from '../shared/utils/format';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
+
+const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string }[] = [
+  { value: 'ROUTE_TAXI', label: 'Маршруткой' },
+  { value: 'CITY_DELIVERY', label: 'Доставка по городу (Хасавюрт)' },
+  { value: 'OZON', label: 'Озон доставка' },
+  { value: 'WB', label: 'ВБ доставка' },
+  { value: 'CDEK', label: 'СДЭК' },
+];
 
 export function CheckoutPage() {
   const { currentPath, searchParams, navigate } = useRouter();
@@ -28,6 +37,8 @@ export function CheckoutPage() {
   const initialPromoCode = React.useRef(searchParams.get('promo_code') ?? '');
   const [promoCode, setPromoCode] = React.useState(initialPromoCode.current);
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
+  const [deliveryMethod, setDeliveryMethod] = React.useState<OrderDeliveryMethod | ''>('');
+  const [deliveryMethodError, setDeliveryMethodError] = React.useState<string | null>(null);
   const [form, setForm] = React.useState({
     contactName: getUserDisplayName(user ?? telegramUser),
     phone: user?.phone ?? '',
@@ -169,6 +180,11 @@ export function CheckoutPage() {
       setNotice('Заполните имя, телефон и город.');
       return;
     }
+    if (!deliveryMethod) {
+      setDeliveryMethodError('Выберите способ доставки.');
+      setNotice('Выберите способ доставки.');
+      return;
+    }
 
     setBusy(true);
     try {
@@ -191,6 +207,7 @@ export function CheckoutPage() {
       const order = await checkoutCart({
         contact_name: form.contactName.trim(),
         contact_phone: form.phone.trim(),
+        delivery_method: deliveryMethod,
         delivery_address: form.city.trim(),
         delivery_comment: deliveryComment || null,
         promo_code: promoCodeForOrder,
@@ -259,6 +276,37 @@ export function CheckoutPage() {
             <label>Получатель<input value={form.contactName} onChange={(event) => updateField('contactName', event.target.value)} required /></label>
             <label>Телефон<input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} required inputMode="tel" /></label>
             <label>Город<input value={form.city} onChange={(event) => updateField('city', event.target.value)} required /></label>
+            <fieldset
+              className="delivery-method-fieldset"
+              aria-invalid={deliveryMethodError ? 'true' : undefined}
+              aria-describedby={deliveryMethodError ? 'delivery-method-error' : undefined}
+            >
+              <legend>Способ доставки</legend>
+              <div className="delivery-method-options">
+                {DELIVERY_METHODS.map((method) => (
+                  <label
+                    className={`delivery-method-option ${deliveryMethod === method.value ? 'is-selected' : ''}`}
+                    key={method.value}
+                  >
+                    <input
+                      type="radio"
+                      name="delivery-method"
+                      value={method.value}
+                      checked={deliveryMethod === method.value}
+                      onChange={() => {
+                        setDeliveryMethod(method.value);
+                        setDeliveryMethodError(null);
+                        setNotice(null);
+                      }}
+                    />
+                    <span>{method.label}</span>
+                  </label>
+                ))}
+              </div>
+              {deliveryMethodError ? (
+                <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
+              ) : null}
+            </fieldset>
             <div className="two-inputs">
               <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
               <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>

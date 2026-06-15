@@ -37,6 +37,7 @@ from app.modules.manual_payments.schemas import (
     SellerPaymentSettingsRead,
     SellerPaymentSettingsUpdate,
 )
+from app.modules.orders.delivery import delivery_method_label
 from app.modules.telegram.service import TelegramService
 from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
@@ -96,6 +97,7 @@ class ManualPaymentEventPublisher:
             f"Сумма: {amount_label} ₽\n"
             f"Клиент: {username_label} / ID {payload['user_id']}\n"
             f"Телефон клиента: {payload.get('customer_phone') or '-'}\n"
+            f"Способ доставки: {payload.get('delivery_method_label') or '-'}\n"
             f"Комментарий к переводу: {payload['payment_comment']}\n"
             f"Скриншот: {receipt_label}\n"
             f"Резерв до: {expires_at.astimezone(SELLER_TIMEZONE).strftime('%H:%M')}\n"
@@ -555,6 +557,10 @@ class ManualPaymentsService:
             "user_id": order.user_id,
             "customer_username": order.user.username if order.user is not None else None,
             "customer_phone": order.contact_phone,
+            "delivery_method": (
+                order.delivery_method.value if order.delivery_method is not None else None
+            ),
+            "delivery_method_label": delivery_method_label(order.delivery_method),
             "amount": str(payment.amount),
             "payment_comment": payment.payment_comment,
             "expires_at": payment.expires_at.isoformat(),
@@ -584,6 +590,7 @@ class ManualPaymentsService:
             customer_user_id=order.user_id,
             customer_name=order.contact_name,
             customer_phone=order.contact_phone,
+            delivery_method=order.delivery_method,
             method=payment.method,
             amount=payment.amount,
             currency=payment.currency,

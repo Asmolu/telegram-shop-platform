@@ -18,6 +18,7 @@ from app.db.models import (
     Notification,
     NotificationStatus,
     Order,
+    OrderDeliveryMethod,
     OrderItem,
     OrderStatus,
     Product,
@@ -306,6 +307,7 @@ async def test_checkout_from_valid_cart() -> None:
 
     assert order.user_id == 1
     assert order.status == OrderStatus.NEW
+    assert order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
     assert order.total_amount == Decimal("119.80")
     assert order.items[0].product_name == "Hoodie"
     assert order.items[0].variant_size == "M"
@@ -336,8 +338,27 @@ async def test_checkout_from_valid_cart() -> None:
     assert event_payload["items"][0]["variant_sku"] == "HOODIE-M-BLK"
     assert event_payload["items"][0]["quantity"] == 2
     assert event_payload["contact"]["name"] == "Ada Lovelace"
+    assert event_payload["contact"]["delivery_method"] == "ROUTE_TAXI"
+    assert event_payload["contact"]["delivery_method_label"] == "Маршруткой"
     assert event_payload["seller_panel_url"] == "https://seller.tsplatform.ru/orders"
     assert events.commit_states == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivery_method", list(OrderDeliveryMethod))
+async def test_checkout_stores_each_supported_delivery_method(
+    delivery_method: OrderDeliveryMethod,
+) -> None:
+    service, _, _, _ = _orders_service()
+    payload = _checkout_payload_json()
+    payload["delivery_method"] = delivery_method.value
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate.model_validate(payload),
+    )
+
+    assert order.delivery_method == delivery_method
 
 
 @pytest.mark.asyncio
@@ -655,6 +676,31 @@ async def test_user_can_list_own_orders() -> None:
     orders = await service.list_current_user_orders(user_id=1)
 
     assert [order.user_id for order in orders.items] == [1]
+    assert orders.items[0].delivery_method == OrderDeliveryMethod.ROUTE_TAXI
+
+
+@pytest.mark.asyncio
+async def test_old_order_without_delivery_method_remains_readable() -> None:
+    service, repository, _, _ = _orders_service()
+    legacy_order = _order(order_id=10, user_id=1)
+    legacy_order.delivery_method = None
+    repository.orders[10] = legacy_order
+
+    order = await service.get_current_user_order(user_id=1, order_id=10)
+
+    assert order.delivery_method is None
+
+
+@pytest.mark.asyncio
+async def test_order_detail_returns_delivery_method() -> None:
+    service, repository, _, _ = _orders_service()
+    repository.orders[10] = _order(order_id=10, user_id=1)
+
+    customer_order = await service.get_current_user_order(user_id=1, order_id=10)
+    seller_order = await service.get_order(order_id=10)
+
+    assert customer_order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
+    assert seller_order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
 
 
 @pytest.mark.asyncio
@@ -836,6 +882,36 @@ def test_orders_require_authentication() -> None:
     assert checkout_response.status_code == 401
 
 
+@pytest.mark.parametrize("delivery_method", [None, "DRONE"])
+def test_checkout_rejects_missing_or_invalid_delivery_method(
+    delivery_method: str | None,
+) -> None:
+    app = create_app()
+    payload = _checkout_payload_json()
+    if delivery_method is None:
+        payload.pop("delivery_method")
+    else:
+        payload["delivery_method"] = delivery_method
+
+    class UnexpectedCheckoutService:
+        async def checkout_current_user_cart(self, *_: object) -> None:
+            raise AssertionError("Invalid checkout request reached the service")
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    app.dependency_overrides[get_orders_service] = UnexpectedCheckoutService
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/orders/checkout", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert any(
+        detail["loc"][-1] == "delivery_method"
+        for detail in response.json()["detail"]
+    )
+
+
 def test_order_admin_routes_reject_regular_user() -> None:
     app = create_app()
     app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
@@ -957,6 +1033,7 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
         total_amount=Decimal("59.90"),
         contact_name="Ada Lovelace",
         contact_phone="+10000000000",
+        delivery_method=OrderDeliveryMethod.ROUTE_TAXI,
         delivery_address="Main street",
         delivery_comment=None,
         items=[
@@ -1032,6 +1109,7 @@ def _checkout_payload_json() -> dict[str, str]:
     return {
         "contact_name": "Ada Lovelace",
         "contact_phone": "+10000000000",
+        "delivery_method": "ROUTE_TAXI",
         "delivery_address": "Main street",
         "delivery_comment": "Door code 42",
     }
@@ -1049,6 +1127,7 @@ def _order_response(status_value: str = "NEW") -> dict[str, object]:
         "total_amount": "59.90",
         "contact_name": "Ada Lovelace",
         "contact_phone": "+10000000000",
+        "delivery_method": "ROUTE_TAXI",
         "delivery_address": "Main street",
         "delivery_comment": None,
         "items": [

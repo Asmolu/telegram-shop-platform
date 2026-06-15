@@ -75,6 +75,14 @@ class OrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class OrderDeliveryMethod(StrEnum):
+    ROUTE_TAXI = "ROUTE_TAXI"
+    CITY_DELIVERY = "CITY_DELIVERY"
+    OZON = "OZON"
+    WB = "WB"
+    CDEK = "CDEK"
+
+
 class ManualPaymentMethod(StrEnum):
     SBP_PHONE = "SBP_PHONE"
 
@@ -919,6 +927,14 @@ class Order(Base):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    delivery_method: Mapped[OrderDeliveryMethod | None] = mapped_column(
+        Enum(
+            OrderDeliveryMethod,
+            name="order_delivery_method",
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
     delivery_address: Mapped[str] = mapped_column(Text, nullable=False)
     delivery_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -104,6 +104,7 @@ async def test_order_created_event_creates_and_sends_seller_notification() -> No
     assert "Promo code: SAVE10" in message
     assert "Discount: 20.00" in message
     assert "Final total: 99.80" in message
+    assert "Способ доставки: СДЭК" in message
     assert "Seller Panel: https://seller.tsplatform.ru/orders" in message
     assert session.commits == 2
 
@@ -377,6 +378,14 @@ def _order_created_payload() -> dict[str, object]:
             "last_name": None,
             "name": "Ada",
         },
+        "contact": {
+            "name": "Ada",
+            "phone": "+79990000000",
+            "delivery_method": "CDEK",
+            "delivery_method_label": "СДЭК",
+            "delivery_address": "Moscow",
+            "delivery_comment": "Call first",
+        },
     }
 
 
@@ -411,6 +420,8 @@ def _detailed_order_created_payload() -> dict[str, object]:
             "contact": {
                 "name": "Ada",
                 "phone": "+79990000000",
+                "delivery_method": "CDEK",
+                "delivery_method_label": "СДЭК",
                 "delivery_address": "Moscow",
                 "delivery_comment": "Call first",
             },

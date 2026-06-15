@@ -21,6 +21,8 @@ from app.db.models import (
     NotificationStatus,
     NotificationTemplate,
     NotificationTemplateCategory,
+    Order,
+    OrderDeliveryMethod,
     OrderItem,
     PendingSellerRegistration,
     Product,
@@ -697,3 +699,24 @@ def test_manual_sbp_payment_migration_and_model_contract() -> None:
     assert SellerPaymentSettings.__table__.c.seller_phone_e164.nullable is True
     assert ManualPayment.__table__.c.order_id.unique is True
     assert ManualPayment.__table__.c.receipt_image_path.type.length == 1024
+
+
+def test_order_delivery_method_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260615_0028_add_order_delivery_method.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_order_delivery_method", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    assert migration.down_revision == "20260614_0027"
+    assert migration.ORDER_DELIVERY_METHOD_ENUM.enums == [
+        method.value for method in OrderDeliveryMethod
+    ]
+    assert migration.ORDER_DELIVERY_METHOD_ENUM.create_type is False
+    assert Order.__table__.c.delivery_method.nullable is True

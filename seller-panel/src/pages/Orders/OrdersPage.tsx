@@ -338,6 +338,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   </div>
                   <div><dt>Клиент</dt><dd>{selectedPayment.customer_name}</dd></div>
                   <div><dt>Телефон клиента</dt><dd>{selectedPayment.customer_phone}</dd></div>
+                  <div><dt>{t('orders.deliveryMethod')}</dt><dd>{labelForEnum(selectedPayment.delivery_method, t)}</dd></div>
                   <div><dt>Сумма</dt><dd>{formatMoney(selectedPayment.amount, language)}</dd></div>
                   <div><dt>Телефон СБП</dt><dd>{selectedPayment.seller_phone_display}</dd></div>
                   <div><dt>Комментарий</dt><dd>{selectedPayment.payment_comment}</dd></div>
@@ -439,6 +440,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     <td>
                       <span>{order.contact_phone}</span>
                       <small>{compactText(order.delivery_address, t('common.notProvided'))}</small>
+                      <small>{labelForEnum(order.delivery_method, t)}</small>
                     </td>
                     <td>{formatMoney(order.total_amount, language)}</td>
                     <td>{order.promo_code_code ?? t('common.none')}</td>
@@ -530,6 +532,10 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                 <div>
                   <dt>{t('orders.address')}</dt>
                   <dd>{selectedOrder.delivery_address}</dd>
+                </div>
+                <div>
+                  <dt>{t('orders.deliveryMethod')}</dt>
+                  <dd>{labelForEnum(selectedOrder.delivery_method, t)}</dd>
                 </div>
                 <div>
                   <dt>{t('orders.comment')}</dt>

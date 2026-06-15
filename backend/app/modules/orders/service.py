@@ -428,6 +428,7 @@ class OrdersService:
             total_amount=total,
             contact_name=payload.contact_name,
             contact_phone=payload.contact_phone,
+            delivery_method=payload.delivery_method,
             delivery_address=payload.delivery_address,
             delivery_comment=payload.delivery_comment,
         )

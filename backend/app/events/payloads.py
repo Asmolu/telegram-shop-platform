@@ -2,6 +2,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.db.models import Order, OrderItem, OrderStatus, ProductImage
+from app.modules.orders.delivery import delivery_method_label
 
 MINI_APP_PRODUCT_URL = "https://mini.tsplatform.ru/product/{product_id}"
 SELLER_PANEL_ORDERS_URL = "https://seller.tsplatform.ru/orders"
@@ -25,6 +26,10 @@ def order_created_payload(order: Order) -> dict[str, object]:
         "contact": {
             "name": order.contact_name,
             "phone": order.contact_phone,
+            "delivery_method": (
+                order.delivery_method.value if order.delivery_method is not None else None
+            ),
+            "delivery_method_label": delivery_method_label(order.delivery_method),
             "delivery_address": order.delivery_address,
             "delivery_comment": order.delivery_comment,
         },

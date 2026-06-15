@@ -7,6 +7,7 @@ from app.db.models import (
     ManualPaymentCurrency,
     ManualPaymentMethod,
     ManualPaymentStatus,
+    OrderDeliveryMethod,
     OrderStatus,
 )
 
@@ -53,6 +54,7 @@ class ManualPaymentRead(BaseModel):
     customer_user_id: int
     customer_name: str
     customer_phone: str
+    delivery_method: OrderDeliveryMethod | None = None
     method: ManualPaymentMethod
     amount: Decimal
     currency: ManualPaymentCurrency
