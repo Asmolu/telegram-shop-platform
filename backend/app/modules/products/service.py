@@ -66,6 +66,8 @@ PRODUCT_AUDIT_FIELDS = (
     "size_grid",
     "image_badge_type",
     "image_badge_text",
+    "image_badge_color",
+    "image_badge_position",
     "status",
     "category_id",
 )

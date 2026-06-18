@@ -27,6 +27,8 @@ from app.db.models import (
     PendingSellerRegistration,
     Product,
     ProductCategory,
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
     ProductImageBadgeType,
     ProductRelatedProduct,
     ProductSizeGrid,
@@ -594,6 +596,46 @@ def test_related_products_and_image_badges_migration_contract() -> None:
     assert "uq_product_related_products_pair" in constraint_names
     assert "uq_product_related_products_position" in constraint_names
     assert "ix_product_related_products_product_position" in index_names
+
+
+def test_configurable_product_image_badges_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260618_0031_configurable_product_image_badges.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "configurable_product_image_badges",
+        migration_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    product_table = Product.__table__
+
+    assert migration.down_revision == "20260618_0030"
+    assert migration.PRODUCT_IMAGE_BADGE_COLOR_ENUM.enums == [
+        "purple",
+        "pink",
+        "red",
+        "orange",
+        "blue",
+        "green",
+        "black",
+        "white",
+    ]
+    assert migration.PRODUCT_IMAGE_BADGE_POSITION_ENUM.enums == [
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right",
+    ]
+    assert product_table.c.image_badge_color.nullable is True
+    assert product_table.c.image_badge_position.nullable is True
+    assert product_table.c.image_badge_color.type.enum_class == ProductImageBadgeColor
+    assert product_table.c.image_badge_position.type.enum_class == ProductImageBadgePosition
 
 
 def test_tag_images_migration_and_model_contract() -> None:

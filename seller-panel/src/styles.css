@@ -997,16 +997,39 @@ textarea:focus {
 
 .badge-editor {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   align-items: end;
   gap: 12px;
   margin-bottom: 16px;
 }
 
+.image-badge-preview-frame {
+  position: relative;
+  align-self: stretch;
+  min-height: 112px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.16), rgba(236, 72, 153, 0.14)),
+    #f8fafc;
+}
+
+.image-badge-preview-frame::after {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  content: '';
+}
+
 .image-badge-preview {
-  align-self: center;
-  justify-self: start;
-  max-width: 180px;
+  position: absolute;
+  max-width: calc(100% - 20px);
   overflow: hidden;
   border-radius: 999px;
   padding: 7px 11px;
@@ -1017,18 +1040,57 @@ textarea:focus {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
 }
 
-.image-badge-preview--sale {
+.image-badge-preview--color-pink {
+  background: #ec4899;
+}
+
+.image-badge-preview--color-red {
   background: #dc2626;
 }
 
-.image-badge-preview--hit {
+.image-badge-preview--color-orange {
   background: #ea580c;
 }
 
-.image-badge-preview--exclusive {
+.image-badge-preview--color-blue {
+  background: #2563eb;
+}
+
+.image-badge-preview--color-green {
+  background: #16a34a;
+}
+
+.image-badge-preview--color-black {
   background: #111827;
+}
+
+.image-badge-preview--color-white {
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: #ffffff;
+  color: #111827;
+}
+
+.image-badge-preview--position-top-left {
+  top: 10px;
+  left: 10px;
+}
+
+.image-badge-preview--position-top-right {
+  top: 10px;
+  right: 58px;
+}
+
+.image-badge-preview--position-bottom-left {
+  bottom: 10px;
+  left: 10px;
+}
+
+.image-badge-preview--position-bottom-right {
+  right: 58px;
+  bottom: 10px;
 }
 
 @media (max-width: 760px) {

@@ -67,6 +67,24 @@ class ProductImageBadgeType(StrEnum):
     CUSTOM = "custom"
 
 
+class ProductImageBadgeColor(StrEnum):
+    PURPLE = "purple"
+    PINK = "pink"
+    RED = "red"
+    ORANGE = "orange"
+    BLUE = "blue"
+    GREEN = "green"
+    BLACK = "black"
+    WHITE = "white"
+
+
+class ProductImageBadgePosition(StrEnum):
+    TOP_LEFT = "top-left"
+    TOP_RIGHT = "top-right"
+    BOTTOM_LEFT = "bottom-left"
+    BOTTOM_RIGHT = "bottom-right"
+
+
 class OrderStatus(StrEnum):
     NEW = "NEW"
     PROCESSING = "PROCESSING"
@@ -663,6 +681,22 @@ class Product(Base):
         server_default=ProductImageBadgeType.NONE.value,
     )
     image_badge_text: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    image_badge_color: Mapped[ProductImageBadgeColor | None] = mapped_column(
+        Enum(
+            ProductImageBadgeColor,
+            name="product_image_badge_color",
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
+    image_badge_position: Mapped[ProductImageBadgePosition | None] = mapped_column(
+        Enum(
+            ProductImageBadgePosition,
+            name="product_image_badge_position",
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
     status: Mapped[ProductStatus] = mapped_column(
         Enum(ProductStatus, name="product_status", values_callable=_enum_values),
         nullable=False,

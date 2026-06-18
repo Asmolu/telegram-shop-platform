@@ -13,6 +13,8 @@ from app.db.models import (
     Category,
     Product,
     ProductCategory,
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
     ProductImageBadgeType,
     ProductRelatedProduct,
     ProductSizeGrid,
@@ -607,6 +609,43 @@ def test_product_create_defaults_search_priority_to_medium() -> None:
     assert product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert product.image_badge_type == ProductImageBadgeType.NONE
     assert product.image_badge_text is None
+    assert product.image_badge_color is None
+    assert product.image_badge_position is None
+
+
+def test_product_create_accepts_configurable_badge_appearance() -> None:
+    product = ProductCreate(
+        name="Hoodie",
+        slug="hoodie",
+        base_price=Decimal("59.90"),
+        image_badge_type=ProductImageBadgeType.HIT,
+        image_badge_color=ProductImageBadgeColor.GREEN,
+        image_badge_position=ProductImageBadgePosition.BOTTOM_RIGHT,
+    )
+
+    assert product.image_badge_color == ProductImageBadgeColor.GREEN
+    assert product.image_badge_position == ProductImageBadgePosition.BOTTOM_RIGHT
+
+
+def test_product_create_rejects_invalid_badge_appearance_values() -> None:
+    with pytest.raises(ValidationError) as color_error:
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie",
+            base_price=Decimal("59.90"),
+            image_badge_color="teal",
+        )
+
+    with pytest.raises(ValidationError) as position_error:
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie",
+            base_price=Decimal("59.90"),
+            image_badge_position="center",
+        )
+
+    assert "image_badge_color" in str(color_error.value)
+    assert "image_badge_position" in str(position_error.value)
 
 
 def test_product_brand_is_optional_and_normalized() -> None:
@@ -740,12 +779,23 @@ async def test_product_update_persists_related_product_order_and_badge() -> None
             related_product_ids=[3, 2],
             image_badge_type=ProductImageBadgeType.CUSTOM,
             image_badge_text=" Только сегодня ",
+            image_badge_color=ProductImageBadgeColor.PINK,
+            image_badge_position=ProductImageBadgePosition.TOP_RIGHT,
         ),
     )
 
     assert updated.related_product_ids == [3, 2]
     assert updated.image_badge_type == ProductImageBadgeType.CUSTOM
     assert updated.image_badge_text == "Только сегодня"
+    assert updated.image_badge_color == ProductImageBadgeColor.PINK
+    assert updated.image_badge_position == ProductImageBadgePosition.TOP_RIGHT
+
+
+def test_old_product_without_badge_appearance_serializes() -> None:
+    product = ProductRead.model_validate(_product())
+
+    assert product.image_badge_color is None
+    assert product.image_badge_position is None
 
 
 def test_product_create_rejects_old_price_not_above_base_price() -> None:
@@ -1051,6 +1101,8 @@ def _product(
         size_grid=size_grid,
         image_badge_type=ProductImageBadgeType.NONE,
         image_badge_text=None,
+        image_badge_color=None,
+        image_badge_position=None,
         status=status,
         category_id=1,
         category=_category(),

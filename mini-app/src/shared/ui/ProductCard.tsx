@@ -2,7 +2,7 @@ import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
 import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
-import { getProductBadge } from '../utils/images';
+import { getProductBadge, getProductBadgeColor, getProductBadgePosition } from '../utils/images';
 import { CartIcon, HeartIcon } from './Icons';
 import { ProductImageCarousel } from './ProductImageCarousel';
 
@@ -81,7 +81,8 @@ export function ProductCard({
       : badge?.toLowerCase() === 'sale'
         ? 'sale'
         : 'custom';
-  const badgePosition = badgeType === 'new' ? 'top' : 'bottom';
+  const badgePosition = getProductBadgePosition(product, badgeType);
+  const badgeColor = getProductBadgeColor(product, badgeType);
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
   const brand = product.brand?.trim() || 'Без бренда';
@@ -107,8 +108,8 @@ export function ProductCard({
           <ProductImageCarousel product={product} variant="card" />
           {badge ? (
             <span
-              className={`product-badge product-badge--${badgeType} product-badge--${badgePosition} ${
-                discount && badgePosition === 'bottom' ? 'product-badge--above-discount' : ''
+              className={`product-badge product-badge--${badgeType} product-badge--color-${badgeColor} product-badge--position-${badgePosition} ${
+                discount && badgePosition === 'bottom-left' ? 'product-badge--above-discount' : ''
               }`}
             >
               {badge}

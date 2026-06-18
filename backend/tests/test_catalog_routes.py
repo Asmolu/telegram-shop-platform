@@ -303,6 +303,8 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
                         {
                             **_product_response(),
                             "brand": "Gadji",
+                            "image_badge_color": "green",
+                            "image_badge_position": "bottom-right",
                             "variants": [_variant_response()],
                             "is_available": True,
                         }
@@ -322,6 +324,8 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
     assert response.json()["items"][0]["is_available"] is True
     assert response.json()["items"][0]["brand"] == "Gadji"
     assert response.json()["items"][0]["size_grid"] == "clothing_alpha"
+    assert response.json()["items"][0]["image_badge_color"] == "green"
+    assert response.json()["items"][0]["image_badge_position"] == "bottom-right"
     assert response.json()["items"][0]["variants"][0]["available_quantity"] == 3
 
 
@@ -377,6 +381,8 @@ def _product_response() -> dict[str, object]:
         "description": "Warm",
         "base_price": "59.90",
         "size_grid": "clothing_alpha",
+        "image_badge_color": None,
+        "image_badge_position": None,
         "status": "ACTIVE",
         "category_id": None,
         "category": None,

@@ -1,5 +1,27 @@
 import { getApiOrigin } from '../api';
-import type { Product } from '../api';
+import type {
+  Product,
+  ProductImageBadgeColor,
+  ProductImageBadgePosition,
+  ProductImageBadgeType,
+} from '../api';
+
+const BADGE_COLORS = new Set<ProductImageBadgeColor>([
+  'purple',
+  'pink',
+  'red',
+  'orange',
+  'blue',
+  'green',
+  'black',
+  'white',
+]);
+const BADGE_POSITIONS = new Set<ProductImageBadgePosition>([
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+]);
 
 export function normalizeAssetUrl(url?: string | null) {
   if (!url) {
@@ -75,4 +97,29 @@ export function getProductImageBadge(product: Product) {
   if (product.image_badge_type === 'exclusive') return 'Эксклюзив';
   if (product.image_badge_type === 'custom') return product.image_badge_text?.trim() || null;
   return null;
+}
+
+export function getProductBadgeColor(
+  product: Product,
+  badgeType: ProductImageBadgeType = product.image_badge_type,
+): ProductImageBadgeColor {
+  if (product.image_badge_color && BADGE_COLORS.has(product.image_badge_color)) {
+    return product.image_badge_color;
+  }
+
+  if (badgeType === 'sale') return 'red';
+  if (badgeType === 'hit') return 'orange';
+  if (badgeType === 'exclusive') return 'black';
+  return 'purple';
+}
+
+export function getProductBadgePosition(
+  product: Product,
+  badgeType: ProductImageBadgeType = product.image_badge_type,
+): ProductImageBadgePosition {
+  if (product.image_badge_position && BADGE_POSITIONS.has(product.image_badge_position)) {
+    return product.image_badge_position;
+  }
+
+  return badgeType === 'new' ? 'top-left' : 'bottom-left';
 }

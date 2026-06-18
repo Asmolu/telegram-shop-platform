@@ -3,6 +3,8 @@ import { api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
   Product,
+  ProductImageBadgeColor,
+  ProductImageBadgePosition,
   ProductImageBadgeType,
   ProductSizeGrid,
   ProductStatus,
@@ -34,6 +36,8 @@ interface ProductFormState {
   sizeGrid: ProductSizeGrid;
   imageBadgeType: ProductImageBadgeType;
   imageBadgeText: string;
+  imageBadgeColor: ProductImageBadgeColor;
+  imageBadgePosition: ProductImageBadgePosition;
   status: ProductStatus;
   tagIds: number[];
 }
@@ -68,12 +72,30 @@ const initialForm: ProductFormState = {
   sizeGrid: 'clothing_alpha',
   imageBadgeType: 'none',
   imageBadgeText: '',
+  imageBadgeColor: 'purple',
+  imageBadgePosition: 'top-left',
   status: 'DRAFT',
   tagIds: [],
 };
 
 const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'] as const;
 const SHOE_SIZES_RU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+const BADGE_COLORS: Array<{ value: ProductImageBadgeColor; labelKey: string }> = [
+  { value: 'purple', labelKey: 'productEditor.badgeColorPurple' },
+  { value: 'pink', labelKey: 'productEditor.badgeColorPink' },
+  { value: 'red', labelKey: 'productEditor.badgeColorRed' },
+  { value: 'orange', labelKey: 'productEditor.badgeColorOrange' },
+  { value: 'blue', labelKey: 'productEditor.badgeColorBlue' },
+  { value: 'green', labelKey: 'productEditor.badgeColorGreen' },
+  { value: 'black', labelKey: 'productEditor.badgeColorBlack' },
+  { value: 'white', labelKey: 'productEditor.badgeColorWhite' },
+];
+const BADGE_POSITIONS: Array<{ value: ProductImageBadgePosition; labelKey: string }> = [
+  { value: 'top-left', labelKey: 'productEditor.badgePositionTopLeft' },
+  { value: 'top-right', labelKey: 'productEditor.badgePositionTopRight' },
+  { value: 'bottom-left', labelKey: 'productEditor.badgePositionBottomLeft' },
+  { value: 'bottom-right', labelKey: 'productEditor.badgePositionBottomRight' },
+];
 
 function allowedSizes(sizeGrid: ProductSizeGrid): readonly string[] {
   return sizeGrid === 'shoes_ru' ? SHOE_SIZES_RU : CLOTHING_SIZES;
@@ -149,6 +171,12 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             sizeGrid: loadedProduct.size_grid ?? 'clothing_alpha',
             imageBadgeType: loadedProduct.image_badge_type ?? 'none',
             imageBadgeText: loadedProduct.image_badge_text ?? '',
+            imageBadgeColor:
+              loadedProduct.image_badge_color ??
+              getDefaultBadgeColor(loadedProduct.image_badge_type ?? 'none'),
+            imageBadgePosition:
+              loadedProduct.image_badge_position ??
+              getDefaultBadgePosition(loadedProduct.image_badge_type ?? 'none'),
             status: loadedProduct.status,
             tagIds: loadedProduct.tags.map((tag) => tag.id),
           });
@@ -185,6 +213,26 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
   function updateField<Key extends keyof ProductFormState>(key: Key, value: ProductFormState[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function changeBadgeType(nextType: ProductImageBadgeType) {
+    setForm((current) => {
+      const currentDefaultColor = getDefaultBadgeColor(current.imageBadgeType);
+      const currentDefaultPosition = getDefaultBadgePosition(current.imageBadgeType);
+
+      return {
+        ...current,
+        imageBadgeType: nextType,
+        imageBadgeColor:
+          current.imageBadgeColor === currentDefaultColor
+            ? getDefaultBadgeColor(nextType)
+            : current.imageBadgeColor,
+        imageBadgePosition:
+          current.imageBadgePosition === currentDefaultPosition
+            ? getDefaultBadgePosition(nextType)
+            : current.imageBadgePosition,
+      };
+    });
   }
 
   function changeSizeGrid(nextGrid: ProductSizeGrid) {
@@ -404,6 +452,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         size_grid: form.sizeGrid,
         image_badge_type: form.imageBadgeType,
         image_badge_text: form.imageBadgeType === 'custom' ? form.imageBadgeText.trim() : null,
+        image_badge_color: form.imageBadgeColor,
+        image_badge_position: form.imageBadgePosition,
         status: form.status,
         category_id: primaryCategoryId,
         categories: normalizedCategories,
@@ -806,7 +856,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             <select
               value={form.imageBadgeType}
               onChange={(event) =>
-                updateField('imageBadgeType', event.target.value as ProductImageBadgeType)
+                changeBadgeType(event.target.value as ProductImageBadgeType)
               }
             >
               <option value="none">{t('productEditor.badgeNone')}</option>
@@ -828,9 +878,43 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               <small className="field-hint">{form.imageBadgeText.length}/20</small>
             </label>
           ) : null}
+          <label className="field">
+            <span>{t('productEditor.badgeColor')}</span>
+            <select
+              value={form.imageBadgeColor}
+              onChange={(event) =>
+                updateField('imageBadgeColor', event.target.value as ProductImageBadgeColor)
+              }
+            >
+              {BADGE_COLORS.map((color) => (
+                <option key={color.value} value={color.value}>
+                  {t(color.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{t('productEditor.badgePosition')}</span>
+            <select
+              value={form.imageBadgePosition}
+              onChange={(event) =>
+                updateField('imageBadgePosition', event.target.value as ProductImageBadgePosition)
+              }
+            >
+              {BADGE_POSITIONS.map((position) => (
+                <option key={position.value} value={position.value}>
+                  {t(position.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
           {form.imageBadgeType !== 'none' ? (
-            <div className={`image-badge-preview image-badge-preview--${form.imageBadgeType}`}>
-              {getBadgePreviewText(form.imageBadgeType, form.imageBadgeText, t)}
+            <div className="image-badge-preview-frame" aria-label={t('productEditor.badgePreview')}>
+              <div
+                className={`image-badge-preview image-badge-preview--color-${form.imageBadgeColor} image-badge-preview--position-${form.imageBadgePosition}`}
+              >
+                {getBadgePreviewText(form.imageBadgeType, form.imageBadgeText, t)}
+              </div>
             </div>
           ) : null}
         </div>
@@ -1018,6 +1102,17 @@ function getBadgePreviewText(
   if (badgeType === 'hit') return t('productEditor.badgeHit');
   if (badgeType === 'exclusive') return t('productEditor.badgeExclusive');
   return customText.trim() || t('productEditor.badgeCustom');
+}
+
+function getDefaultBadgeColor(badgeType: ProductImageBadgeType): ProductImageBadgeColor {
+  if (badgeType === 'sale') return 'red';
+  if (badgeType === 'hit') return 'orange';
+  if (badgeType === 'exclusive') return 'black';
+  return 'purple';
+}
+
+function getDefaultBadgePosition(badgeType: ProductImageBadgeType): ProductImageBadgePosition {
+  return badgeType === 'new' ? 'top-left' : 'bottom-left';
 }
 
 function getCategoryRowsFromProduct(product: Product): CategoryAssignmentRow[] {

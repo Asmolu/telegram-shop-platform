@@ -4,7 +4,13 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
-from app.db.models import ProductImageBadgeType, ProductSizeGrid, ProductStatus
+from app.db.models import (
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
+    ProductImageBadgeType,
+    ProductSizeGrid,
+    ProductStatus,
+)
 from app.modules.categories.schemas import CategoryRead
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.search import (
@@ -145,6 +151,10 @@ def _normalize_optional_text(value: object) -> object:
     return normalized or None
 
 
+def _normalize_optional_enum(value: object) -> object:
+    return _normalize_optional_text(value)
+
+
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -162,6 +172,8 @@ class ProductBase(BaseModel):
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
     image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
     image_badge_text: str | None = Field(default=None, max_length=20)
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     status: ProductStatus = ProductStatus.DRAFT
     category_id: int | None = None
 
@@ -187,6 +199,11 @@ class ProductBase(BaseModel):
         value: ProductImageBadgeType | None,
     ) -> ProductImageBadgeType:
         return ProductImageBadgeType.NONE if value is None else value
+
+    @field_validator("image_badge_color", "image_badge_position", mode="before")
+    @classmethod
+    def normalize_optional_badge_enum(cls, value: object) -> object:
+        return _normalize_optional_enum(value)
 
     @field_validator("image_badge_text")
     @classmethod
@@ -241,6 +258,8 @@ class ProductUpdate(BaseModel):
     size_grid: ProductSizeGrid | None = None
     image_badge_type: ProductImageBadgeType | None = None
     image_badge_text: str | None = Field(default=None, max_length=20)
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     status: ProductStatus | None = None
     category_id: int | None = None
     categories: list[ProductCategoryInput] | None = None
@@ -257,6 +276,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def normalize_brand(cls, value: object) -> object:
         return _normalize_optional_text(value)
+
+    @field_validator("image_badge_color", "image_badge_position", mode="before")
+    @classmethod
+    def normalize_optional_badge_enum(cls, value: object) -> object:
+        return _normalize_optional_enum(value)
 
     @field_validator("image_badge_text")
     @classmethod

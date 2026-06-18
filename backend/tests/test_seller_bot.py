@@ -14,6 +14,8 @@ from app.db.models import (
     Category,
     NotificationChannel,
     NotificationStatus,
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
     ProductImageBadgeType,
     ProductSizeGrid,
     ProductStatus,
@@ -568,6 +570,75 @@ async def test_new_product_command_creates_custom_badge(
 
 
 @pytest.mark.asyncio
+async def test_new_product_command_creates_badge_appearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, _, _ = _quick_product_service()
+
+    message = await service.create_quick_product_draft_command(
+        chat_id=-100,
+        message=_quick_product_message(
+            caption=_strict_product_caption(
+                title="Color Badge Hoodie",
+                size_grid="одежда",
+                rows=("M / White / 2 / COLOR-M",),
+                image_badge="Хит",
+                image_badge_color="green",
+                image_badge_position="сверху справа",
+            )
+        ),
+        actor_telegram_user_id=500,
+        actor_username="operator",
+    )
+
+    product = product_repository.products[0]
+    assert product.image_badge_type == ProductImageBadgeType.HIT
+    assert product.image_badge_color == ProductImageBadgeColor.GREEN
+    assert product.image_badge_position == ProductImageBadgePosition.TOP_RIGHT
+    assert "Цвет виджета фото: зеленый" in message
+    assert "Положение виджета фото: сверху справа" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("image_badge_color", "teal", "Цвет виджета фото"),
+        ("image_badge_position", "центр", "Положение виджета фото"),
+    ],
+)
+async def test_new_product_command_rejects_invalid_badge_appearance(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, product_repository, _, storage, _ = _quick_product_service()
+    kwargs = {
+        "title": "Invalid Badge Appearance",
+        "size_grid": "одежда",
+        "rows": ("M / White / 2 / INVALID-APPEARANCE-M",),
+        "image_badge": "Хит",
+        field: value,
+    }
+
+    with pytest.raises(AppError, match=expected):
+        await service.create_quick_product_draft_command(
+            chat_id=-100,
+            message=_quick_product_message(
+                caption=_strict_product_caption(**kwargs),
+            ),
+            actor_telegram_user_id=500,
+            actor_username="operator",
+        )
+
+    assert product_repository.products == []
+    assert storage.saved == []
+
+
+@pytest.mark.asyncio
 async def test_new_product_command_rejects_unknown_related_product(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1008,6 +1079,8 @@ def _strict_product_caption(
     related_products: str | None = None,
     image_badge: str | None = None,
     image_badge_text: str | None = None,
+    image_badge_color: str | None = None,
+    image_badge_position: str | None = None,
     status: str = "черновик",
 ) -> str:
     lines = [
@@ -1027,6 +1100,10 @@ def _strict_product_caption(
         lines.append(f"Виджет фото: {image_badge}")
     if image_badge_text is not None:
         lines.append(f"Текст виджета фото: {image_badge_text}")
+    if image_badge_color is not None:
+        lines.append(f"Цвет виджета фото: {image_badge_color}")
+    if image_badge_position is not None:
+        lines.append(f"Положение виджета фото: {image_badge_position}")
     lines.append(f"Статус: {status}")
     return "\n".join(lines)
 

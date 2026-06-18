@@ -7,6 +7,16 @@ export type PageMeta = {
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
+export type ProductImageBadgeColor =
+  | 'purple'
+  | 'pink'
+  | 'red'
+  | 'orange'
+  | 'blue'
+  | 'green'
+  | 'black'
+  | 'white';
+export type ProductImageBadgePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
 export type ManualPaymentStatus =
@@ -89,6 +99,8 @@ export type Product = {
   size_grid: ProductSizeGrid;
   image_badge_type: ProductImageBadgeType;
   image_badge_text?: string | null;
+  image_badge_color?: ProductImageBadgeColor | null;
+  image_badge_position?: ProductImageBadgePosition | null;
   status: ProductStatus;
   category_id?: number | null;
   category?: Category | null;

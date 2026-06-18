@@ -21,6 +21,8 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
     ProductImageBadgeType,
     ProductSizeGrid,
     ProductStatus,
@@ -90,6 +92,14 @@ QUICK_PRODUCT_ALLOWED_FIELDS = {
     "текст бейджа": "image_badge_text",
     "badge_text": "image_badge_text",
     "image_badge_text": "image_badge_text",
+    "цвет виджета фото": "image_badge_color",
+    "цвет бейджа": "image_badge_color",
+    "badge_color": "image_badge_color",
+    "image_badge_color": "image_badge_color",
+    "положение виджета фото": "image_badge_position",
+    "положение бейджа": "image_badge_position",
+    "badge_position": "image_badge_position",
+    "image_badge_position": "image_badge_position",
     "приоритет поиска": "search_priority",
     "псевдонимы поиска": "search_aliases",
     "ключевые слова": "search_aliases",
@@ -130,6 +140,62 @@ QUICK_PRODUCT_BADGE_LABELS = {
     ProductImageBadgeType.HIT: "Хит",
     ProductImageBadgeType.EXCLUSIVE: "Эксклюзив",
 }
+QUICK_PRODUCT_BADGE_COLOR_ALIASES = {
+    "purple": ProductImageBadgeColor.PURPLE,
+    "фиолетовый": ProductImageBadgeColor.PURPLE,
+    "pink": ProductImageBadgeColor.PINK,
+    "розовый": ProductImageBadgeColor.PINK,
+    "red": ProductImageBadgeColor.RED,
+    "красный": ProductImageBadgeColor.RED,
+    "orange": ProductImageBadgeColor.ORANGE,
+    "оранжевый": ProductImageBadgeColor.ORANGE,
+    "blue": ProductImageBadgeColor.BLUE,
+    "синий": ProductImageBadgeColor.BLUE,
+    "green": ProductImageBadgeColor.GREEN,
+    "зеленый": ProductImageBadgeColor.GREEN,
+    "зелёный": ProductImageBadgeColor.GREEN,
+    "black": ProductImageBadgeColor.BLACK,
+    "черный": ProductImageBadgeColor.BLACK,
+    "чёрный": ProductImageBadgeColor.BLACK,
+    "white": ProductImageBadgeColor.WHITE,
+    "light": ProductImageBadgeColor.WHITE,
+    "белый": ProductImageBadgeColor.WHITE,
+    "светлый": ProductImageBadgeColor.WHITE,
+}
+QUICK_PRODUCT_BADGE_COLOR_LABELS = {
+    ProductImageBadgeColor.PURPLE: "фиолетовый",
+    ProductImageBadgeColor.PINK: "розовый",
+    ProductImageBadgeColor.RED: "красный",
+    ProductImageBadgeColor.ORANGE: "оранжевый",
+    ProductImageBadgeColor.BLUE: "синий",
+    ProductImageBadgeColor.GREEN: "зеленый",
+    ProductImageBadgeColor.BLACK: "черный",
+    ProductImageBadgeColor.WHITE: "белый",
+}
+QUICK_PRODUCT_BADGE_POSITION_ALIASES = {
+    "top-left": ProductImageBadgePosition.TOP_LEFT,
+    "top left": ProductImageBadgePosition.TOP_LEFT,
+    "top_left": ProductImageBadgePosition.TOP_LEFT,
+    "сверху слева": ProductImageBadgePosition.TOP_LEFT,
+    "top-right": ProductImageBadgePosition.TOP_RIGHT,
+    "top right": ProductImageBadgePosition.TOP_RIGHT,
+    "top_right": ProductImageBadgePosition.TOP_RIGHT,
+    "сверху справа": ProductImageBadgePosition.TOP_RIGHT,
+    "bottom-left": ProductImageBadgePosition.BOTTOM_LEFT,
+    "bottom left": ProductImageBadgePosition.BOTTOM_LEFT,
+    "bottom_left": ProductImageBadgePosition.BOTTOM_LEFT,
+    "снизу слева": ProductImageBadgePosition.BOTTOM_LEFT,
+    "bottom-right": ProductImageBadgePosition.BOTTOM_RIGHT,
+    "bottom right": ProductImageBadgePosition.BOTTOM_RIGHT,
+    "bottom_right": ProductImageBadgePosition.BOTTOM_RIGHT,
+    "снизу справа": ProductImageBadgePosition.BOTTOM_RIGHT,
+}
+QUICK_PRODUCT_BADGE_POSITION_LABELS = {
+    ProductImageBadgePosition.TOP_LEFT: "сверху слева",
+    ProductImageBadgePosition.TOP_RIGHT: "сверху справа",
+    ProductImageBadgePosition.BOTTOM_LEFT: "снизу слева",
+    ProductImageBadgePosition.BOTTOM_RIGHT: "снизу справа",
+}
 
 
 @dataclass(frozen=True)
@@ -161,6 +227,8 @@ class QuickProductDraft:
     related_product_ids: list[int]
     image_badge_type: ProductImageBadgeType
     image_badge_text: str | None
+    image_badge_color: ProductImageBadgeColor | None
+    image_badge_position: ProductImageBadgePosition | None
     search_priority: int
     search_aliases: str | None
     status: ProductStatus
@@ -507,6 +575,8 @@ class SellerBotService:
                 size_grid=draft.size_grid,
                 image_badge_type=draft.image_badge_type,
                 image_badge_text=draft.image_badge_text,
+                image_badge_color=draft.image_badge_color,
+                image_badge_position=draft.image_badge_position,
                 status=draft.status,
                 categories=categories,
                 tag_ids=[tag.id for tag in tags],
@@ -533,6 +603,12 @@ class SellerBotService:
                     "status": product.status.value,
                     "image_count": len(product.images),
                     "image_badge_type": product.image_badge_type.value,
+                    "image_badge_color": product.image_badge_color.value
+                    if product.image_badge_color
+                    else None,
+                    "image_badge_position": product.image_badge_position.value
+                    if product.image_badge_position
+                    else None,
                     "related_product_ids": draft.related_product_ids,
                 },
                 metadata={
@@ -542,6 +618,12 @@ class SellerBotService:
                     "size_grid": draft.size_grid.value,
                     "variant_count": len(variant_payloads),
                     "image_badge_type": draft.image_badge_type.value,
+                    "image_badge_color": draft.image_badge_color.value
+                    if draft.image_badge_color
+                    else None,
+                    "image_badge_position": draft.image_badge_position.value
+                    if draft.image_badge_position
+                    else None,
                     "related_product_ids": draft.related_product_ids,
                 },
                 commit=False,
@@ -685,6 +767,10 @@ class SellerBotService:
             values.get("image_badge_type"),
             values.get("image_badge_text"),
         )
+        image_badge_color = self._parse_image_badge_color(values.get("image_badge_color"))
+        image_badge_position = self._parse_image_badge_position(
+            values.get("image_badge_position")
+        )
 
         return QuickProductDraft(
             title=title,
@@ -700,6 +786,8 @@ class SellerBotService:
             ),
             image_badge_type=image_badge_type,
             image_badge_text=image_badge_text,
+            image_badge_color=image_badge_color,
+            image_badge_position=image_badge_position,
             search_priority=search_priority,
             search_aliases=normalize_search_aliases(values.get("search_aliases")),
             status=status,
@@ -760,6 +848,40 @@ class SellerBotService:
         if "<" in badge_text or ">" in badge_text:
             raise AppError("поле `Текст виджета фото` не должно содержать HTML.", 400)
         return badge_type, badge_text
+
+    def _parse_image_badge_color(
+        self,
+        value: str | None,
+    ) -> ProductImageBadgeColor | None:
+        normalized = self._optional_text(value)
+        if normalized is None:
+            return None
+
+        color = QUICK_PRODUCT_BADGE_COLOR_ALIASES.get(normalized.casefold())
+        if color is None:
+            raise AppError(
+                "поле `Цвет виджета фото` должно быть одним из: purple, pink, red, "
+                "orange, blue, green, black, white.",
+                400,
+            )
+        return color
+
+    def _parse_image_badge_position(
+        self,
+        value: str | None,
+    ) -> ProductImageBadgePosition | None:
+        normalized = self._optional_text(value)
+        if normalized is None:
+            return None
+
+        position = QUICK_PRODUCT_BADGE_POSITION_ALIASES.get(normalized.casefold())
+        if position is None:
+            raise AppError(
+                "поле `Положение виджета фото` должно быть одним из: сверху слева, "
+                "сверху справа, снизу слева, снизу справа.",
+                400,
+            )
+        return position
 
     def _parse_size_grid(self, value: str) -> ProductSizeGrid:
         size_grid = QUICK_PRODUCT_SIZE_GRID_ALIASES.get(value.strip().casefold())
@@ -963,6 +1085,15 @@ class SellerBotService:
         ]
         if draft.image_badge_type != ProductImageBadgeType.NONE:
             lines.append(f"Виджет фото: {self._quick_product_badge_label(draft)}")
+        if draft.image_badge_color is not None:
+            lines.append(
+                f"Цвет виджета фото: {QUICK_PRODUCT_BADGE_COLOR_LABELS[draft.image_badge_color]}"
+            )
+        if draft.image_badge_position is not None:
+            lines.append(
+                "Положение виджета фото: "
+                f"{QUICK_PRODUCT_BADGE_POSITION_LABELS[draft.image_badge_position]}"
+            )
         if draft.related_product_ids:
             lines.append(
                 f"Похожие товары: {', '.join(str(item) for item in draft.related_product_ids)}"
@@ -992,6 +1123,8 @@ XL / Black / 5 / HERMES-XL-B
 3XL / Black / 3 / HERMES-3XL-B
 Похожие товары: 11, 12, 13
 Виджет фото: Распродажа
+Цвет виджета фото: red
+Положение виджета фото: снизу слева
 Псевдонимы поиска: футболка, фудболка, футбалка
 Статус: черновик"""
         footwear_example = """/new_product
@@ -1009,10 +1142,14 @@ XL / Black / 5 / HERMES-XL-B
 41 / Black / 4 / SKU-NIKE-41-B
 Похожие товары: 11, 12, 13
 Виджет фото: NEW
+Цвет виджета фото: purple
+Положение виджета фото: сверху слева
 Псевдонимы поиска: найк, кросовки, кроссовки
 Статус: черновик"""
         custom_badge_example = """Виджет фото: custom
-Текст виджета фото: -30%"""
+Текст виджета фото: -30%
+Цвет виджета фото: pink
+Положение виджета фото: сверху справа"""
         return "\n\n".join(
             (
                 "Отправь фото товара с подписью в одном из форматов ниже.",
@@ -1032,6 +1169,9 @@ XL / Black / 5 / HERMES-XL-B
                         "Похожие товары указываются ID через запятую.",
                         "Виджет фото: нет, NEW, Распродажа, Хит, Эксклюзив, custom.",
                         "Для custom добавь: Текст виджета фото: ...",
+                        "Цвет виджета фото: purple, pink, red, orange, blue, green, black, white.",
+                        "Положение виджета фото: сверху слева, сверху справа, "
+                        "снизу слева, снизу справа.",
                         "Категории и теги должны уже существовать.",
                         "По умолчанию товар создаётся как черновик.",
                     )
@@ -1076,6 +1216,8 @@ XL / Black / 5 / HERMES-XL-B
             "stock_quantity": "Остаток",
             "image_badge_text": "Текст виджета фото",
             "image_badge_type": "Виджет фото",
+            "image_badge_color": "Цвет виджета фото",
+            "image_badge_position": "Положение виджета фото",
             "related_product_ids": "Похожие товары",
         }
         return f"поле `{labels.get(field, field)}` не прошло проверку: {error['msg']}."
