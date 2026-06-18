@@ -136,9 +136,19 @@ def _normalize_badge_text(value: str | None) -> str | None:
     return normalized
 
 
+def _normalize_optional_text(value: object) -> object:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    normalized = value.strip()
+    return normalized or None
+
+
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    brand: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     base_price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
     old_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
@@ -159,6 +169,11 @@ class ProductBase(BaseModel):
     @classmethod
     def normalize_aliases(cls, value: str | None) -> str | None:
         return normalize_search_aliases(value)
+
+    @field_validator("brand", mode="before")
+    @classmethod
+    def normalize_brand(cls, value: object) -> object:
+        return _normalize_optional_text(value)
 
     @field_validator("search_priority", mode="before")
     @classmethod
@@ -217,6 +232,7 @@ class ProductUpdate(BaseModel):
         max_length=255,
         pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
     )
+    brand: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     base_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     old_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
@@ -236,6 +252,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def normalize_aliases(cls, value: str | None) -> str | None:
         return normalize_search_aliases(value)
+
+    @field_validator("brand", mode="before")
+    @classmethod
+    def normalize_brand(cls, value: object) -> object:
+        return _normalize_optional_text(value)
 
     @field_validator("image_badge_text")
     @classmethod

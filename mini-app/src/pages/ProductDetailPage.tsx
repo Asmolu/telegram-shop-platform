@@ -20,6 +20,43 @@ import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductI
 import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { displaySize, sortVariants } from '../shared/utils/sizes';
 
+const NO_COLOR_KEY = '__no_color__';
+
+type ColorOption = {
+  key: string;
+  label: string;
+  availableCount: number;
+};
+
+function getVariantColorKey(variant: ProductVariant) {
+  return variant.color?.trim() || NO_COLOR_KEY;
+}
+
+function getVariantColorLabel(variant: ProductVariant) {
+  return variant.color?.trim() || 'Без цвета';
+}
+
+function getColorOptions(variants: ProductVariant[]): ColorOption[] {
+  const options = new Map<string, ColorOption>();
+
+  variants.forEach((variant) => {
+    const key = getVariantColorKey(variant);
+    const option = options.get(key) ?? {
+      key,
+      label: getVariantColorLabel(variant),
+      availableCount: 0,
+    };
+    option.availableCount += Math.max(variant.available_quantity, 0);
+    options.set(key, option);
+  });
+
+  return Array.from(options.values());
+}
+
+function firstSelectableVariant(variants: ProductVariant[]) {
+  return variants.find((variant) => variant.available_quantity > 0) ?? variants[0] ?? null;
+}
+
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate, goBack } = useRouter();
   const { isAuthenticated } = useAuth();
@@ -30,6 +67,7 @@ export function ProductDetailPage() {
   const [addedVariantIds, setAddedVariantIds] = React.useState<Set<number>>(new Set());
   const [favorite, setFavorite] = React.useState(false);
   const [selectedVariantId, setSelectedVariantId] = React.useState<number | null>(null);
+  const [selectedColorKey, setSelectedColorKey] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -64,7 +102,12 @@ export function ProductDetailPage() {
           setFavorite(favoritesResult.items.some((item) => item.product_id === productResult.id));
           setCart(cartResult);
           setAddedVariantIds(new Set(cartResult?.items.map((item) => item.product_variant.id) ?? []));
-          const activeVariant = productResult.variants.find((variant) => variant.is_active && variant.available_quantity > 0);
+          const activeVariants = sortVariants(
+            productResult.variants.filter((variant) => variant.is_active),
+            productResult.size_grid,
+          );
+          const activeVariant = firstSelectableVariant(activeVariants);
+          setSelectedColorKey(activeVariant ? getVariantColorKey(activeVariant) : null);
           setSelectedVariantId(activeVariant?.id ?? null);
         }
       } catch (loadError) {
@@ -83,6 +126,68 @@ export function ProductDetailPage() {
       cancelled = true;
     };
   }, [isAuthenticated, productId]);
+
+  const activeVariants = React.useMemo(
+    () => product
+      ? sortVariants(
+          product.variants.filter((variant) => variant.is_active),
+          product.size_grid,
+        )
+      : [],
+    [product],
+  );
+  const colorOptions = React.useMemo(() => getColorOptions(activeVariants), [activeVariants]);
+  const selectedColorVariants = React.useMemo(
+    () => selectedColorKey
+      ? activeVariants.filter((variant) => getVariantColorKey(variant) === selectedColorKey)
+      : activeVariants,
+    [activeVariants, selectedColorKey],
+  );
+  const selectedColorOption = colorOptions.find((option) => option.key === selectedColorKey) ?? null;
+  const showColorSelector = colorOptions.length > 1
+    || colorOptions.some((option) => option.key !== NO_COLOR_KEY);
+
+  React.useEffect(() => {
+    if (!product) {
+      return;
+    }
+
+    if (activeVariants.length === 0) {
+      if (selectedVariantId !== null) {
+        setSelectedVariantId(null);
+      }
+      if (selectedColorKey !== null) {
+        setSelectedColorKey(null);
+      }
+      return;
+    }
+
+    const currentVariant = activeVariants.find((variant) => variant.id === selectedVariantId) ?? null;
+    const colorStillValid = Boolean(
+      selectedColorKey && colorOptions.some((option) => option.key === selectedColorKey),
+    );
+    const nextColorKey = colorStillValid
+      ? selectedColorKey
+      : currentVariant
+        ? getVariantColorKey(currentVariant)
+        : colorOptions[0]?.key ?? null;
+    const variantsForColor = nextColorKey
+      ? activeVariants.filter((variant) => getVariantColorKey(variant) === nextColorKey)
+      : activeVariants;
+    const currentVariantStillValid = Boolean(
+      currentVariant && variantsForColor.some((variant) => variant.id === currentVariant.id),
+    );
+    const nextVariant = currentVariantStillValid
+      ? currentVariant
+      : firstSelectableVariant(variantsForColor);
+
+    if (nextColorKey !== selectedColorKey) {
+      setSelectedColorKey(nextColorKey);
+    }
+    if ((nextVariant?.id ?? null) !== selectedVariantId) {
+      setSelectedVariantId(nextVariant?.id ?? null);
+    }
+  }, [activeVariants, colorOptions, product, selectedColorKey, selectedVariantId]);
 
   const selectedVariant = product?.variants.find((variant) => variant.id === selectedVariantId) ?? null;
   const selectedVariantAvailable = Boolean(
@@ -109,6 +214,21 @@ export function ProductDetailPage() {
       || (selectedVariant !== null && !selectedVariantAvailable)
     )),
   );
+
+  function selectColor(colorKey: string) {
+    const variantsForColor = activeVariants.filter(
+      (variant) => getVariantColorKey(variant) === colorKey,
+    );
+    const sameSizeVariant = selectedVariant
+      ? variantsForColor.find(
+          (variant) => variant.size === selectedVariant.size && variant.available_quantity > 0,
+        )
+      : null;
+    const nextVariant = sameSizeVariant ?? firstSelectableVariant(variantsForColor);
+
+    setSelectedColorKey(colorKey);
+    setSelectedVariantId(nextVariant?.id ?? null);
+  }
 
   async function toggleFavorite() {
     if (!product) return;
@@ -233,10 +353,6 @@ export function ProductDetailPage() {
     );
   }
 
-  const activeVariants = sortVariants(
-    product.variants.filter((variant) => variant.is_active),
-    product.size_grid,
-  );
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
 
@@ -286,11 +402,30 @@ export function ProductDetailPage() {
         )}
       </section>
 
-      <section className="detail-card">
+      <section className="detail-card variant-selector-card">
+        {showColorSelector ? (
+          <>
+            <div className="selector-heading">
+              <h2>Цвет</h2>
+              {selectedColorOption ? <span>{selectedColorOption.label}</span> : null}
+            </div>
+            <div className="variant-carousel color-carousel" aria-label="Доступные цвета">
+              {colorOptions.map((option) => (
+                <ColorButton
+                  key={option.key}
+                  option={option}
+                  selected={selectedColorKey === option.key}
+                  onSelect={() => selectColor(option.key)}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+
         <h2>{product.size_grid === 'shoes_ru' ? 'Российский размер' : 'Размер'}</h2>
-        {activeVariants.length > 0 ? (
+        {selectedColorVariants.length > 0 ? (
           <div className="variant-carousel" aria-label="Доступные размеры">
-            {activeVariants.map((variant) => (
+            {selectedColorVariants.map((variant) => (
               <VariantButton
                 key={variant.id}
                 selected={selectedVariantId === variant.id}
@@ -368,7 +503,7 @@ export function ProductDetailPage() {
               value={reviewText}
               onChange={(event) => setReviewText(event.target.value)}
               placeholder="Что понравилось?"
-              rows={3}
+              rows={4}
             />
           </label>
           <button className="secondary-button" type="submit" disabled={reviewBusy || !reviewText.trim()}>
@@ -405,6 +540,27 @@ export function ProductDetailPage() {
   );
 }
 
+function ColorButton({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: ColorOption;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      className={`color-button ${selected ? 'is-selected' : ''} ${option.availableCount <= 0 ? 'is-unavailable' : ''}`}
+      type="button"
+      onClick={onSelect}
+    >
+      <strong>{option.label}</strong>
+      <span>{option.availableCount <= 0 ? 'нет' : `${option.availableCount} шт.`}</span>
+    </button>
+  );
+}
+
 function VariantButton({
   variant,
   sizeGrid,
@@ -425,7 +581,7 @@ function VariantButton({
       type="button"
       onClick={onSelect}
     >
-      <strong>{variant.color ? `${displaySize(sizeGrid, variant.size)} · ${variant.color}` : displaySize(sizeGrid, variant.size)}</strong>
+      <strong>{displaySize(sizeGrid, variant.size)}</strong>
       <span>{disabled ? 'нет' : `${variant.available_quantity} шт.`}</span>
     </button>
   );

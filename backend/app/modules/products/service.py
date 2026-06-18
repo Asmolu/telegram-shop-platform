@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 PRODUCT_AUDIT_FIELDS = (
     "name",
     "slug",
+    "brand",
     "description",
     "base_price",
     "old_price",

@@ -738,3 +738,23 @@ def test_manual_payment_telegram_message_refs_migration_and_model_contract() -> 
     assert migration.down_revision == "20260615_0028"
     assert ManualPayment.__table__.c.seller_telegram_chat_id.nullable is True
     assert ManualPayment.__table__.c.seller_telegram_message_id.nullable is True
+
+
+def test_product_brand_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260618_0030_add_product_brand.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_product_brand", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260615_0029"
+    assert "brand" in content
+    assert Product.__table__.c.brand.nullable is True
+    assert Product.__table__.c.brand.type.length == 120

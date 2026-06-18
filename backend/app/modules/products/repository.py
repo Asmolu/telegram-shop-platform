@@ -256,6 +256,7 @@ class ProductsRepository:
         return or_(
             self._text_matches(Product.name, term, search_pattern),
             self._text_matches(Product.slug, term, search_pattern),
+            self._text_matches(Product.brand, term, search_pattern),
             self._text_matches(Product.description, term, search_pattern),
             self._text_matches(Product.search_aliases, term, search_pattern),
             Product.category.has(

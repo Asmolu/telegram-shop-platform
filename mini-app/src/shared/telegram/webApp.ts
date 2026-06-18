@@ -8,6 +8,8 @@ export type TelegramThemeParams = {
   secondary_bg_color?: string;
 };
 
+export type TelegramColorScheme = 'light' | 'dark';
+
 export type TelegramUser = {
   id: number;
   first_name?: string;
@@ -36,7 +38,7 @@ export type TelegramWebApp = {
     user?: TelegramUser;
   };
   themeParams?: TelegramThemeParams;
-  colorScheme?: 'light' | 'dark';
+  colorScheme?: TelegramColorScheme;
   platform?: string;
   isFullscreen?: boolean;
   safeAreaInset?: TelegramSafeAreaInset;
@@ -268,7 +270,7 @@ function getContrastRatio(left: string, right: string) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-function resolveThemeMode(colorScheme?: 'light' | 'dark', bgColor?: string | null) {
+function resolveThemeMode(colorScheme?: TelegramColorScheme, bgColor?: string | null): TelegramColorScheme {
   if (colorScheme === 'dark' || colorScheme === 'light') {
     return colorScheme;
   }
@@ -287,12 +289,24 @@ function setThemeToken(root: HTMLElement, token: string, color: string | null, c
 export function applyTelegramTheme() {
   const webApp = getTelegramWebApp();
   const root = document.documentElement;
+  const telegramTheme = getTelegramThemeMode();
 
   if (!root.dataset.theme) {
     root.dataset.theme = 'light';
   }
   root.dataset.telegram = webApp ? 'true' : 'false';
+  root.dataset.telegramTheme = telegramTheme ?? 'unknown';
   themeOverrideTokens.forEach((token) => root.style.removeProperty(token));
+}
+
+export function getTelegramThemeMode(): TelegramColorScheme | null {
+  const webApp = getTelegramWebApp();
+  if (!webApp) {
+    return null;
+  }
+
+  const bgColor = normalizeColor(webApp.themeParams?.bg_color);
+  return resolveThemeMode(webApp.colorScheme, bgColor);
 }
 
 export function subscribeTelegramThemeChanges(handler: () => void) {
@@ -302,6 +316,27 @@ export function subscribeTelegramThemeChanges(handler: () => void) {
   return () => {
     webApp?.offEvent?.('themeChanged', handler);
   };
+}
+
+export function closeTelegramApp() {
+  const webApp = getTelegramWebApp();
+
+  try {
+    if (typeof webApp?.close === 'function') {
+      webApp.close();
+      return true;
+    }
+  } catch {
+    // Browser fallback below is used when Telegram refuses or lacks close().
+  }
+
+  try {
+    window.close();
+  } catch {
+    // Ordinary browser tabs usually cannot be closed by scripts.
+  }
+
+  return false;
 }
 
 export function getTelegramBotUrl() {

@@ -16,7 +16,7 @@ import { getUserDisplayName } from '../shared/utils/format';
 export function ProfilePage() {
   const { currentPath, navigate } = useRouter();
   const { clearToken, isAuthenticated, isTelegram, status, telegramUser, user } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, themePreference, setTheme } = useTheme();
   const [subscription, setSubscription] =
     React.useState<CustomerNotificationSubscription | null>(null);
   const [notificationsLoading, setNotificationsLoading] = React.useState(false);
@@ -161,14 +161,30 @@ export function ProfilePage() {
         <label className="toggle-setting">
           <span>
             <strong>Тема интерфейса</strong>
-            <small>{theme === 'dark' ? 'Тёмная' : 'Светлая'}</small>
+            <small>
+              {themePreference === 'auto'
+                ? `Авто · ${theme === 'dark' ? 'тёмная' : 'светлая'}`
+                : theme === 'dark'
+                  ? 'Тёмная'
+                  : 'Светлая'}
+            </small>
           </span>
-          <input
-            checked={theme === 'dark'}
-            role="switch"
-            type="checkbox"
-            onChange={(event) => setTheme(event.target.checked ? 'dark' : 'light')}
-          />
+          <div className="segmented-control theme-mode-control" aria-label="Режим темы">
+            {[
+              ['auto', 'Авто'],
+              ['light', 'Свет'],
+              ['dark', 'Тьма'],
+            ].map(([value, label]) => (
+              <button
+                className={themePreference === value ? 'is-selected' : ''}
+                key={value}
+                type="button"
+                onClick={() => setTheme(value as 'auto' | 'light' | 'dark')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </label>
         <div>
           <span>Данные и приватность</span>

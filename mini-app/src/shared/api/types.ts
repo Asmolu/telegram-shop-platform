@@ -81,6 +81,7 @@ export type Product = {
   id: number;
   name: string;
   slug: string;
+  brand?: string | null;
   description?: string | null;
   base_price: string;
   old_price?: string | null;

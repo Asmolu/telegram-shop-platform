@@ -2,6 +2,7 @@ import React from 'react';
 import { getBanners, getCart, trackBannerClick, type Banner } from '../api';
 import { useAuth } from '../auth/AuthProvider';
 import { Link, useRouter } from '../router/RouterProvider';
+import { closeTelegramApp } from '../telegram/webApp';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
@@ -31,6 +32,10 @@ export function TopBar({
   right?: React.ReactNode;
   variant?: 'marketplace';
 }) {
+  const closeApp = React.useCallback(() => {
+    closeTelegramApp();
+  }, []);
+
   return (
     <header className="top-bar top-bar--marketplace">
       <div className="top-bar__left">
@@ -41,7 +46,17 @@ export function TopBar({
         ) : null}
         <h1>{title}</h1>
       </div>
-      {right ? <div className="top-bar__right">{right}</div> : null}
+      <div className="top-bar__right">
+        {right}
+        <button
+          className="icon-button top-bar__exit-button"
+          type="button"
+          aria-label="Закрыть Mini App"
+          onClick={closeApp}
+        >
+          ×
+        </button>
+      </div>
     </header>
   );
 }

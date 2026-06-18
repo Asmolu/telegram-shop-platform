@@ -141,6 +141,7 @@ export interface Product {
   id: number;
   name: string;
   slug: string;
+  brand: string | null;
   description: string | null;
   base_price: ApiDecimal;
   old_price: ApiDecimal | null;
@@ -173,6 +174,7 @@ export interface ProductImageCreate {
 export interface ProductCreate {
   name: string;
   slug: string;
+  brand?: string | null;
   description?: string | null;
   base_price: string;
   old_price?: string | null;
@@ -192,6 +194,7 @@ export interface ProductCreate {
 export interface ProductUpdate {
   name?: string;
   slug?: string;
+  brand?: string | null;
   description?: string | null;
   base_price?: string;
   old_price?: string | null;

@@ -25,6 +25,7 @@ interface PageProps {
 interface ProductFormState {
   name: string;
   slug: string;
+  brand: string;
   description: string;
   basePrice: string;
   oldPrice: string;
@@ -58,6 +59,7 @@ interface VariantRow {
 const initialForm: ProductFormState = {
   name: '',
   slug: '',
+  brand: '',
   description: '',
   basePrice: '',
   oldPrice: '',
@@ -138,6 +140,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           setForm({
             name: loadedProduct.name,
             slug: loadedProduct.slug,
+            brand: loadedProduct.brand ?? '',
             description: loadedProduct.description ?? '',
             basePrice: String(loadedProduct.base_price),
             oldPrice: loadedProduct.old_price ? String(loadedProduct.old_price) : '',
@@ -392,6 +395,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       const payload = {
         name: form.name.trim(),
         slug: form.slug.trim(),
+        brand: form.brand.trim() || null,
         description: form.description.trim() || null,
         base_price: form.basePrice.trim(),
         old_price: form.oldPrice.trim() || null,
@@ -518,6 +522,15 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             <label className="field">
               <span>{t('productEditor.slug')}</span>
               <input value={form.slug} onChange={(event) => updateField('slug', event.target.value)} />
+            </label>
+            <label className="field field-wide">
+              <span>{t('productEditor.brand')}</span>
+              <input
+                maxLength={120}
+                value={form.brand}
+                onChange={(event) => updateField('brand', event.target.value)}
+              />
+              <small className="field-hint">{t('productEditor.brandHint')}</small>
             </label>
             <div className="form-pair-row field-wide">
               <label className="field">

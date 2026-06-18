@@ -576,6 +576,19 @@ def test_product_create_defaults_search_priority_to_medium() -> None:
     assert product.image_badge_text is None
 
 
+def test_product_brand_is_optional_and_normalized() -> None:
+    product = ProductCreate(
+        name="Hoodie",
+        slug="hoodie",
+        brand="  Gadji  ",
+        base_price=Decimal("59.90"),
+    )
+    update = ProductUpdate(brand="  ")
+
+    assert product.brand == "Gadji"
+    assert update.brand is None
+
+
 def test_product_create_rejects_duplicate_related_product_ids() -> None:
     with pytest.raises(ValidationError, match="duplicate related product"):
         ProductCreate(

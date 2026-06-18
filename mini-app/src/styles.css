@@ -320,7 +320,8 @@ label {
 }
 
 .top-bar__right {
-  min-height: 40px;
+  min-height: 46px;
+  gap: 8px;
 }
 
 .top-bar h1 {
@@ -332,6 +333,29 @@ label {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.top-bar__exit-button {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  border-color: rgba(255, 255, 255, 0.78);
+  background: #ffffff;
+  color: #6d28d9;
+  font-size: 25px;
+  line-height: 1;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.22);
+}
+
+.top-bar--marketplace .top-bar__exit-button {
+  width: 46px;
+  height: 46px;
+  border-color: rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  background: #ffffff;
+  color: #6d28d9;
+  font-size: 25px;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.22);
 }
 
 .icon-button,
@@ -473,6 +497,47 @@ label {
   font-size: 13px;
   font-weight: 900;
   box-shadow: 0 10px 20px rgba(124, 58, 237, 0.2);
+}
+
+.search-row--feed {
+  position: sticky;
+  top: calc(var(--app-header-top-padding) + 52px);
+  z-index: 19;
+  margin: -2px -12px 12px;
+  padding: 8px 12px 10px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.search-row--feed .search-field {
+  min-height: 53px;
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.12);
+}
+
+.search-row--feed .search-field--input input {
+  min-height: 51px;
+  color: #111827;
+  font-size: 15px;
+}
+
+.search-row--feed .search-field--input input::placeholder {
+  color: #6b7280;
+}
+
+.search-row--feed .search-icon {
+  width: 23px;
+  height: 23px;
+  flex-basis: 23px;
+}
+
+.search-row--feed .search-submit-button {
+  min-height: 53px;
+  border-radius: 17px;
+  padding: 0 16px;
+  font-size: 14px;
 }
 
 .search-field--static {
@@ -931,6 +996,18 @@ label {
   line-height: 1.35;
 }
 
+.product-card__brand {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .product-card__meta {
   overflow: hidden;
   color: var(--muted);
@@ -1289,6 +1366,11 @@ label {
   padding: 10px 12px;
 }
 
+.review-form textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
 .filter-section small,
 .muted-text,
 .form-error {
@@ -1536,7 +1618,33 @@ label {
   display: none;
 }
 
-.variant-button {
+.variant-selector-card {
+  gap: 12px;
+}
+
+.selector-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.selector-heading h2 {
+  margin-bottom: 0;
+}
+
+.selector-heading span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variant-button,
+.color-button {
   display: grid;
   flex: 0 0 auto;
   gap: 3px;
@@ -1552,21 +1660,32 @@ label {
   scroll-snap-align: start;
 }
 
-.variant-button strong {
+.color-button {
+  min-width: 104px;
+}
+
+.variant-button strong,
+.color-button strong {
   overflow-wrap: anywhere;
   font-size: 12px;
   line-height: 1.2;
 }
 
-.variant-button.is-selected {
+.variant-button.is-selected,
+.color-button.is-selected {
   border-color: var(--primary);
   background: var(--primary-soft);
   color: var(--primary);
 }
 
-.variant-button span {
+.variant-button span,
+.color-button span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.color-button.is-unavailable span {
+  color: var(--danger);
 }
 
 .related-products-section {
@@ -2386,6 +2505,28 @@ label {
   opacity: 0.55;
 }
 
+.theme-mode-control {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 3px;
+  max-width: 180px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.theme-mode-control button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  border-radius: 11px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .status-text-success {
   color: var(--success-text);
 }
@@ -2793,6 +2934,13 @@ label {
   }
 
   .top-bar {
+    margin-right: -10px;
+    margin-left: -10px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .search-row--feed {
     margin-right: -10px;
     margin-left: -10px;
     padding-right: 10px;
