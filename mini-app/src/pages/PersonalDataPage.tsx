@@ -131,7 +131,7 @@ export function PersonalDataPage() {
   if (!isAuthenticated) {
     return (
       <div className="page page--gradient-header">
-        <TopBar title="Личные данные" variant="marketplace" onBack={() => navigate('/profile')} />
+        <TopBar title="Личные данные" variant="marketplace" backFallback="/profile" />
         <EmptyState
           title="Нужен вход через Telegram"
           message="Сохранение личных данных доступно после входа."
@@ -144,7 +144,7 @@ export function PersonalDataPage() {
 
   return (
     <div className="page page--gradient-header">
-      <TopBar title="Личные данные" variant="marketplace" onBack={() => navigate('/profile')} />
+      <TopBar title="Личные данные" variant="marketplace" backFallback="/profile" />
       {loading ? <PageLoader text="Загружаем личные данные..." /> : null}
       {!loading ? (
         <section className="detail-card personal-data-card">

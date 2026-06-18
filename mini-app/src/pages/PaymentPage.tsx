@@ -173,7 +173,7 @@ export function PaymentPage() {
   if (!isAuthenticated) {
     return (
       <div className="page payment-page">
-        <TopBar title="Оплата заказа" onBack={() => navigate('/cart?tab=orders')} />
+        <TopBar title="Оплата заказа" backFallback="/cart?tab=orders" />
         <EmptyState
           title="Нужен вход через Telegram"
           actionLabel="Войти"
@@ -185,7 +185,7 @@ export function PaymentPage() {
 
   return (
     <div className="page payment-page">
-      <TopBar title="Оплата через СБП" onBack={() => navigate('/cart?tab=orders')} />
+      <TopBar title="Оплата через СБП" backFallback="/cart?tab=orders" />
       {loading ? <PageLoader text="Загружаем реквизиты..." /> : null}
       {!loading && error ? (
         <ErrorState

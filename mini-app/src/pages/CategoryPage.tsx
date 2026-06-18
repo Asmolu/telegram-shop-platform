@@ -69,7 +69,7 @@ export function CategoryPage() {
 
   return (
     <div className="page">
-      <TopBar title={category?.name ?? 'Категория'} variant="marketplace" onBack={() => navigate('/categories')} />
+      <TopBar title={category?.name ?? 'Категория'} variant="marketplace" backFallback="/categories" />
 
       {notice ? (
         <InlineNotice tone={notice.includes('добавлен') ? 'success' : 'warning'}>

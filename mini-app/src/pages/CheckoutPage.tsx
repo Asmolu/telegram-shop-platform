@@ -224,7 +224,7 @@ export function CheckoutPage() {
   if (!isAuthenticated) {
     return (
       <div className="page">
-        <TopBar title="Оформление" onBack={() => navigate(withReturnTo('/cart?tab=cart', returnToParam))} />
+        <TopBar title="Оформление" backFallback={withReturnTo('/cart?tab=cart', returnToParam)} />
         <EmptyState
           title="Нужен вход через Telegram"
           message="Оформление заказа доступно после входа."
@@ -237,7 +237,7 @@ export function CheckoutPage() {
 
   return (
     <div className="page">
-      <TopBar title="Оформление" onBack={() => navigate(withReturnTo('/cart?tab=cart', returnToParam))} />
+      <TopBar title="Оформление" backFallback={withReturnTo('/cart?tab=cart', returnToParam)} />
       {loading ? <PageLoader text="Проверяем корзину..." /> : null}
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error && (!cart || cart.items.length === 0) ? (

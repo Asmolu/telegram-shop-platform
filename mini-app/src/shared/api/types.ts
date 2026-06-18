@@ -99,6 +99,11 @@ export type Product = {
   related_product_ids?: number[];
   related_products?: Product[];
   is_available: boolean;
+  rating?: number | string | null;
+  average_rating?: number | string | null;
+  review_count?: number | string | null;
+  reviews_count?: number | string | null;
+  rating_count?: number | string | null;
   created_at: string;
   updated_at: string;
 };

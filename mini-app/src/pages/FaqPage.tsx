@@ -37,7 +37,7 @@ const faqItems = [
 ];
 
 export function FaqPage() {
-  const { navigate, searchParams } = useRouter();
+  const { searchParams } = useRouter();
   const topic = searchParams.get('topic');
   const initialOpenIndex = Math.max(0, faqItems.findIndex((item) => item.id === topic));
   const [openIndex, setOpenIndex] = React.useState(initialOpenIndex);
@@ -52,7 +52,7 @@ export function FaqPage() {
 
   return (
     <div className="page page--faq">
-      <TopBar title="FAQ" onBack={() => navigate('/main')} />
+      <TopBar title="FAQ" backFallback="/main" />
       <div className="accordion-list">
         {faqItems.map((item, index) => (
           <section className="accordion-item" key={item.id}>

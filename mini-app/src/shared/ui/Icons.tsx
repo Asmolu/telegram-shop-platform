@@ -22,3 +22,39 @@ export function CartIcon({ className = '' }: { className?: string }) {
     </svg>
   );
 }
+
+export function HeartIcon({
+  className = '',
+  filled = false,
+}: {
+  className?: string;
+  filled?: boolean;
+}) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 20.4s-7.2-4.5-9.1-8.9C1.4 8.1 3.4 4.8 7 4.8c2 0 3.6 1 5 2.8 1.4-1.8 3-2.8 5-2.8 3.6 0 5.6 3.3 4.1 6.7-1.9 4.4-9.1 8.9-9.1 8.9Z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.4"
+      />
+    </svg>
+  );
+}
+
+export function BackIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M15.5 5 8.5 12l7 7"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.8"
+      />
+    </svg>
+  );
+}

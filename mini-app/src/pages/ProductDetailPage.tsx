@@ -58,7 +58,7 @@ function firstSelectableVariant(variants: ProductVariant[]) {
 }
 
 export function ProductDetailPage() {
-  const { currentPath, pathname, navigate, goBack } = useRouter();
+  const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const productId = getNumericRouteParam(pathname, '/product/');
   const [product, setProduct] = React.useState<Product | null>(null);
@@ -338,7 +338,7 @@ export function ProductDetailPage() {
   if (loading) {
     return (
       <div className="page">
-        <TopBar title="Товар" onBack={() => navigate('/main')} />
+        <TopBar title="Товар" backFallback="/main" />
         <PageLoader text="Загружаем товар..." />
       </div>
     );
@@ -347,7 +347,7 @@ export function ProductDetailPage() {
   if (error || !product) {
     return (
       <div className="page">
-        <TopBar title="Товар" onBack={() => navigate('/main')} />
+        <TopBar title="Товар" backFallback="/main" />
         <ErrorState message={error ?? 'Товар не найден'} actionLabel="К ленте" onAction={() => navigate('/main')} />
       </div>
     );
@@ -360,7 +360,7 @@ export function ProductDetailPage() {
     <div className="page page--detail">
       <TopBar
         title="Товар"
-        onBack={() => goBack()}
+        backFallback="/main"
         right={
           <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" onClick={() => void toggleFavorite()}>
             {favorite ? '♥' : '♡'}

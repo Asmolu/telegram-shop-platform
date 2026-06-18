@@ -2,10 +2,10 @@ import React from 'react';
 import { getBanners, getCart, trackBannerClick, type Banner } from '../api';
 import { useAuth } from '../auth/AuthProvider';
 import { Link, useRouter } from '../router/RouterProvider';
-import { closeTelegramApp } from '../telegram/webApp';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
+import { BackIcon } from './Icons';
 
 const navItems = [
   { to: '/main', label: 'Лента', icon: 'home', match: ['/main', '/'] },
@@ -25,38 +25,32 @@ function isActive(pathname: string, item: (typeof navItems)[number]) {
 export function TopBar({
   title,
   onBack,
+  backFallback = '/main',
+  hideBack = false,
   right,
 }: {
   title: string;
   onBack?: () => void;
+  backFallback?: string;
+  hideBack?: boolean;
   right?: React.ReactNode;
   variant?: 'marketplace';
 }) {
-  const closeApp = React.useCallback(() => {
-    closeTelegramApp();
-  }, []);
+  const { pathname, goBack } = useRouter();
+  const showBack = !hideBack && pathname !== '/' && pathname !== '/main';
+  const handleBack = onBack ?? (() => goBack(backFallback));
 
   return (
     <header className="top-bar top-bar--marketplace">
       <div className="top-bar__left">
-        {onBack ? (
-          <button className="icon-button" type="button" aria-label="Назад" onClick={onBack}>
-            ‹
+        {showBack ? (
+          <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
+            <BackIcon />
           </button>
         ) : null}
         <h1>{title}</h1>
       </div>
-      <div className="top-bar__right">
-        {right}
-        <button
-          className="icon-button top-bar__exit-button"
-          type="button"
-          aria-label="Закрыть Mini App"
-          onClick={closeApp}
-        >
-          ×
-        </button>
-      </div>
+      <div className="top-bar__right">{right}</div>
     </header>
   );
 }

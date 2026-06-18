@@ -71,7 +71,7 @@ function RouteSwitch() {
     default:
       page = (
         <div className="page">
-          <TopBar title="Страница не найдена" onBack={() => navigate('/main')} />
+          <TopBar title="Страница не найдена" backFallback="/main" />
           <section className="state-block">
             <h1>Страница не найдена</h1>
             <button className="primary-button" type="button" onClick={() => navigate('/main')}>

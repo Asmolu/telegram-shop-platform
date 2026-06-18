@@ -3,8 +3,63 @@ import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
 import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge } from '../utils/images';
-import { CartIcon } from './Icons';
+import { CartIcon, HeartIcon } from './Icons';
 import { ProductImageCarousel } from './ProductImageCarousel';
+
+function toFiniteNumber(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function formatRating(value: number) {
+  return value.toLocaleString('ru-RU', {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+  });
+}
+
+function formatReviewCount(count: number) {
+  const normalized = Math.max(Math.trunc(count), 0);
+  const mod10 = normalized % 10;
+  const mod100 = normalized % 100;
+  const noun = mod10 === 1 && mod100 !== 11
+    ? 'отзыв'
+    : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+      ? 'отзыва'
+      : 'отзывов';
+
+  return `${normalized} ${noun}`;
+}
+
+function getReviewLine(product: Product) {
+  const rating = [
+    product.average_rating,
+    product.rating,
+  ].map(toFiniteNumber).find((value): value is number => value !== null && value > 0);
+  const reviewCount = [
+    product.reviews_count,
+    product.review_count,
+    product.rating_count,
+  ].map(toFiniteNumber).find((value): value is number => value !== null && value > 0);
+
+  if (rating && reviewCount) {
+    return `★ ${formatRating(rating)} · ${formatReviewCount(reviewCount)}`;
+  }
+
+  if (rating) {
+    return `★ ${formatRating(rating)}`;
+  }
+
+  if (reviewCount) {
+    return formatReviewCount(reviewCount);
+  }
+
+  return 'Пока нет отзывов';
+}
 
 export function ProductCard({
   product,
@@ -29,7 +84,8 @@ export function ProductCard({
   const badgePosition = badgeType === 'new' ? 'top' : 'bottom';
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
-  const brand = product.brand?.trim();
+  const brand = product.brand?.trim() || 'Без бренда';
+  const reviewLine = getReviewLine(product);
 
   async function runAction(action: 'favorite' | 'cart', callback?: (product: Product) => void | Promise<void>) {
     if (!callback) {
@@ -51,7 +107,9 @@ export function ProductCard({
           <ProductImageCarousel product={product} variant="card" />
           {badge ? (
             <span
-              className={`product-badge product-badge--${badgeType} product-badge--${badgePosition}`}
+              className={`product-badge product-badge--${badgeType} product-badge--${badgePosition} ${
+                discount && badgePosition === 'bottom' ? 'product-badge--above-discount' : ''
+              }`}
             >
               {badge}
             </span>
@@ -66,7 +124,11 @@ export function ProductCard({
             disabled={busyAction !== null}
             onClick={() => void runAction('favorite', onFavoriteToggle)}
           >
-            {busyAction === 'favorite' ? '…' : favorite ? '♥' : '♡'}
+            {busyAction === 'favorite' ? (
+              <span aria-hidden="true">...</span>
+            ) : (
+              <HeartIcon filled={favorite} />
+            )}
           </button>
         ) : null}
         {onAddToCart ? (
@@ -87,11 +149,9 @@ export function ProductCard({
             <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
             {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
           </span>
-          {brand ? <span className="product-card__brand">{brand}</span> : null}
+          <span className="product-card__brand">{brand}</span>
           <span className="product-card__title">{product.name}</span>
-          <span className="product-card__meta">
-            {product.is_available ? 'В наличии' : 'Нет в наличии'}
-          </span>
+          <span className="product-card__review-line">{reviewLine}</span>
         </Link>
       </div>
     </article>

@@ -114,7 +114,7 @@ export function SearchResultsPage() {
       <TopBar
         title={categoryName || tagName || 'Результаты'}
         variant="marketplace"
-        onBack={() => navigate(fromCategories ? '/categories' : '/search')}
+        backFallback={fromCategories ? '/categories' : '/search'}
       />
       <button className="search-field search-field--static" type="button" onClick={() => navigate('/search')}>
         <SearchIcon className="search-icon" />
