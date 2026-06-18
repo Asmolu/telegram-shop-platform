@@ -33,7 +33,7 @@ The Seller Panel crops images before upload to match these display-safe standard
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Category/tag card image | 4:3 | 1200x900 | 600x450 | 1600x1200 |
-| Horizontal Mini App banner | 3:1 | 1800x600 | 900x300 | 2400x800 |
+| Horizontal Mini App banner | 60:23 | 1800x690 | 900x345 | 2400x920 |
 | Vertical Mini App banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 | Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
 | Aggressive popup banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |

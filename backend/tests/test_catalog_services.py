@@ -28,6 +28,7 @@ from app.modules.products.schemas import (
     ProductCreate,
     ProductImageCreate,
     ProductList,
+    ProductRead,
     ProductUpdate,
     ProductVariantCreate,
     ProductVariantUpdate,
@@ -271,6 +272,38 @@ async def test_product_service_create_update_delete_flow() -> None:
     assert created.id == 1
     assert updated.status == ProductStatus.ACTIVE
     service.repository.delete.assert_awaited_once_with(product)
+
+
+@pytest.mark.asyncio
+async def test_product_service_creates_updates_and_reads_brand() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+
+    def capture_product(product: Product) -> None:
+        product.id = 1
+        product.created_at = datetime(2026, 5, 27, tzinfo=UTC)
+        product.updated_at = datetime(2026, 5, 27, tzinfo=UTC)
+        captured["product"] = product
+
+    service.repository.add = capture_product
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie-brand",
+            brand="  Gadji  ",
+            base_price=Decimal("59.90"),
+        )
+    )
+    created_brand = created.brand
+    updated = await service.update_product(1, ProductUpdate(brand="  Atelier  "))
+    read_model = ProductRead.model_validate(updated)
+
+    assert created_brand == "Gadji"
+    assert updated.brand == "Atelier"
+    assert read_model.brand == "Atelier"
 
 
 @pytest.mark.asyncio

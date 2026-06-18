@@ -59,6 +59,7 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   const [form, setForm] = useState<BannerFormState>(initialForm);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [cropSourceFile, setCropSourceFile] = useState<File | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -79,6 +80,18 @@ export function BannersPage({ onAuthExpired }: PageProps) {
   useEffect(() => {
     loadBanners();
   }, []);
+
+  useEffect(() => {
+    if (imageFile) {
+      const objectUrl = URL.createObjectURL(imageFile);
+      setPreviewImageUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+
+    const imagePath = form.imagePath.trim();
+    setPreviewImageUrl(imagePath ? resolveMediaUrl(imagePath) : null);
+    return undefined;
+  }, [form.imagePath, imageFile]);
 
   function selectBanner(banner: Banner) {
     setEditingBanner(banner);
@@ -238,7 +251,9 @@ export function BannersPage({ onAuthExpired }: PageProps) {
                   <tr key={banner.id}>
                     <td>
                       <img
-                        className="table-image banner-thumb"
+                        className={`table-image banner-thumb banner-thumb--${bannerDisplayClass(
+                          banner.display_type,
+                        )}`}
                         src={resolveMediaUrl(banner.image_url)}
                         alt={banner.title}
                       />
@@ -455,10 +470,22 @@ export function BannersPage({ onAuthExpired }: PageProps) {
             />
             {t('common.active')}
           </label>
-          {form.title || form.subtitle ? (
-            <div className="banner-preview">
-              <strong>{form.title || t('banners.titlePlaceholder')}</strong>
-              <span>{form.subtitle || t('banners.subtitlePlaceholder')}</span>
+          {form.title || form.subtitle || previewImageUrl ? (
+            <div className={`banner-preview banner-preview--${bannerDisplayClass(form.displayType)}`}>
+              <div className="banner-preview__media">
+                {previewImageUrl ? (
+                  <img src={previewImageUrl} alt="" />
+                ) : (
+                  <span className="banner-preview__placeholder">{t('banners.preview')}</span>
+                )}
+                {form.targetType ? (
+                  <span className="banner-preview__cta">{labelForEnum(form.targetType, t)}</span>
+                ) : null}
+              </div>
+              <div className="banner-preview__meta">
+                <strong>{form.title || t('banners.titlePlaceholder')}</strong>
+                <span>{form.subtitle || t('banners.subtitlePlaceholder')}</span>
+              </div>
             </div>
           ) : null}
           <button className="button button-primary" disabled={saving} type="submit">
@@ -504,4 +531,8 @@ function getBannerImageKind(displayType: BannerDisplayType): BannerImageKind {
     default:
       return 'native_banner';
   }
+}
+
+function bannerDisplayClass(displayType: BannerDisplayType | null | undefined) {
+  return (displayType ?? 'horizontal').replace(/_/g, '-');
 }

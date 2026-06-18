@@ -231,7 +231,7 @@ Search:
 Тип баннера:
 
 - горизонтальный;
-- высота `84–110px`;
+- высота `97–127px`;
 - скругление `18–22px`;
 - может вести на товар, категорию, подборку или промо.
 
@@ -246,11 +246,11 @@ Search:
 
 Native banner image upload standard:
 
-- aspect ratio: `16:9`;
-- recommended crop output: `1600x900`;
-- minimum source/output size: `800x450`;
-- maximum accepted upload: `2400x1350`;
-- Mini App rendering must reserve a stable `16 / 9` image box with `object-fit: cover`.
+- aspect ratio: `60:23`;
+- recommended crop output: `1800x690`;
+- minimum source/output size: `900x345`;
+- maximum accepted upload: `2400x920`;
+- Mini App rendering must reserve a stable `60 / 23` image box with `object-fit: cover`.
 
 ### Product Grid
 
@@ -1092,8 +1092,8 @@ CTA:
 
 Banner image upload standards:
 
-- native banner: `16:9`, recommended `1600x900`, minimum `800x450`, maximum `2400x1350`;
-- aggressive promo banner: `3:1`, recommended `1800x600`, minimum `900x300`, maximum `2400x800`;
+- native banner: `60:23`, recommended `1800x690`, minimum `900x345`, maximum `2400x920`;
+- aggressive popup banner: `9:16`, recommended `900x1600`, minimum `450x800`, maximum `1350x2400`;
 - Seller Portal must show the matching recommended and minimum dimensions before upload.
 
 ---
