@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.modules.analytics.router import dashboard_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
@@ -27,6 +28,7 @@ from app.modules.uploads.router import router as uploads_router
 from app.modules.users.router import router as users_router
 
 api_router = APIRouter()
+api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)
 api_router.include_router(audit_router)
 api_router.include_router(auth_router)

@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_db_session, require_roles
 from app.db.models import User, UserRole
-from app.modules.analytics.schemas import AnalyticsEventList, AnalyticsSummary
+from app.modules.analytics.schemas import AnalyticsEventList, AnalyticsSummary, DashboardSummary
 from app.modules.analytics.service import AnalyticsService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+dashboard_router = APIRouter(prefix="/admin/dashboard", tags=["dashboard"])
 
 
 def get_analytics_service(
@@ -57,3 +58,11 @@ async def get_analytics_summary(
     created_to: datetime | None = None,
 ) -> AnalyticsSummary:
     return await service.get_summary(created_from=created_from, created_to=created_to)
+
+
+@dashboard_router.get("/summary", response_model=DashboardSummary)
+async def get_dashboard_summary(
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
+) -> DashboardSummary:
+    return await service.get_dashboard_summary()

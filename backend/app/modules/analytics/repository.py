@@ -4,10 +4,41 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AnalyticsEvent, Banner, Order, Product, PromoCode
+from app.db.models import (
+    AnalyticsEvent,
+    Banner,
+    ManualPayment,
+    ManualPaymentStatus,
+    Order,
+    OrderStatus,
+    Product,
+    ProductStatus,
+    ProductVariant,
+    PromoCode,
+)
+
+ACTIVE_ORDER_STATUSES = (
+    OrderStatus.NEW,
+    OrderStatus.PROCESSING,
+    OrderStatus.SHIPPED,
+)
+PRODUCT_TOTAL_STATUSES = (
+    ProductStatus.DRAFT,
+    ProductStatus.ACTIVE,
+    ProductStatus.OUT_OF_STOCK,
+)
+OUT_OF_STOCK_PRODUCT_STATUSES = (
+    ProductStatus.ACTIVE,
+    ProductStatus.OUT_OF_STOCK,
+)
+REVENUE_LEGACY_ORDER_STATUSES = (
+    OrderStatus.PROCESSING,
+    OrderStatus.SHIPPED,
+    OrderStatus.DELIVERED,
+)
 
 
 class AnalyticsRepository:
@@ -101,11 +132,76 @@ class AnalyticsRepository:
         created_to: datetime | None = None,
     ) -> Decimal:
         result = await self.session.execute(
-            select(func.coalesce(func.sum(Order.total_amount), Decimal("0.00"))).where(
-                *self._order_filters(created_from=created_from, created_to=created_to)
+            select(func.coalesce(func.sum(Order.total_amount), Decimal("0.00")))
+            .join(ManualPayment, ManualPayment.order_id == Order.id, isouter=True)
+            .where(
+                *self._revenue_order_filters(
+                    created_from=created_from,
+                    created_to=created_to,
+                )
             )
         )
         return result.scalar_one()
+
+    async def count_active_orders(self) -> int:
+        result = await self.session.execute(
+            select(func.count(Order.id)).where(*self._active_order_filters())
+        )
+        return result.scalar_one()
+
+    async def count_active_banners(self, *, now: datetime) -> int:
+        result = await self.session.execute(
+            select(func.count(Banner.id)).where(*self._active_banner_filters(now=now))
+        )
+        return result.scalar_one()
+
+    async def count_products_total(self) -> int:
+        result = await self.session.execute(
+            select(func.count(Product.id)).where(*self._product_total_filters())
+        )
+        return result.scalar_one()
+
+    async def count_products_out_of_stock(self) -> int:
+        result = await self.session.execute(
+            select(func.count(Product.id)).where(*self._out_of_stock_product_filters())
+        )
+        return result.scalar_one()
+
+    async def revenue_for_orders(
+        self,
+        *,
+        period_start: datetime,
+        period_end: datetime,
+    ) -> tuple[int, Decimal, Decimal, Decimal]:
+        result = await self.session.execute(
+            select(
+                func.count(Order.id).label("orders_count"),
+                func.coalesce(func.sum(Order.subtotal_amount), Decimal("0.00")).label(
+                    "gross_revenue"
+                ),
+                func.coalesce(func.sum(Order.discount_amount), Decimal("0.00")).label(
+                    "discount_total"
+                ),
+                func.coalesce(func.sum(Order.total_amount), Decimal("0.00")).label(
+                    "net_revenue"
+                ),
+            )
+            .join(ManualPayment, ManualPayment.order_id == Order.id, isouter=True)
+            .where(
+                *self._revenue_order_filters(
+                    created_from=period_start,
+                    created_to=period_end,
+                    end_exclusive=True,
+                )
+            )
+        )
+        row = result.one()
+        return (
+            int(row.orders_count),
+            row.gross_revenue,
+            row.discount_total,
+            row.net_revenue,
+        )
 
     async def top_products_by_views(
         self,
@@ -251,6 +347,64 @@ class AnalyticsRepository:
             created_from=created_from,
             created_to=created_to,
         )
+
+    def _revenue_order_filters(
+        self,
+        *,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        end_exclusive: bool = False,
+    ) -> list[Any]:
+        conditions = self._created_at_filters(
+            Order.created_at,
+            created_from=created_from,
+            created_to=None if end_exclusive else created_to,
+        )
+        if created_to is not None and end_exclusive:
+            conditions.append(Order.created_at < created_to)
+        conditions.extend(
+            [
+                Order.status != OrderStatus.CANCELLED,
+                or_(
+                    and_(
+                        ManualPayment.id.is_not(None),
+                        ManualPayment.status == ManualPaymentStatus.APPROVED,
+                    ),
+                    and_(
+                        ManualPayment.id.is_(None),
+                        Order.status.in_(REVENUE_LEGACY_ORDER_STATUSES),
+                    ),
+                ),
+            ]
+        )
+        return conditions
+
+    def _active_order_filters(self) -> list[Any]:
+        return [Order.status.in_(ACTIVE_ORDER_STATUSES)]
+
+    def _active_banner_filters(self, *, now: datetime) -> list[Any]:
+        return [
+            Banner.is_active.is_(True),
+            Banner.target_type.is_not(None),
+            or_(Banner.starts_at.is_(None), Banner.starts_at <= now),
+            or_(Banner.ends_at.is_(None), Banner.ends_at > now),
+        ]
+
+    def _product_total_filters(self) -> list[Any]:
+        return [Product.status.in_(PRODUCT_TOTAL_STATUSES)]
+
+    def _out_of_stock_product_filters(self) -> list[Any]:
+        available_variant_exists = exists(
+            select(ProductVariant.id).where(
+                ProductVariant.product_id == Product.id,
+                ProductVariant.is_active.is_(True),
+                ProductVariant.stock_quantity > ProductVariant.reserved_quantity,
+            )
+        )
+        return [
+            Product.status.in_(OUT_OF_STOCK_PRODUCT_STATUSES),
+            ~available_variant_exists,
+        ]
 
     def _created_at_filters(
         self,

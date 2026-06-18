@@ -432,6 +432,23 @@ export interface AnalyticsSummary {
   }>;
 }
 
+export interface DashboardRevenueMonth {
+  period_start: string;
+  period_end: string;
+  orders_count: number;
+  gross_revenue: ApiDecimal;
+  discount_total: ApiDecimal;
+  net_revenue: ApiDecimal;
+}
+
+export interface DashboardSummary {
+  active_orders_count: number;
+  active_banners_count: number;
+  products_total: number;
+  products_out_of_stock: number;
+  revenue_month: DashboardRevenueMonth;
+}
+
 export interface AnalyticsEvent {
   id: number;
   event_name: string;

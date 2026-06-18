@@ -17,6 +17,7 @@ import type {
   CategoryPayload,
   CustomerNotificationSubscription,
   CustomerOrderMessageResponse,
+  DashboardSummary,
   ManualPayment,
   ManualPaymentStatus,
   NotificationTemplate,
@@ -395,6 +396,9 @@ export const api = {
       apiRequest<AnalyticsSummary>('/analytics/summary', { query }),
     events: (query: QueryParams = {}) =>
       apiRequest<PageList<AnalyticsEvent>>('/analytics/events', { query }),
+  },
+  dashboard: {
+    summary: () => apiRequest<DashboardSummary>('/admin/dashboard/summary'),
   },
   sellerBot: {
     status: () => apiRequest<SellerBotStatus>('/seller-bot/status'),

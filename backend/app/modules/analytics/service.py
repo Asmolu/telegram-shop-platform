@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +18,8 @@ from app.modules.analytics.schemas import (
     AnalyticsEventList,
     AnalyticsEventRead,
     AnalyticsSummary,
+    DashboardRevenueMonth,
+    DashboardSummary,
     TopBannerSummary,
     TopProductSummary,
     TopPromoCodeSummary,
@@ -24,6 +27,7 @@ from app.modules.analytics.schemas import (
 from app.modules.products.search import sanitize_search_query
 
 logger = logging.getLogger(__name__)
+SELLER_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 
 class AnalyticsTracker(Protocol):
@@ -74,9 +78,10 @@ class IsolatedAnalyticsTracker:
 class AnalyticsService:
     """Analytics event capture and reporting."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, now_factory=None) -> None:
         self.session = session
         self.repository = AnalyticsRepository(session)
+        self.now_factory = now_factory or (lambda: datetime.now(SELLER_TIMEZONE))
 
     async def record_event(
         self,
@@ -231,3 +236,39 @@ class AnalyticsService:
                 for banner_id, banner_title, click_count in top_banners
             ],
         )
+
+    async def get_dashboard_summary(self) -> DashboardSummary:
+        now = self._now().astimezone(SELLER_TIMEZONE)
+        period_start, period_end = self._current_month_interval(now)
+        orders_count, gross_revenue, discount_total, net_revenue = (
+            await self.repository.revenue_for_orders(
+                period_start=period_start,
+                period_end=period_end,
+            )
+        )
+        return DashboardSummary(
+            active_orders_count=await self.repository.count_active_orders(),
+            active_banners_count=await self.repository.count_active_banners(now=now),
+            products_total=await self.repository.count_products_total(),
+            products_out_of_stock=await self.repository.count_products_out_of_stock(),
+            revenue_month=DashboardRevenueMonth(
+                period_start=period_start,
+                period_end=period_end,
+                orders_count=orders_count,
+                gross_revenue=gross_revenue,
+                discount_total=discount_total,
+                net_revenue=net_revenue,
+            ),
+        )
+
+    def _now(self) -> datetime:
+        return self.now_factory()
+
+    @staticmethod
+    def _current_month_interval(now: datetime) -> tuple[datetime, datetime]:
+        period_start = datetime(now.year, now.month, 1, tzinfo=SELLER_TIMEZONE)
+        if now.month == 12:
+            period_end = datetime(now.year + 1, 1, 1, tzinfo=SELLER_TIMEZONE)
+        else:
+            period_end = datetime(now.year, now.month + 1, 1, tzinfo=SELLER_TIMEZONE)
+        return period_start, period_end

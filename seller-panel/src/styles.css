@@ -513,6 +513,10 @@ textarea:focus {
   padding: 16px;
 }
 
+.kpi-wide {
+  grid-column: span 2;
+}
+
 .kpi-card span {
   display: block;
   color: #6b7280;
@@ -524,6 +528,44 @@ textarea:focus {
   display: block;
   margin-top: 8px;
   font-size: 25px;
+}
+
+.kpi-subtitle {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.kpi-breakdown {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.kpi-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kpi-card .kpi-breakdown-row span {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kpi-card .kpi-breakdown-row strong {
+  margin: 0;
+  color: #374151;
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .kpi-warning strong {
@@ -1688,6 +1730,10 @@ textarea:focus {
   .date-grid,
   .crop-controls {
     grid-template-columns: 1fr;
+  }
+
+  .kpi-wide {
+    grid-column: auto;
   }
 
   .variant-row {

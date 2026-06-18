@@ -59,3 +59,20 @@ class AnalyticsSummary(BaseModel):
     top_products: list[TopProductSummary]
     top_promo_codes: list[TopPromoCodeSummary]
     top_banners: list[TopBannerSummary]
+
+
+class DashboardRevenueMonth(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    orders_count: int
+    gross_revenue: Decimal
+    discount_total: Decimal
+    net_revenue: Decimal
+
+
+class DashboardSummary(BaseModel):
+    active_orders_count: int
+    active_banners_count: int
+    products_total: int
+    products_out_of_stock: int
+    revenue_month: DashboardRevenueMonth
