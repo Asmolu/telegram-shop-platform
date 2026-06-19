@@ -199,6 +199,7 @@ export type CartItem = {
   product: CartProduct;
   product_variant: CartProductVariant;
   quantity: number;
+  is_selected: boolean;
   unit_price: string;
   subtotal: string;
   created_at: string;
@@ -212,6 +213,9 @@ export type Cart = {
   total: string;
   quantity_total: number;
   distinct_item_count: number;
+  selected_total: string;
+  selected_quantity_total: number;
+  selected_distinct_item_count: number;
   created_at: string;
   updated_at: string;
 };

@@ -18,7 +18,7 @@ export function SearchResultsPage() {
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const { addToCart, toggleFavorite, notice, clearNotice } = useProductActions({
+  const { addToCart, sizePicker, toggleFavorite, notice, clearNotice } = useProductActions({
     favoriteIds,
     setFavoriteIds,
   });
@@ -165,6 +165,7 @@ export function SearchResultsPage() {
           ))}
         </div>
       ) : null}
+      {sizePicker}
     </div>
   );
 }

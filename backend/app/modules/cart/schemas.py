@@ -16,6 +16,15 @@ class CartItemUpdate(BaseModel):
     quantity: int = Field(gt=0)
 
 
+class CartItemSelectionUpdate(BaseModel):
+    is_selected: bool
+
+
+class CartSelectionUpdate(BaseModel):
+    is_selected: bool
+    item_ids: list[int] | None = None
+
+
 class CartProductRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,6 +53,7 @@ class CartItemRead(BaseModel):
     product: CartProductRead
     product_variant: CartProductVariantRead
     quantity: int
+    is_selected: bool
     unit_price: Decimal
     subtotal: Decimal
     created_at: datetime
@@ -57,5 +67,8 @@ class CartRead(BaseModel):
     total: Decimal
     quantity_total: int
     distinct_item_count: int
+    selected_total: Decimal
+    selected_quantity_total: int
+    selected_distinct_item_count: int
     created_at: datetime
     updated_at: datetime

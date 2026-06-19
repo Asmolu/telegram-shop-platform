@@ -12,10 +12,12 @@ from app.modules.cart.repository import CartRepository
 from app.modules.cart.schemas import (
     CartItemCreate,
     CartItemRead,
+    CartItemSelectionUpdate,
     CartItemUpdate,
     CartProductRead,
     CartProductVariantRead,
     CartRead,
+    CartSelectionUpdate,
 )
 from app.modules.products.inventory import calculate_available_quantity
 
@@ -60,10 +62,12 @@ class CartService:
                     product_id=product.id,
                     product_variant_id=variant.id,
                     quantity=quantity,
+                    is_selected=True,
                 )
             )
         else:
             existing_item.quantity = quantity
+            existing_item.is_selected = True
 
         cart_response = await self._commit_and_reload(user_id)
         await self._track_event(
@@ -94,6 +98,37 @@ class CartService:
         )
         self._validate_quantity(payload.quantity, item.product_variant)
         item.quantity = payload.quantity
+
+        return await self._commit_and_reload(user_id)
+
+    async def update_item_selection(
+        self,
+        user_id: int,
+        item_id: int,
+        payload: CartItemSelectionUpdate,
+    ) -> CartRead:
+        item = await self.repository.get_item_for_user(user_id=user_id, item_id=item_id)
+        if item is None:
+            raise AppError("Cart item not found", status.HTTP_404_NOT_FOUND)
+
+        item.is_selected = payload.is_selected
+        return await self._commit_and_reload(user_id)
+
+    async def update_selection(
+        self,
+        user_id: int,
+        payload: CartSelectionUpdate,
+    ) -> CartRead:
+        cart = await self._get_or_create_cart(user_id)
+        items = cart.items
+        if payload.item_ids is not None:
+            requested_ids = set(payload.item_ids)
+            items = [item for item in cart.items if item.id in requested_ids]
+            if len(items) != len(requested_ids):
+                raise AppError("Cart item not found", status.HTTP_404_NOT_FOUND)
+
+        for item in items:
+            item.is_selected = payload.is_selected
 
         return await self._commit_and_reload(user_id)
 
@@ -180,6 +215,9 @@ class CartService:
         items = [self._build_item_response(item) for item in cart.items]
         total = sum((item.subtotal for item in items), Decimal("0.00"))
         quantity_total = sum(item.quantity for item in items)
+        selected_items = [item for item in items if item.is_selected]
+        selected_total = sum((item.subtotal for item in selected_items), Decimal("0.00"))
+        selected_quantity_total = sum(item.quantity for item in selected_items)
         return CartRead(
             id=cart.id,
             user_id=cart.user_id,
@@ -187,6 +225,9 @@ class CartService:
             total=total,
             quantity_total=quantity_total,
             distinct_item_count=len(items),
+            selected_total=selected_total,
+            selected_quantity_total=selected_quantity_total,
+            selected_distinct_item_count=len(selected_items),
             created_at=cart.created_at,
             updated_at=cart.updated_at,
         )
@@ -199,6 +240,7 @@ class CartService:
             product=CartProductRead.model_validate(item.product),
             product_variant=CartProductVariantRead.model_validate(item.product_variant),
             quantity=item.quantity,
+            is_selected=item.is_selected,
             unit_price=unit_price,
             subtotal=subtotal,
             created_at=item.created_at,

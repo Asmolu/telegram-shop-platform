@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  addCartItem,
   getCart,
   getFavorites,
   getOrders,
@@ -8,6 +7,8 @@ import {
   removeCartItem,
   removeFavorite,
   updateCartItem,
+  updateCartItemSelection,
+  updateCartSelection,
   validatePromoCode,
   toApiErrorMessage,
   type Cart,
@@ -16,6 +17,7 @@ import {
   type Product,
   type PromoValidation,
 } from '../shared/api';
+import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
@@ -48,6 +50,18 @@ export function CartPage() {
   const [notice, setNotice] = React.useState<string | null>(null);
   const [promoCode, setPromoCode] = React.useState('');
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
+
+  const requireAuth = React.useCallback(() => {
+    if (isAuthenticated) {
+      return true;
+    }
+    navigate(getAuthPath(currentPath));
+    return false;
+  }, [currentPath, isAuthenticated, navigate]);
+  const quickCart = useQuickCartPicker({
+    requireAuth,
+    onNotice: setNotice,
+  });
 
   const load = React.useCallback(async () => {
     if (!isAuthenticated) {
@@ -98,9 +112,9 @@ export function CartPage() {
       const appliedPromoCode = promoValidation?.code;
       const nextCart = await updateCartItem(itemId, quantity);
       setCart(nextCart);
-      if (appliedPromoCode && nextCart.items.length > 0) {
+      if (appliedPromoCode && nextCart.selected_distinct_item_count > 0) {
         await refreshPromoValidation(appliedPromoCode);
-      } else if (nextCart.items.length === 0) {
+      } else if (nextCart.items.length === 0 || nextCart.selected_distinct_item_count === 0) {
         clearPromo();
       }
       window.dispatchEvent(new Event('miniapp:cart-updated'));
@@ -114,12 +128,42 @@ export function CartPage() {
       const appliedPromoCode = promoValidation?.code;
       const nextCart = await removeCartItem(itemId);
       setCart(nextCart);
-      if (appliedPromoCode && nextCart.items.length > 0) {
+      if (appliedPromoCode && nextCart.selected_distinct_item_count > 0) {
         await refreshPromoValidation(appliedPromoCode);
-      } else if (nextCart.items.length === 0) {
+      } else if (nextCart.items.length === 0 || nextCart.selected_distinct_item_count === 0) {
         clearPromo();
       }
       window.dispatchEvent(new Event('miniapp:cart-updated'));
+    } catch (actionError) {
+      setNotice(toApiErrorMessage(actionError));
+    }
+  }
+
+  async function changeItemSelection(itemId: number, isSelected: boolean) {
+    try {
+      const appliedPromoCode = promoValidation?.code;
+      const nextCart = await updateCartItemSelection(itemId, isSelected);
+      setCart(nextCart);
+      if (appliedPromoCode && nextCart.selected_distinct_item_count > 0) {
+        await refreshPromoValidation(appliedPromoCode);
+      } else if (nextCart.selected_distinct_item_count === 0) {
+        clearPromo();
+      }
+    } catch (actionError) {
+      setNotice(toApiErrorMessage(actionError));
+    }
+  }
+
+  async function changeAllSelection(isSelected: boolean) {
+    try {
+      const appliedPromoCode = promoValidation?.code;
+      const nextCart = await updateCartSelection(isSelected);
+      setCart(nextCart);
+      if (appliedPromoCode && nextCart.selected_distinct_item_count > 0) {
+        await refreshPromoValidation(appliedPromoCode);
+      } else if (nextCart.selected_distinct_item_count === 0) {
+        clearPromo();
+      }
     } catch (actionError) {
       setNotice(toApiErrorMessage(actionError));
     }
@@ -135,29 +179,13 @@ export function CartPage() {
     }
   }
 
-  async function addFavoriteProductToCart(product: Product) {
-    const activeVariants = product.variants.filter(
-      (variant) => variant.is_active && variant.available_quantity > 0,
-    );
-
-    if (activeVariants.length !== 1) {
-      setNotice('Выберите размер в карточке товара.');
-      navigate(`/product/${product.id}`);
-      return;
-    }
-
-    try {
-      await addCartItem(product.id, activeVariants[0].id, 1);
-      window.dispatchEvent(new Event('miniapp:cart-updated'));
-      setNotice('Товар добавлен в корзину.');
-    } catch (actionError) {
-      setNotice(toApiErrorMessage(actionError));
-    }
-  }
-
   async function applyPromo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPromoValidation(null);
+    if (!cart || cart.selected_distinct_item_count === 0) {
+      setNotice('Выберите товары для оформления.');
+      return;
+    }
     const code = normalizePromoCode(promoCode);
     if (!code) {
       return;
@@ -199,6 +227,10 @@ export function CartPage() {
   }
 
   function checkoutWithPromo() {
+    if (!cart || cart.selected_distinct_item_count === 0) {
+      setNotice('Выберите товары для оформления.');
+      return;
+    }
     const checkoutPath = promoValidation?.code
       ? `/checkout?promo_code=${encodeURIComponent(promoValidation.code)}`
       : '/checkout';
@@ -243,7 +275,7 @@ export function CartPage() {
         <FavoritesTab
           products={favoriteProducts}
           favorites={favorites}
-          onAddToCart={addFavoriteProductToCart}
+          onAddToCart={quickCart.addToCart}
           onRemove={removeFavoriteProduct}
         />
       ) : null}
@@ -256,13 +288,16 @@ export function CartPage() {
           onApplyPromo={applyPromo}
           onCheckout={checkoutWithPromo}
           onClearPromo={clearPromo}
+          onItemSelectionChange={changeItemSelection}
           onPromoCodeChange={updatePromoCode}
           onQuantityChange={changeQuantity}
           onGoShop={() => navigate(returnTo)}
           onRemove={removeItem}
+          onSelectAll={changeAllSelection}
         />
       ) : null}
       {!loading && !error && activeTab === 'orders' ? <OrdersTab orders={orders} /> : null}
+      {quickCart.picker}
     </div>
   );
 }
@@ -326,10 +361,12 @@ function CartItemsTab({
   onApplyPromo,
   onCheckout,
   onClearPromo,
+  onItemSelectionChange,
   onPromoCodeChange,
   onQuantityChange,
   onGoShop,
   onRemove,
+  onSelectAll,
 }: {
   cart: Cart | null;
   productMap: Map<number, Product>;
@@ -338,12 +375,18 @@ function CartItemsTab({
   onApplyPromo: (event: React.FormEvent<HTMLFormElement>) => void;
   onCheckout: () => void;
   onClearPromo: () => void;
+  onItemSelectionChange: (itemId: number, isSelected: boolean) => Promise<void>;
   onPromoCodeChange: (value: string) => void;
   onQuantityChange: (itemId: number, quantity: number) => Promise<void>;
   onGoShop: () => void;
   onRemove: (itemId: number) => Promise<void>;
+  onSelectAll: (isSelected: boolean) => Promise<void>;
 }) {
   const items = cart?.items ?? [];
+  const selectedItems = items.filter((item) => item.is_selected);
+  const allSelected = items.length > 0 && selectedItems.length === items.length;
+  const selectedTotal = cart?.selected_total ?? '0';
+  const selectedQuantity = cart?.selected_quantity_total ?? 0;
 
   if (!cart || items.length === 0) {
     return <EmptyState title="Корзина пустая" actionLabel="Перейти к товарам" onAction={onGoShop} />;
@@ -351,6 +394,18 @@ function CartItemsTab({
 
   return (
     <div className="cart-layout">
+      <div className="cart-selection-toolbar">
+        <label>
+          <input
+            checked={allSelected}
+            type="checkbox"
+            onChange={(event) => void onSelectAll(event.target.checked)}
+          />
+          <span>Все</span>
+        </label>
+        <strong>{selectedQuantity} выбрано</strong>
+      </div>
+
       <div className="cart-list">
         {items.map((item) => {
           const product = productMap.get(item.product.id);
@@ -358,7 +413,14 @@ function CartItemsTab({
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
 
           return (
-            <article className="cart-item" key={item.id}>
+            <article className={`cart-item ${item.is_selected ? '' : 'cart-item--unselected'}`} key={item.id}>
+              <label className="cart-item__selector" aria-label="Выбрать товар">
+                <input
+                  checked={item.is_selected}
+                  type="checkbox"
+                  onChange={(event) => void onItemSelectionChange(item.id, event.target.checked)}
+                />
+              </label>
               <span className="cart-item__image">
                 {imageUrl ? <img src={imageUrl} alt="" /> : <span>{item.product.name[0]}</span>}
               </span>
@@ -395,11 +457,12 @@ function CartItemsTab({
       ) : null}
 
       <section className="summary-card">
-        <div><span>Товары</span><strong>{formatPrice(cart.total)}</strong></div>
+        <div><span>Выбрано</span><strong>{selectedQuantity}</strong></div>
+        <div><span>Товары</span><strong>{formatPrice(selectedTotal)}</strong></div>
         <div><span>Скидка</span><strong>{formatPrice(promoValidation?.discount_amount ?? 0)}</strong></div>
-        <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? cart.total)}</strong></div>
-        <button className="primary-button" type="button" onClick={onCheckout}>
-          Оформить заказ
+        <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? selectedTotal)}</strong></div>
+        <button className="primary-button" type="button" disabled={selectedQuantity === 0} onClick={onCheckout}>
+          {selectedQuantity > 0 ? `К оформлению · ${selectedQuantity}` : 'Выберите товары'}
         </button>
       </section>
     </div>

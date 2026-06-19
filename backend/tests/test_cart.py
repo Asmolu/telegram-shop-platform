@@ -7,7 +7,12 @@ from fastapi.testclient import TestClient
 from app.core.errors import AppError
 from app.db.models import Cart, CartItem, Product, ProductSizeGrid, ProductStatus, ProductVariant
 from app.main import create_app
-from app.modules.cart.schemas import CartItemCreate, CartItemUpdate
+from app.modules.cart.schemas import (
+    CartItemCreate,
+    CartItemSelectionUpdate,
+    CartItemUpdate,
+    CartSelectionUpdate,
+)
 from app.modules.cart.service import CartService
 
 
@@ -122,9 +127,12 @@ async def test_add_item() -> None:
 
     assert len(cart.items) == 1
     assert cart.items[0].quantity == 2
+    assert cart.items[0].is_selected is True
     assert cart.items[0].product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert cart.items[0].subtotal == Decimal("119.80")
     assert cart.total == Decimal("119.80")
+    assert cart.selected_total == Decimal("119.80")
+    assert cart.selected_quantity_total == 2
 
 
 @pytest.mark.asyncio
@@ -175,6 +183,37 @@ async def test_update_quantity() -> None:
 
     assert updated.items[0].quantity == 4
     assert updated.total == Decimal("239.60")
+
+
+@pytest.mark.asyncio
+async def test_update_item_selection_updates_selected_totals() -> None:
+    service, _ = _cart_service()
+
+    cart = await service.add_item(1, CartItemCreate(product_id=1, product_variant_id=1, quantity=2))
+    updated = await service.update_item_selection(
+        1,
+        cart.items[0].id,
+        CartItemSelectionUpdate(is_selected=False),
+    )
+
+    assert updated.items[0].is_selected is False
+    assert updated.total == Decimal("119.80")
+    assert updated.quantity_total == 2
+    assert updated.selected_total == Decimal("0.00")
+    assert updated.selected_quantity_total == 0
+    assert updated.selected_distinct_item_count == 0
+
+
+@pytest.mark.asyncio
+async def test_update_selection_can_select_all_items() -> None:
+    service, _ = _cart_service()
+
+    await service.add_item(1, CartItemCreate(product_id=1, product_variant_id=1, quantity=1))
+    await service.update_selection(1, CartSelectionUpdate(is_selected=False))
+    updated = await service.update_selection(1, CartSelectionUpdate(is_selected=True))
+
+    assert updated.items[0].is_selected is True
+    assert updated.selected_quantity_total == 1
 
 
 @pytest.mark.asyncio

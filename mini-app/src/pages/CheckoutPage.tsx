@@ -72,7 +72,7 @@ export function CheckoutPage() {
         }
 
         const code = normalizePromoCode(initialPromoCode.current);
-        if (code && result.items.length > 0) {
+        if (code && result.selected_distinct_item_count > 0) {
           try {
             const validation = await validatePromoCode(code);
             if (!cancelled) {
@@ -129,6 +129,10 @@ export function CheckoutPage() {
   async function applyPromo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPromoValidation(null);
+    if (!cart || cart.selected_distinct_item_count === 0) {
+      setNotice('Выберите товары для оформления.');
+      return;
+    }
     const code = normalizePromoCode(promoCode);
     if (!code) {
       return;
@@ -176,6 +180,10 @@ export function CheckoutPage() {
 
   async function submitCheckout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!cart || cart.selected_distinct_item_count === 0) {
+      setNotice('Выберите товары для оформления.');
+      return;
+    }
     if (!form.contactName.trim() || !form.phone.trim() || !form.city.trim()) {
       setNotice('Заполните имя, телефон и город.');
       return;
@@ -221,6 +229,9 @@ export function CheckoutPage() {
     }
   }
 
+  const selectedItems = cart?.items.filter((item) => item.is_selected) ?? [];
+  const selectedTotal = cart?.selected_total ?? cart?.total ?? '0';
+
   if (!isAuthenticated) {
     return (
       <div className="page">
@@ -243,7 +254,10 @@ export function CheckoutPage() {
       {!loading && !error && (!cart || cart.items.length === 0) ? (
         <EmptyState title="Корзина пустая" actionLabel="Вернуться к покупкам" onAction={() => navigate(returnTo)} />
       ) : null}
-      {!loading && !error && cart && cart.items.length > 0 ? (
+      {!loading && !error && cart && cart.items.length > 0 && selectedItems.length === 0 ? (
+        <EmptyState title="Нет выбранных товаров" actionLabel="Вернуться в корзину" onAction={() => navigate(withReturnTo('/cart?tab=cart', returnToParam))} />
+      ) : null}
+      {!loading && !error && cart && selectedItems.length > 0 ? (
         <>
           {notice ? (
             <InlineNotice tone={notice.includes('применен') ? 'success' : 'warning'}>
@@ -254,11 +268,11 @@ export function CheckoutPage() {
 
           <section className="summary-card">
             <h2>Корзина</h2>
-            {cart.items.map((item) => (
+            {selectedItems.map((item) => (
               <div key={item.id}><span>{item.product.name} × {item.quantity}</span><strong>{formatPrice(item.subtotal)}</strong></div>
             ))}
             <div><span>Скидка</span><strong>{formatPrice(promoValidation?.discount_amount ?? 0)}</strong></div>
-            <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? cart.total)}</strong></div>
+            <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? selectedTotal)}</strong></div>
           </section>
 
           <form className="promo-form" onSubmit={applyPromo}>

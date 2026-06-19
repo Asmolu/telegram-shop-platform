@@ -119,14 +119,15 @@ class OrdersService:
             cart = await self.repository.get_cart_for_checkout(user_id)
             self._validate_cart_not_empty(cart)
             assert cart is not None
+            checkout_items = self._selected_cart_items(cart)
             payment_settings = await self.manual_payments_service.require_checkout_settings()
 
             variants_by_id = await self.repository.lock_variants_by_ids(
-                item.product_variant_id for item in cart.items
+                item.product_variant_id for item in checkout_items
             )
-            self._validate_checkout_items(cart.items, variants_by_id)
+            self._validate_checkout_items(checkout_items, variants_by_id)
 
-            subtotal = self._calculate_subtotal(cart.items)
+            subtotal = self._calculate_subtotal(checkout_items)
             promo_calculation = await self._validate_promo_code(
                 user_id=user_id,
                 code=payload.promo_code,
@@ -152,7 +153,7 @@ class OrdersService:
                     order_id=order.id,
                 )
 
-            for item in cart.items:
+            for item in checkout_items:
                 variant = variants_by_id[item.product_variant_id]
                 subtotal = item.product.base_price * item.quantity
                 variant.stock_quantity -= item.quantity
@@ -174,7 +175,7 @@ class OrdersService:
                     )
                 )
 
-            await self.repository.clear_cart(cart.id)
+            await self.repository.clear_cart_items(cart.id, (item.id for item in checkout_items))
             await self.session.flush()
 
             created_order = await self.repository.get_by_id(order.id)
@@ -380,6 +381,12 @@ class OrdersService:
     def _validate_cart_not_empty(self, cart: Cart | None) -> None:
         if cart is None or not cart.items:
             raise AppError("Cart is empty", status.HTTP_400_BAD_REQUEST)
+
+    def _selected_cart_items(self, cart: Cart) -> list[CartItem]:
+        items = [item for item in cart.items if item.is_selected]
+        if not items:
+            raise AppError("No selected cart items", status.HTTP_400_BAD_REQUEST)
+        return items
 
     def _validate_checkout_items(
         self,

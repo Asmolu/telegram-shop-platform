@@ -112,6 +112,23 @@ export function updateCartItem(itemId: number, quantity: number) {
   });
 }
 
+export function updateCartItemSelection(itemId: number, isSelected: boolean) {
+  return apiRequest<Cart>(`/cart/items/${itemId}/selection`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_selected: isSelected }),
+  });
+}
+
+export function updateCartSelection(isSelected: boolean, itemIds?: number[]) {
+  return apiRequest<Cart>('/cart/selection', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      is_selected: isSelected,
+      item_ids: itemIds,
+    }),
+  });
+}
+
 export function removeCartItem(itemId: number) {
   return apiRequest<Cart>(`/cart/items/${itemId}`, { method: 'DELETE' });
 }

@@ -146,13 +146,13 @@ export function ProductCard({
       </div>
       <div className={`product-card__body ${onAddToCart ? '' : 'product-card__body--no-action'}`}>
         <Link className="product-card__info" to={`/product/${product.id}`}>
+          <span className="product-card__brand">{brand}</span>
+          <span className="product-card__title">{product.name}</span>
+          <span className="product-card__review-line">{reviewLine}</span>
           <span className="product-card__price-row">
             <strong className="product-card__price">{formatCompactPrice(product.base_price)}</strong>
             {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
           </span>
-          <span className="product-card__brand">{brand}</span>
-          <span className="product-card__title">{product.name}</span>
-          <span className="product-card__review-line">{reviewLine}</span>
         </Link>
       </div>
     </article>

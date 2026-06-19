@@ -80,6 +80,6 @@ class PromoCodesRepository:
 
 def calculate_cart_subtotal(cart: Cart) -> Decimal:
     return sum(
-        (item.product.base_price * item.quantity for item in cart.items),
+        (item.product.base_price * item.quantity for item in cart.items if item.is_selected),
         Decimal("0.00"),
     )

@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  addCartItem,
   addFavorite,
   removeFavorite,
   toApiErrorMessage,
@@ -8,6 +7,7 @@ import {
 } from '../../shared/api';
 import { useAuth } from '../../shared/auth/AuthProvider';
 import { getAuthPath, useRouter } from '../../shared/router/RouterProvider';
+import { useQuickCartPicker } from './useQuickCartPicker';
 
 export function useProductActions({
   favoriteIds,
@@ -53,35 +53,14 @@ export function useProductActions({
     [favoriteIds, requireAuth, setFavoriteIds],
   );
 
-  const addToCart = React.useCallback(
-    async (product: Product) => {
-      if (!requireAuth()) {
-        return;
-      }
-
-      const activeVariants = product.variants.filter(
-        (variant) => variant.is_active && variant.available_quantity > 0,
-      );
-
-      if (activeVariants.length !== 1) {
-        setNotice('Выберите размер в карточке товара.');
-        navigate(`/product/${product.id}`);
-        return;
-      }
-
-      try {
-        await addCartItem(product.id, activeVariants[0].id, 1);
-        window.dispatchEvent(new Event('miniapp:cart-updated'));
-        setNotice('Товар добавлен в корзину.');
-      } catch (error) {
-        setNotice(toApiErrorMessage(error));
-      }
-    },
-    [navigate, requireAuth],
-  );
+  const quickCart = useQuickCartPicker({
+    requireAuth,
+    onNotice: setNotice,
+  });
 
   return {
-    addToCart,
+    addToCart: quickCart.addToCart,
+    sizePicker: quickCart.picker,
     toggleFavorite,
     notice,
     clearNotice: () => setNotice(null),

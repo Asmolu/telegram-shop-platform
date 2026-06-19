@@ -286,6 +286,57 @@ async def test_validate_promo_code_against_current_cart() -> None:
     assert result.total == Decimal("107.82")
 
 
+@pytest.mark.asyncio
+async def test_validate_promo_code_uses_selected_cart_items_only() -> None:
+    service, repository, _ = _promo_service()
+    repository.add(_promo_code(discount_type=DiscountType.PERCENT, discount_value=Decimal("10.00")))
+    cart = _cart(user_id=1)
+    second_product = Product(
+        id=2,
+        name="Sneakers",
+        slug="sneakers",
+        description="Light",
+        base_price=Decimal("80.00"),
+        size_grid=ProductSizeGrid.SHOES_RU,
+        status=ProductStatus.ACTIVE,
+        category_id=None,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    cart.items.append(
+        CartItem(
+            id=2,
+            cart_id=1,
+            product_id=second_product.id,
+            product=second_product,
+            product_variant_id=2,
+            quantity=3,
+            is_selected=False,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+    )
+    repository.carts[1] = cart
+
+    result = await service.validate_current_cart(user_id=1, code="SAVE10")
+
+    assert result.subtotal_amount == Decimal("119.80")
+    assert result.discount_amount == Decimal("11.98")
+    assert result.total_amount == Decimal("107.82")
+
+
+@pytest.mark.asyncio
+async def test_validate_promo_code_rejects_cart_with_no_selected_items() -> None:
+    service, repository, _ = _promo_service()
+    repository.add(_promo_code())
+    cart = _cart(user_id=1)
+    cart.items[0].is_selected = False
+    repository.carts[1] = cart
+
+    with pytest.raises(AppError, match="No selected cart items"):
+        await service.validate_current_cart(user_id=1, code="SAVE10")
+
+
 def test_validate_request_accepts_checkout_promo_code_field_name() -> None:
     payload = PromoCodeValidateRequest.model_validate({"promo_code": "save10"})
 
@@ -438,6 +489,7 @@ def _cart(*, user_id: int) -> Cart:
                 product=product,
                 product_variant_id=1,
                 quantity=2,
+                is_selected=True,
                 created_at=_now(),
                 updated_at=_now(),
             )

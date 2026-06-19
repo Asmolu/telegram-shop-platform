@@ -276,6 +276,13 @@ class FakeOrdersRepository:
                 cart.items = []
                 return
 
+    async def clear_cart_items(self, cart_id: int, item_ids: list[int]) -> None:
+        selected_ids = set(item_ids)
+        for cart in self.carts.values():
+            if cart.id == cart_id:
+                cart.items = [item for item in cart.items if item.id not in selected_ids]
+                return
+
 
 class FakeNotificationsRepository:
     def __init__(self) -> None:
@@ -558,6 +565,36 @@ async def test_reject_empty_cart_checkout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reject_checkout_when_no_cart_items_selected() -> None:
+    product = _product()
+    variant = _variant()
+    service, repository, session, events = _orders_service(
+        cart_items=[
+            CartItem(
+                id=1,
+                cart_id=1,
+                product_id=product.id,
+                product_variant_id=variant.id,
+                product=product,
+                product_variant=variant,
+                quantity=1,
+                is_selected=False,
+                created_at=_now(),
+                updated_at=_now(),
+            )
+        ],
+    )
+
+    with pytest.raises(AppError, match="No selected cart items"):
+        await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert repository.orders == {}
+    assert repository.variants[1].stock_quantity == 5
+    assert session.rolled_back is True
+    assert events.events == []
+
+
+@pytest.mark.asyncio
 async def test_reject_inactive_product_checkout() -> None:
     service, repository, _, _ = _orders_service(product_status=ProductStatus.DRAFT)
 
@@ -618,6 +655,57 @@ async def test_cart_cleared_after_successful_checkout() -> None:
     await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
 
     assert repository.carts[1].items == []
+
+
+@pytest.mark.asyncio
+async def test_checkout_uses_selected_cart_items_and_preserves_unselected() -> None:
+    first_product = _product()
+    first_variant = _variant()
+    second_product = _product(product_id=2, name="Sneakers", base_price=Decimal("80.00"))
+    second_variant = _variant(
+        variant_id=2,
+        product_id=2,
+        size="42",
+        color="White",
+        sku="SNEAKERS-42-WHT",
+        stock_quantity=5,
+    )
+    cart_items = [
+        CartItem(
+            id=1,
+            cart_id=1,
+            product_id=first_product.id,
+            product_variant_id=first_variant.id,
+            product=first_product,
+            product_variant=first_variant,
+            quantity=1,
+            is_selected=True,
+            created_at=_now(),
+            updated_at=_now(),
+        ),
+        CartItem(
+            id=2,
+            cart_id=1,
+            product_id=second_product.id,
+            product_variant_id=second_variant.id,
+            product=second_product,
+            product_variant=second_variant,
+            quantity=3,
+            is_selected=False,
+            created_at=_now(),
+            updated_at=_now(),
+        ),
+    ]
+    service, repository, _, _ = _orders_service(cart_items=cart_items)
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert order.subtotal_amount == Decimal("59.90")
+    assert order.total_amount == Decimal("59.90")
+    assert [item.product_id for item in order.items] == [1]
+    assert repository.variants[1].stock_quantity == 4
+    assert repository.variants[2].stock_quantity == 5
+    assert [item.id for item in repository.carts[1].items] == [2]
 
 
 @pytest.mark.asyncio
@@ -984,7 +1072,10 @@ def _orders_service(
         items=cart_items,
     )
     if repository.carts[1].items:
-        repository.variants[1] = repository.carts[1].items[0].product_variant
+        repository.variants = {
+            item.product_variant_id: item.product_variant
+            for item in repository.carts[1].items
+        }
     else:
         repository.variants[1] = _variant()
     service.repository = repository
@@ -1015,6 +1106,7 @@ def _cart(
             product=product,
             product_variant=variant,
             quantity=2,
+            is_selected=True,
             created_at=_now(),
             updated_at=_now(),
         )
@@ -1057,20 +1149,26 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
     )
 
 
-def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
+def _product(
+    status: ProductStatus = ProductStatus.ACTIVE,
+    *,
+    product_id: int = 1,
+    name: str = "Hoodie",
+    base_price: Decimal = Decimal("59.90"),
+) -> Product:
     return Product(
-        id=1,
-        name="Hoodie",
-        slug="hoodie",
+        id=product_id,
+        name=name,
+        slug=name.lower(),
         description="Warm",
-        base_price=Decimal("59.90"),
+        base_price=base_price,
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
         category_id=None,
         images=[
             ProductImage(
-                id=1,
-                product_id=1,
+                id=product_id,
+                product_id=product_id,
                 file_path="products/hoodie.webp",
                 original_filename="hoodie.webp",
                 mime_type="image/webp",
@@ -1086,13 +1184,22 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
     )
 
 
-def _variant(*, stock_quantity: int = 5, is_active: bool = True) -> ProductVariant:
+def _variant(
+    *,
+    variant_id: int = 1,
+    product_id: int = 1,
+    size: str = "M",
+    color: str = "Black",
+    sku: str = "HOODIE-M-BLK",
+    stock_quantity: int = 5,
+    is_active: bool = True,
+) -> ProductVariant:
     return ProductVariant(
-        id=1,
-        product_id=1,
-        size="M",
-        color="Black",
-        sku="HOODIE-M-BLK",
+        id=variant_id,
+        product_id=product_id,
+        size=size,
+        color=color,
+        sku=sku,
         stock_quantity=stock_quantity,
         reserved_quantity=0,
         is_active=is_active,

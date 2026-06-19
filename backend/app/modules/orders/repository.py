@@ -121,6 +121,15 @@ class OrdersRepository:
     async def clear_cart(self, cart_id: int) -> None:
         await self.session.execute(delete(CartItem).where(CartItem.cart_id == cart_id))
 
+    async def clear_cart_items(self, cart_id: int, item_ids: Iterable[int]) -> None:
+        unique_ids = sorted(set(item_ids))
+        if not unique_ids:
+            return
+
+        await self.session.execute(
+            delete(CartItem).where(CartItem.cart_id == cart_id, CartItem.id.in_(unique_ids))
+        )
+
     def _order_detail_loads(self) -> tuple:
         return (
             selectinload(Order.user),

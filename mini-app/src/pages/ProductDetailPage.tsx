@@ -14,6 +14,7 @@ import {
   type ProductVariant,
   type Review,
 } from '../shared/api';
+import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
@@ -75,6 +76,17 @@ export function ProductDetailPage() {
   const [reviewText, setReviewText] = React.useState('');
   const [reviewRating, setReviewRating] = React.useState(5);
   const [reviewBusy, setReviewBusy] = React.useState(false);
+  const requireAuth = React.useCallback(() => {
+    if (isAuthenticated) {
+      return true;
+    }
+    navigate(getAuthPath(currentPath));
+    return false;
+  }, [currentPath, isAuthenticated, navigate]);
+  const quickCart = useQuickCartPicker({
+    requireAuth,
+    onNotice: setNotice,
+  });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -289,30 +301,6 @@ export function ProductDetailPage() {
     }
   }
 
-  async function addRelatedProductToCart(relatedProduct: Product) {
-    if (!isAuthenticated) {
-      navigate(getAuthPath(currentPath));
-      return;
-    }
-
-    const activeVariants = relatedProduct.variants.filter(
-      (variant) => variant.is_active && variant.available_quantity > 0,
-    );
-    if (activeVariants.length !== 1) {
-      setNotice('Выберите размер в карточке товара.');
-      navigate(`/product/${relatedProduct.id}`);
-      return;
-    }
-
-    try {
-      await addCartItem(relatedProduct.id, activeVariants[0].id, 1);
-      window.dispatchEvent(new Event('miniapp:cart-updated'));
-      setNotice('Товар добавлен в корзину.');
-    } catch (actionError) {
-      setNotice(toApiErrorMessage(actionError));
-    }
-  }
-
   async function submitReview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!product || !reviewText.trim()) return;
@@ -376,6 +364,7 @@ export function ProductDetailPage() {
           </button>
         </InlineNotice>
       ) : null}
+      {quickCart.picker}
 
       <section className="product-gallery">
         <ProductImageCarousel product={product} variant="detail" />
@@ -448,7 +437,7 @@ export function ProductDetailPage() {
               <ProductCard
                 key={relatedProduct.id}
                 product={relatedProduct}
-                onAddToCart={addRelatedProductToCart}
+                onAddToCart={quickCart.addToCart}
               />
             ))}
           </div>

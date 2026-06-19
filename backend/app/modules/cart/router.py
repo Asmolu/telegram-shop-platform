@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.deps import get_current_user, get_db_session
 from app.db.models import User
 from app.modules.analytics.service import IsolatedAnalyticsTracker
-from app.modules.cart.schemas import CartItemCreate, CartItemUpdate, CartRead
+from app.modules.cart.schemas import (
+    CartItemCreate,
+    CartItemSelectionUpdate,
+    CartItemUpdate,
+    CartRead,
+    CartSelectionUpdate,
+)
 from app.modules.cart.service import CartService
 
 router = APIRouter(prefix="/cart", tags=["cart"])
@@ -41,6 +47,25 @@ async def update_cart_item_quantity(
     service: Annotated[CartService, Depends(get_cart_service)],
 ) -> CartRead:
     return await service.update_item_quantity(current_user.id, item_id, payload)
+
+
+@router.patch("/items/{item_id}/selection", response_model=CartRead)
+async def update_cart_item_selection(
+    item_id: int,
+    payload: CartItemSelectionUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[CartService, Depends(get_cart_service)],
+) -> CartRead:
+    return await service.update_item_selection(current_user.id, item_id, payload)
+
+
+@router.patch("/selection", response_model=CartRead)
+async def update_cart_selection(
+    payload: CartSelectionUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[CartService, Depends(get_cart_service)],
+) -> CartRead:
+    return await service.update_selection(current_user.id, payload)
 
 
 @router.delete("/items/{item_id}", response_model=CartRead)

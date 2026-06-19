@@ -163,6 +163,8 @@ class PromoCodesService:
             raise AppError("Cart is empty", status.HTTP_400_BAD_REQUEST)
 
         subtotal = calculate_cart_subtotal(cart)
+        if subtotal <= Decimal("0.00"):
+            raise AppError("No selected cart items", status.HTTP_400_BAD_REQUEST)
         calculation = await self.validate_for_checkout(
             user_id=user_id,
             code=code,

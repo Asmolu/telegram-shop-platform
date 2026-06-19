@@ -25,7 +25,7 @@ export function MainPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [bannerNotice, setBannerNotice] = React.useState<string | null>(null);
-  const { addToCart, toggleFavorite, notice, clearNotice } = useProductActions({
+  const { addToCart, sizePicker, toggleFavorite, notice, clearNotice } = useProductActions({
     favoriteIds,
     setFavoriteIds,
   });
@@ -140,6 +140,7 @@ export function MainPage() {
           ))}
         </div>
       ) : null}
+      {sizePicker}
     </div>
   );
 }
