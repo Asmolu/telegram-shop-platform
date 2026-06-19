@@ -1,3 +1,4 @@
+import html
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -249,12 +250,17 @@ class NotificationsService:
         await self.session.refresh(notification)
 
     def _format_telegram_message(self, notification: Notification) -> str:
+        if notification.type == ORDER_CREATED:
+            title = html.escape(notification.title)
+            message = html.escape(notification.message)
+            return f"<b>{title}</b>\n\n{message}"
         return f"{notification.title}\n\n{notification.message}"
 
     async def _send_seller_telegram_notification(self, notification: Notification) -> None:
         message = self._format_telegram_message(notification)
         parts = self._split_telegram_message(message)
         image_url = self._first_product_image_url(notification.payload)
+        parse_mode = "HTML" if notification.type == ORDER_CREATED else None
         if (
             notification.type == ORDER_CREATED
             and image_url is not None
@@ -262,11 +268,18 @@ class NotificationsService:
             and len(parts[0]) <= TELEGRAM_PHOTO_CAPTION_LIMIT
             and hasattr(self.telegram_service, "send_seller_photo")
         ):
-            await self.telegram_service.send_seller_photo(image_url, caption=parts[0])
+            await self.telegram_service.send_seller_photo(
+                image_url,
+                caption=parts[0],
+                parse_mode=parse_mode,
+            )
             return
 
         for part in parts:
-            await self.telegram_service.send_seller_notification(part)
+            await self.telegram_service.send_seller_notification(
+                part,
+                parse_mode=parse_mode,
+            )
 
     def _format_seller_order_created_message(self, payload: Mapping[str, object]) -> str:
         order_id = self._payload_value(payload, "order_id", fallback=MISSING_VALUE)
@@ -285,23 +298,23 @@ class NotificationsService:
 
         lines = [
             f"ID заказа: {order_id}",
-            f"Статус заказа: {order_status_label(status_value)}",
-            f"Статус оплаты: {payment_status_label(payment_status)}",
+            f"Статус: {order_status_label(status_value)}",
+            f"Оплата: {payment_status_label(payment_status)}",
             f"Создан: {format_datetime_moscow(created_at)}",
             "",
-            "👤 Клиент",
+            "Клиент",
             *self._customer_lines(payload.get("customer")),
             "",
-            "📦 Товары",
+            "Товары",
             *self._product_lines(payload.get("items")),
             "",
-            "💰 Сумма",
+            "Сумма",
             f"Товары: {format_rubles(subtotal)}",
             f"Промокод: {promo or MISSING_VALUE}",
             f"Скидка: {format_rubles(discount)}",
             f"К оплате: {format_rubles(total)}",
             "",
-            "🚚 Доставка и контакты",
+            "Доставка и контакты",
             *self._contact_lines(payload.get("contact"), payload.get("customer")),
             "",
             f"Панель продавца: {seller_panel_url}",

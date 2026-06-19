@@ -18,6 +18,8 @@ from app.db.models import (
 )
 from app.modules.products.search import (
     SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
+    SearchSuggestionCandidate,
+    SearchSuggestionKind,
     SearchToken,
     expand_color_query,
     normalize_search_text,
@@ -78,6 +80,136 @@ class ProductsRepository:
         products_result = await self.session.execute(products_query)
         count_result = await self.session.execute(count_query)
         return list(products_result.scalars().all()), count_result.scalar_one()
+
+    async def list_search_suggestions(
+        self,
+        *,
+        query: str,
+        limit: int,
+    ) -> list[SearchSuggestionCandidate]:
+        normalized_query = normalize_search_text(query)
+        if not normalized_query:
+            return []
+
+        search_pattern = f"%{normalized_query}%"
+        per_source_limit = max(limit * 2, 4)
+        candidates: list[SearchSuggestionCandidate] = []
+
+        product_rows = await self.session.execute(
+            select(Product.name)
+            .where(
+                Product.status == ProductStatus.ACTIVE,
+                self._suggestion_text_matches(Product.name, search_pattern),
+            )
+            .order_by(
+                self._suggestion_prefix_rank(Product.name, normalized_query),
+                Product.search_priority.asc(),
+                Product.created_at.desc(),
+                Product.id.desc(),
+            )
+            .limit(per_source_limit)
+        )
+        candidates.extend(
+            self._suggestion_candidate(value, "product", normalized_query, 0)
+            for value in product_rows.scalars().all()
+            if value
+        )
+
+        brand_rows = await self.session.execute(
+            select(Product.brand, func.count(Product.id).label("product_count"))
+            .where(
+                Product.status == ProductStatus.ACTIVE,
+                Product.brand.is_not(None),
+                self._normalized_column(Product.brand) != "",
+                self._suggestion_text_matches(Product.brand, search_pattern),
+            )
+            .group_by(Product.brand)
+            .order_by(
+                self._suggestion_prefix_rank(Product.brand, normalized_query),
+                func.count(Product.id).desc(),
+                func.min(Product.search_priority).asc(),
+                Product.brand.asc(),
+            )
+            .limit(per_source_limit)
+        )
+        candidates.extend(
+            self._suggestion_candidate(value, "brand", normalized_query, 20)
+            for value, _ in brand_rows.all()
+            if value
+        )
+
+        active_category_condition = or_(
+            Category.products.any(Product.status == ProductStatus.ACTIVE),
+            Category.product_categories.any(
+                ProductCategory.product.has(Product.status == ProductStatus.ACTIVE)
+            ),
+        )
+        category_rows = await self.session.execute(
+            select(Category.name)
+            .where(
+                active_category_condition,
+                or_(
+                    self._suggestion_text_matches(Category.name, search_pattern),
+                    self._suggestion_text_matches(Category.slug, search_pattern),
+                    self._suggestion_text_matches(Category.description, search_pattern),
+                ),
+            )
+            .order_by(
+                self._suggestion_prefix_rank(Category.name, normalized_query),
+                Category.name.asc(),
+            )
+            .limit(per_source_limit)
+        )
+        candidates.extend(
+            self._suggestion_candidate(value, "category", normalized_query, 40)
+            for value in category_rows.scalars().all()
+            if value
+        )
+
+        tag_rows = await self.session.execute(
+            select(Tag.name)
+            .where(
+                Tag.products.any(Product.status == ProductStatus.ACTIVE),
+                or_(
+                    self._suggestion_text_matches(Tag.name, search_pattern),
+                    self._suggestion_text_matches(Tag.slug, search_pattern),
+                ),
+            )
+            .order_by(
+                self._suggestion_prefix_rank(Tag.name, normalized_query),
+                Tag.name.asc(),
+            )
+            .limit(per_source_limit)
+        )
+        candidates.extend(
+            self._suggestion_candidate(value, "tag", normalized_query, 50)
+            for value in tag_rows.scalars().all()
+            if value
+        )
+
+        alias_rows = await self.session.execute(
+            select(Product.search_aliases)
+            .where(
+                Product.status == ProductStatus.ACTIVE,
+                Product.search_aliases.is_not(None),
+                self._suggestion_text_matches(Product.search_aliases, search_pattern),
+            )
+            .order_by(
+                self._suggestion_prefix_rank(Product.search_aliases, normalized_query),
+                Product.search_priority.asc(),
+                Product.created_at.desc(),
+                Product.id.desc(),
+            )
+            .limit(per_source_limit)
+        )
+        for raw_aliases in alias_rows.scalars().all():
+            for alias in self._split_search_aliases(raw_aliases):
+                if self._suggestion_value_matches(alias, normalized_query):
+                    candidates.append(
+                        self._suggestion_candidate(alias, "alias", normalized_query, 60)
+                    )
+
+        return self._dedupe_suggestions(candidates, limit)
 
     async def get_by_id(
         self,
@@ -312,6 +444,68 @@ class ProductsRepository:
             func.similarity(normalized_column, normalized_search)
             >= SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
         )
+
+    def _suggestion_text_matches(self, column: Any, search_pattern: str) -> Any:
+        return self._normalized_column(column).ilike(search_pattern)
+
+    def _suggestion_prefix_rank(self, column: Any, normalized_search: str) -> Any:
+        return case(
+            (self._normalized_column(column).ilike(f"{normalized_search}%"), 0),
+            else_=1,
+        )
+
+    def _suggestion_candidate(
+        self,
+        value: str,
+        kind: SearchSuggestionKind,
+        normalized_query: str,
+        kind_score: int,
+    ) -> SearchSuggestionCandidate:
+        normalized_value = normalize_search_text(value) or ""
+        exact_or_prefix_bonus = 0 if normalized_value == normalized_query else 2
+        if normalized_value and not normalized_value.startswith(normalized_query):
+            exact_or_prefix_bonus = 8
+        return SearchSuggestionCandidate(
+            value=value.strip(),
+            kind=kind,
+            score=kind_score + exact_or_prefix_bonus,
+        )
+
+    def _dedupe_suggestions(
+        self,
+        candidates: list[SearchSuggestionCandidate],
+        limit: int,
+    ) -> list[SearchSuggestionCandidate]:
+        suggestions: list[SearchSuggestionCandidate] = []
+        seen_values: set[str] = set()
+        for candidate in sorted(
+            candidates,
+            key=lambda item: (item.score, len(item.value), item.value.casefold()),
+        ):
+            if not candidate.value:
+                continue
+            key = candidate.value.casefold()
+            if key in seen_values:
+                continue
+            seen_values.add(key)
+            suggestions.append(candidate)
+            if len(suggestions) >= limit:
+                break
+        return suggestions
+
+    def _split_search_aliases(self, value: str | None) -> list[str]:
+        if value is None:
+            return []
+        return [
+            part.strip()
+            for raw_line in value.replace(",", "\n").splitlines()
+            for part in raw_line.split(",")
+            if part.strip()
+        ]
+
+    def _suggestion_value_matches(self, value: str, normalized_query: str) -> bool:
+        normalized_value = normalize_search_text(value)
+        return bool(normalized_value and normalized_query in normalized_value)
 
     def _normalized_column(self, column: Any) -> Any:
         return func.lower(func.replace(func.coalesce(column, ""), "ё", "е"))

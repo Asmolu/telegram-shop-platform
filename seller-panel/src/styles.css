@@ -1452,7 +1452,7 @@ textarea:focus {
 .banner-preview__media {
   position: relative;
   width: 100%;
-  aspect-ratio: 60 / 23;
+  aspect-ratio: 400 / 207;
   overflow: hidden;
   border-radius: 8px;
   background: #111827;

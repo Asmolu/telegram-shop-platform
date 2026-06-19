@@ -171,5 +171,7 @@ export function SearchResultsPage() {
 }
 
 function parseSizeGrid(value: string | null): ProductSizeGrid | undefined {
-  return value === 'clothing_alpha' || value === 'shoes_ru' ? value : undefined;
+  return value === 'clothing_alpha' || value === 'shoes_eu' || value === 'shoes_ru'
+    ? value
+    : undefined;
 }

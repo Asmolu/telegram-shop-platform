@@ -150,7 +150,7 @@ Sprint 14 adds Redis-backed caching and rate limiting. Local development can kee
 the isolated in-memory fallback.
 
 Image upload validation checks decoded dimensions in addition to extension, MIME, and byte size:
-product images use 4:5 at 1200x1500 recommended, native banners use 60:23 at 1800x690 recommended,
+product images use 4:5 at 1200x1500 recommended, native banners use 400:207 at 2000x1035 recommended,
 category and tag cards use 4:3 at 1200x900 recommended, and aggressive popup banners use 9:16 at
 900x1600 recommended.
 

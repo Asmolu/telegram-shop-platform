@@ -803,6 +803,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
 }
 
 function formatVariantSize(sizeGrid: ProductSizeGrid, size: string, oneSizeLabel: string): string {
+  if (sizeGrid === 'shoes_eu') return `EU ${size}`;
   if (sizeGrid === 'shoes_ru') return `RU ${size}`;
   return size === 'ONE_SIZE' ? oneSizeLabel : size;
 }

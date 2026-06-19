@@ -33,7 +33,7 @@ The Seller Panel crops images before upload to match these display-safe standard
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Category/tag card image | 4:3 | 1200x900 | 600x450 | 1600x1200 |
-| Horizontal Mini App banner | 60:23 | 1800x690 | 900x345 | 2400x920 |
+| Horizontal Mini App banner | 400:207 | 2000x1035 | 1200x621 | 2400x1242 |
 | Vertical Mini App banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 | Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
 | Aggressive popup banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
@@ -138,12 +138,14 @@ pg_trgm`. Public product responses include `old_price`, `search_priority`, and `
 the Mini App can show crossed-out prices and the Seller Panel can tune search matching. Lower
 numeric `search_priority` values rank first in matching search results; the default is `2`.
 
-Catalog products own a `size_grid`: `clothing_alpha` or `shoes_ru`. Clothing variants support
-`XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, and `ONE_SIZE`. Footwear variants use only Russian whole
-sizes `35` through `46`; EU/US/UK labels and half sizes are outside the MVP. Public product listing
-supports server-side `size_grid`, `size`, and `color` filters against active variants. General
-search matches exact numeric variant sizes and expands common Russian color words and conservative
-typos to the Latin color values stored on variants.
+Catalog products own a `size_grid`: active grids are `clothing_alpha` and `shoes_eu`.
+The legacy `shoes_ru` value remains only for historical products/order snapshots and must not be
+used for new footwear. Clothing variants support `XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, and
+`ONE_SIZE`. Footwear variants use explicit EU whole sizes `35` through `46`; prefixes such as
+RU/EU/US/UK and half sizes are rejected. Public product listing supports server-side `size_grid`,
+`size`, and `color` filters against active variants. General search matches exact numeric variant
+sizes and expands common Russian color words and conservative typos to the Latin color values stored
+on variants.
 
 ## Seller Portal auth and bot management
 
@@ -185,8 +187,9 @@ value. Categories and tags must already exist; Bot 2 never creates or silently
 ignores taxonomy. Products default to `DRAFT` and the reply includes the Seller
 Panel edit link. `/new_product_help` returns complete clothing and footwear
 examples. Clothing accepts `XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, and
-`ONE_SIZE`; footwear accepts only plain Russian whole-size strings `35` through
-`46`, without RU/EU/US/UK prefixes or half sizes.
+`ONE_SIZE`; footwear creates `shoes_eu` products and accepts only plain EU whole-size strings
+`35` through `46`, without RU/EU/US/UK prefixes or half sizes. Existing `shoes_ru` rows are rendered
+as legacy RU data rather than being converted in place.
 
 Set the production webhook with:
 

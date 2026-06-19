@@ -8,7 +8,11 @@ from app.db.models import User, UserRole
 from app.main import create_app
 from app.modules.categories.router import get_categories_service
 from app.modules.products.router import get_products_service
-from app.modules.products.schemas import ProductList
+from app.modules.products.schemas import (
+    ProductList,
+    ProductSearchSuggestion,
+    ProductSearchSuggestionList,
+)
 from app.modules.tags.router import get_tags_service
 
 
@@ -28,6 +32,28 @@ def test_public_product_list_allows_anonymous_access() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "meta": {"limit": 20, "offset": 0, "total": 0}}
+
+
+def test_public_product_suggestions_allow_anonymous_access() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def list_search_suggestions(self, **_: object) -> ProductSearchSuggestionList:
+            return ProductSearchSuggestionList(
+                items=[ProductSearchSuggestion(value="Hoodie", kind="product")]
+            )
+
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/suggestions?query=hoo")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [{"value": "Hoodie", "kind": "product", "label": None}]
+    }
 
 
 def test_product_create_requires_authentication() -> None:

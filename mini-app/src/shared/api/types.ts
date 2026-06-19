@@ -5,7 +5,7 @@ export type PageMeta = {
 };
 
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
-export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
+export type ProductSizeGrid = 'clothing_alpha' | 'shoes_eu' | 'shoes_ru';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type ProductImageBadgeColor =
   | 'purple'
@@ -17,6 +17,7 @@ export type ProductImageBadgeColor =
   | 'black'
   | 'white';
 export type ProductImageBadgePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+export type ProductSearchSuggestionKind = 'product' | 'brand' | 'alias' | 'category' | 'tag';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
 export type ManualPaymentStatus =
@@ -123,6 +124,16 @@ export type Product = {
 export type ProductList = {
   items: Product[];
   meta: PageMeta;
+};
+
+export type ProductSearchSuggestion = {
+  value: string;
+  kind: ProductSearchSuggestionKind;
+  label?: string | null;
+};
+
+export type ProductSearchSuggestionList = {
+  items: ProductSearchSuggestion[];
 };
 
 export type Banner = {

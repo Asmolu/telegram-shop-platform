@@ -55,6 +55,7 @@ class ProductStatus(StrEnum):
 
 class ProductSizeGrid(StrEnum):
     CLOTHING_ALPHA = "clothing_alpha"
+    SHOES_EU = "shoes_eu"
     SHOES_RU = "shoes_ru"
 
 

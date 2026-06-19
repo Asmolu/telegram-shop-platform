@@ -1,13 +1,17 @@
 import type { ProductSizeGrid, ProductVariant } from '../api';
 
 export const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'] as const;
-export const SHOE_SIZES_RU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+export const SHOE_SIZES_EU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+export const SHOE_SIZES_RU = SHOE_SIZES_EU;
 
 export function sizesForGrid(sizeGrid: ProductSizeGrid): readonly string[] {
-  return sizeGrid === 'shoes_ru' ? SHOE_SIZES_RU : CLOTHING_SIZES;
+  return sizeGrid === 'shoes_eu' || sizeGrid === 'shoes_ru' ? SHOE_SIZES_EU : CLOTHING_SIZES;
 }
 
 export function displaySize(sizeGrid: ProductSizeGrid, size: string, detached = false): string {
+  if (sizeGrid === 'shoes_eu') {
+    return detached ? `EU ${size}` : size;
+  }
   if (sizeGrid === 'shoes_ru') {
     return detached ? `RU ${size}` : size;
   }

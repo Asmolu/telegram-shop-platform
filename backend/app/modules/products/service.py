@@ -38,6 +38,8 @@ from app.modules.products.schemas import (
     ProductImageCreate,
     ProductList,
     ProductRead,
+    ProductSearchSuggestion,
+    ProductSearchSuggestionList,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -48,6 +50,8 @@ from app.modules.products.search import sanitize_search_query
 from app.modules.products.size_grids import (
     SizeGridValidationError,
     incompatible_sizes,
+    is_footwear_size_grid,
+    is_legacy_product_size_grid,
     normalize_size,
 )
 from app.modules.tags.repository import TagsRepository
@@ -189,6 +193,32 @@ class ProductsService:
         )
         return ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
 
+    async def list_search_suggestions(
+        self,
+        *,
+        query: str | None,
+        limit: int = 8,
+    ) -> ProductSearchSuggestionList:
+        sanitized_query = sanitize_search_query(query, max_length=100)
+        if sanitized_query is None or len(sanitized_query) < 2:
+            return ProductSearchSuggestionList(items=[])
+
+        safe_limit = min(max(limit, 1), 10)
+        suggestions = await self.repository.list_search_suggestions(
+            query=sanitized_query,
+            limit=safe_limit,
+        )
+        return ProductSearchSuggestionList(
+            items=[
+                ProductSearchSuggestion(
+                    value=suggestion.value,
+                    kind=suggestion.kind,
+                    label=suggestion.label,
+                )
+                for suggestion in suggestions
+            ]
+        )
+
     async def get_public_product(
         self,
         product_id: int,
@@ -270,6 +300,7 @@ class ProductsService:
             categories=payload.categories,
         )
         self._validate_images(payload.images)
+        self._validate_new_product_size_grid(payload.size_grid)
 
         product_data = payload.model_dump(
             exclude={"tag_ids", "images", "categories", "related_product_ids"}
@@ -343,11 +374,12 @@ class ProductsService:
             raise AppError("search_priority must be 1, 2, or 3", status.HTTP_400_BAD_REQUEST)
         if data.get("size_grid") is None and "size_grid" in data:
             raise AppError(
-                "size_grid must be clothing_alpha or shoes_ru",
+                "size_grid must be clothing_alpha or shoes_eu",
                 status.HTTP_400_BAD_REQUEST,
             )
         candidate_size_grid = data.get("size_grid", product.size_grid)
         if candidate_size_grid != product.size_grid:
+            self._validate_product_size_grid_change(product, candidate_size_grid)
             invalid_sizes = incompatible_sizes(
                 candidate_size_grid,
                 (variant.size for variant in product.variants),
@@ -877,3 +909,32 @@ class ProductsService:
             )
         except Exception:
             logger.warning("Failed to track product search analytics event", exc_info=True)
+
+    def _validate_new_product_size_grid(self, size_grid: ProductSizeGrid) -> None:
+        if is_legacy_product_size_grid(size_grid):
+            raise AppError(
+                "size_grid shoes_ru is legacy. Use shoes_eu for new footwear products.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+    def _validate_product_size_grid_change(
+        self,
+        product: Product,
+        candidate_size_grid: ProductSizeGrid,
+    ) -> None:
+        if is_legacy_product_size_grid(candidate_size_grid):
+            raise AppError(
+                "size_grid shoes_ru is legacy and cannot be selected for new footwear. "
+                "Use shoes_eu.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            is_footwear_size_grid(product.size_grid)
+            and is_footwear_size_grid(candidate_size_grid)
+            and product.variants
+        ):
+            raise AppError(
+                "Cannot change size_grid between legacy shoes_ru and shoes_eu while variants "
+                "exist; create a new EU footwear product or remove variants first.",
+                status.HTTP_400_BAD_REQUEST,
+            )

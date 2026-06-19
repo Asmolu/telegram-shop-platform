@@ -13,6 +13,7 @@ from app.modules.products.schemas import (
     ProductCreate,
     ProductDetailRead,
     ProductList,
+    ProductSearchSuggestionList,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -61,6 +62,15 @@ async def list_public_products(
         color=color,
         user_id=current_user.id if current_user is not None else None,
     )
+
+
+@router.get("/suggestions", response_model=ProductSearchSuggestionList)
+async def list_product_search_suggestions(
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    query: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=10)] = 8,
+) -> ProductSearchSuggestionList:
+    return await service.list_search_suggestions(query=query, limit=limit)
 
 
 @router.get("/admin", response_model=ProductList)

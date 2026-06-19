@@ -199,7 +199,7 @@ Seller Panel работает через тот же Backend API, что и Mini
 - slug;
 - описание;
 - базовую цену;
-- размерную сетку `clothing_alpha` или `shoes_ru`;
+- размерную сетку `clothing_alpha` или `shoes_eu`;
 - бейдж на изображении (`none`, `new`, `sale`, `hit`, `exclusive`, `custom`);
 - optional custom-текст бейджа до 20 символов без HTML;
 - статус;
@@ -242,8 +242,9 @@ Seller Panel работает через тот же Backend API, что и Mini
 Размер валидируется по `Product.size_grid`:
 
 - `clothing_alpha`: `XS`, `S`, `M`, `L`, `XL`, `XXL`, `3XL`, `ONE_SIZE`;
-- `shoes_ru`: только российские целые размеры `35`–`46`;
-- EU/US/UK-конвертации и половинные размеры не поддерживаются в MVP;
+- `shoes_eu`: только европейские целые размеры `35`–`46`;
+- legacy `shoes_ru` сохраняется только для исторических товаров и снимков заказов;
+- RU/EU/US/UK-префиксы, конвертации и половинные размеры не поддерживаются в MVP;
 - одна выборка вариантов не смешивает буквенные размеры одежды и числовые размеры обуви.
 
 Фильтры каталога `size_grid`, `size` и `color` применяются на backend к активным вариантам.
@@ -566,7 +567,7 @@ and file-size checks. The Seller Panel should crop uploads before sending them t
 | Product card image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Product detail/gallery image | 4:5 | 1200x1500 | 600x750 | 1600x2000 |
 | Category/tag card image | 4:3 | 1200x900 | 600x450 | 1600x1200 |
-| Horizontal banner | 60:23 | 1800x690 | 900x345 | 2400x920 |
+| Horizontal banner | 400:207 | 2000x1035 | 1200x621 | 2400x1242 |
 | Vertical banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
 | Popup banner | 3:4 | 900x1200 | 450x600 | 1350x1800 |
 | Aggressive popup banner | 9:16 | 900x1600 | 450x800 | 1350x2400 |
@@ -797,10 +798,11 @@ Seller group product draft creation uses a stateless `/new_product` photo
 caption and `/new_product_help`. The backend resolves only existing categories
 and tags, stores the uploaded photo as the primary product image, and creates
 the product plus validated variants in one transaction. Clothing uses
-`clothing_alpha`; footwear uses `shoes_ru` with plain Russian whole-size strings
-`35` through `46`. Prefixes such as RU/EU/US/UK, half sizes, invalid size-grid
-combinations, duplicate size/color rows, and invalid price or stock values are
-rejected with seller-facing messages.
+`clothing_alpha`; footwear uses active grid `shoes_eu` with plain EU whole-size strings
+`35` through `46`. Legacy `shoes_ru` rows are retained for historical rendering only and are not
+converted in place because the stored numeric labels are semantically ambiguous. Prefixes such as
+RU/EU/US/UK, half sizes, invalid size-grid combinations, duplicate size/color rows, and invalid
+price or stock values are rejected with seller-facing messages.
 
 ---
 

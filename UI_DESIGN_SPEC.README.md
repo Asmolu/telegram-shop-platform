@@ -246,11 +246,11 @@ Search:
 
 Native banner image upload standard:
 
-- aspect ratio: `60:23`;
-- recommended crop output: `1800x690`;
-- minimum source/output size: `900x345`;
-- maximum accepted upload: `2400x920`;
-- Mini App rendering must reserve a stable `60 / 23` image box with `object-fit: cover`.
+- aspect ratio: `400:207`;
+- recommended crop output: `2000x1035`;
+- minimum source/output size: `1200x621`;
+- maximum accepted upload: `2400x1242`;
+- Mini App rendering must reserve a stable `400 / 207` image box with `object-fit: cover`.
 
 ### Product Grid
 
@@ -351,7 +351,7 @@ Native banner image upload standard:
 - активный chip — фиолетовый фон;
 - неактивный — белый фон + border;
 - price range — два input поля;
-- размер — chips `XS`, `S`, `M`, `L`, `XL`.
+- размер — chips для одежды `XS`, `S`, `M`, `L`, `XL` и для обуви EU `35`–`46`.
 
 ### CTA
 
@@ -1092,7 +1092,7 @@ CTA:
 
 Banner image upload standards:
 
-- native banner: `60:23`, recommended `1800x690`, minimum `900x345`, maximum `2400x920`;
+- native banner: `400:207`, recommended `2000x1035`, minimum `1200x621`, maximum `2400x1242`;
 - aggressive popup banner: `9:16`, recommended `900x1600`, minimum `450x800`, maximum `1350x2400`;
 - Seller Portal must show the matching recommended and minimum dimensions before upload.
 

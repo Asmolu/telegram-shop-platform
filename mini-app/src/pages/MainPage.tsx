@@ -9,8 +9,9 @@ import {
   type Product,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
+import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
 import { useRouter } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, SearchIcon, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { useProductActions } from '../features/catalog/useProductActions';
@@ -68,10 +69,14 @@ export function MainPage() {
   const horizontalBanners = banners.filter((banner) => banner.display_type === 'horizontal');
   const verticalBanners = banners.filter((banner) => banner.display_type === 'vertical');
 
+  function navigateToFeedSearch(nextQuery = feedQuery) {
+    const query = nextQuery.trim();
+    navigate(query ? `/search/results?q=${encodeURIComponent(query)}` : '/search/results');
+  }
+
   function submitFeedSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const query = feedQuery.trim();
-    navigate(query ? `/search/results?q=${encodeURIComponent(query)}` : '/search/results');
+    navigateToFeedSearch();
   }
 
   return (
@@ -85,19 +90,16 @@ export function MainPage() {
           </button>
         }
       >
-        <form className="search-row search-row--feed" onSubmit={submitFeedSearch}>
-          <label className="search-field search-field--input">
-            <SearchIcon className="search-icon" />
-            <input
-              value={feedQuery}
-              onChange={(event) => setFeedQuery(event.target.value)}
-              placeholder="Найти одежду, бренд, размер..."
-              type="search"
-            />
-          </label>
-          <button className="search-submit-button" type="submit" aria-label="Искать">
-            Найти
-          </button>
+        <form onSubmit={submitFeedSearch}>
+          <SearchAutocomplete
+            className="search-row--feed"
+            value={feedQuery}
+            onChange={setFeedQuery}
+            onSearch={navigateToFeedSearch}
+            placeholder="Найти одежду, бренд, размер..."
+            submitLabel="Найти"
+            submitAriaLabel="Искать"
+          />
         </form>
       </TopBar>
 

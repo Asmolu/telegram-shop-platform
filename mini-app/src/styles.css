@@ -622,6 +622,75 @@ label {
   box-shadow: 0 10px 20px rgba(124, 58, 237, 0.2);
 }
 
+.search-autocomplete {
+  position: relative;
+  align-items: stretch;
+}
+
+.search-suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 45;
+  display: grid;
+  gap: 3px;
+  max-height: min(54vh, 286px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 6px;
+  background: var(--surface-elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-elevated);
+  overscroll-behavior: contain;
+}
+
+.search-row--feed .search-suggestions {
+  top: calc(100% + 8px);
+}
+
+.search-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 13px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.search-suggestion:hover,
+.search-suggestion.is-active {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.search-suggestion__text {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-suggestion__kind,
+.search-suggestions__status {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.search-suggestions__status {
+  min-height: 34px;
+  padding: 9px 10px;
+}
+
 .search-row--feed {
   width: 100%;
   margin: 0;
@@ -703,7 +772,7 @@ label {
   position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 60 / 23;
+  aspect-ratio: 400 / 207;
   margin-bottom: 10px;
   overflow: hidden;
   border: 0;
@@ -1027,12 +1096,10 @@ label {
   background: #ec4899;
 }
 
-.product-badge--sale,
 .product-badge--color-red {
   background: var(--sale);
 }
 
-.product-badge--hit,
 .product-badge--color-orange {
   background: #ea580c;
 }
@@ -1045,7 +1112,6 @@ label {
   background: #16a34a;
 }
 
-.product-badge--exclusive,
 .product-badge--color-black {
   background: #111827;
 }
@@ -1818,12 +1884,10 @@ label {
   background: #ec4899;
 }
 
-.product-image-badge--sale,
 .product-image-badge--color-red {
   background: var(--sale);
 }
 
-.product-image-badge--hit,
 .product-image-badge--color-orange {
   background: #ea580c;
 }
@@ -1836,7 +1900,6 @@ label {
   background: #16a34a;
 }
 
-.product-image-badge--exclusive,
 .product-image-badge--color-black {
   background: #111827;
 }
@@ -2089,6 +2152,48 @@ label {
 .review-card span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.review-rating-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.star-rating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.star-rating__button {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: color-mix(in srgb, var(--muted) 54%, transparent);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.star-rating__button.is-selected {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.star-rating__button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.review-rating-field small {
+  color: var(--muted);
 }
 
 .review-form label,

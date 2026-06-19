@@ -5,12 +5,21 @@ from collections.abc import Iterable
 from app.db.models import ProductSizeGrid
 
 CLOTHING_ALPHA_SIZES = ("XS", "S", "M", "L", "XL", "XXL", "3XL", "ONE_SIZE")
-SHOES_RU_SIZES = tuple(str(size) for size in range(35, 47))
+SHOES_EU_SIZES = tuple(str(size) for size in range(35, 47))
+SHOES_RU_SIZES = SHOES_EU_SIZES
 
 ALLOWED_SIZES_BY_GRID: dict[ProductSizeGrid, tuple[str, ...]] = {
     ProductSizeGrid.CLOTHING_ALPHA: CLOTHING_ALPHA_SIZES,
+    ProductSizeGrid.SHOES_EU: SHOES_EU_SIZES,
     ProductSizeGrid.SHOES_RU: SHOES_RU_SIZES,
 }
+
+ACTIVE_PRODUCT_SIZE_GRIDS = (
+    ProductSizeGrid.CLOTHING_ALPHA,
+    ProductSizeGrid.SHOES_EU,
+)
+LEGACY_PRODUCT_SIZE_GRIDS = (ProductSizeGrid.SHOES_RU,)
+FOOTWEAR_SIZE_GRIDS = (ProductSizeGrid.SHOES_EU, ProductSizeGrid.SHOES_RU)
 
 
 class SizeGridValidationError(ValueError):
@@ -54,8 +63,18 @@ def size_sort_key(grid: ProductSizeGrid | str, value: str) -> tuple[int, str]:
 
 def format_size_for_display(grid: ProductSizeGrid | str, value: str) -> str:
     size_grid = ProductSizeGrid(grid)
+    if size_grid == ProductSizeGrid.SHOES_EU:
+        return f"EU {value}"
     if size_grid == ProductSizeGrid.SHOES_RU:
         return f"RU {value}"
     if value == "ONE_SIZE":
         return "Единый размер"
     return value
+
+
+def is_legacy_product_size_grid(grid: ProductSizeGrid | str) -> bool:
+    return ProductSizeGrid(grid) in LEGACY_PRODUCT_SIZE_GRIDS
+
+
+def is_footwear_size_grid(grid: ProductSizeGrid | str) -> bool:
+    return ProductSizeGrid(grid) in FOOTWEAR_SIZE_GRIDS

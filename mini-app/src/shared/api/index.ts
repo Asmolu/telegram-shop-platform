@@ -16,6 +16,7 @@ import type {
   PersonalDataUpdate,
   Product,
   ProductList,
+  ProductSearchSuggestionList,
   ProductSizeGrid,
   PromoValidation,
   Review,
@@ -64,6 +65,12 @@ export function updatePersonalData(payload: PersonalDataUpdate) {
 
 export function getProducts(params: ProductListParams = {}) {
   return apiRequest<ProductList>('/products', { query: params });
+}
+
+export function getProductSearchSuggestions(query: string, limit = 8) {
+  return apiRequest<ProductSearchSuggestionList>('/products/suggestions', {
+    query: { query, limit },
+  });
 }
 
 export function getProduct(productId: number) {

@@ -520,6 +520,104 @@ async def test_active_orders_command_is_routed(
 
 
 @pytest.mark.asyncio
+async def test_help_command_is_routed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/help"))
+
+    assert response.result == "help_sent"
+    assert telegram.messages == [("-100", "Help for -100: /chetam /orders <ID>")]
+
+
+@pytest.mark.asyncio
+async def test_chetam_command_is_routed_and_split(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/chetam"))
+
+    assert response.result == "chetam_sent"
+    assert seller_bot.chetam_actor_ids == [500]
+    assert telegram.messages == [("-100", "Chetam for -100"), ("-100", "Second page")]
+
+
+@pytest.mark.asyncio
+async def test_orders_command_sends_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/orders 16"))
+
+    assert response.result == "order_detail_sent"
+    assert seller_bot.order_detail_requests == [(16, 500)]
+    assert telegram.messages == [("-100", "ID заказа: 16\nСтатус заказа: В обработке")]
+    assert telegram.reply_markups[0]["inline_keyboard"][0][0]["callback_data"] == (
+        "seller_order:ship:16"
+    )
+    assert telegram.reply_markups[0]["inline_keyboard"][0][1]["callback_data"] == (
+        "seller_order:cancel:16"
+    )
+
+
+@pytest.mark.asyncio
+async def test_orders_command_rejects_invalid_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_seller_group_command_update("/orders nope"))
+
+    assert response.result == "seller_command_error"
+    assert seller_bot.order_detail_requests == []
+    assert "Формат: /orders <ID заказа>" in telegram.messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_order_shipped_callback_updates_order_and_removes_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_callback_update("seller_order:ship:16"))
+
+    assert response.result == "order_shipped"
+    assert seller_bot.shipped_order_ids == [(16, 500)]
+    assert telegram.callback_answers == [("callback-id", "Статус заказа: Отправлен.")]
+    assert telegram.edits == [
+        (
+            "-100",
+            11,
+            "ID заказа: 16\nСтатус заказа: Отправлен",
+            {"inline_keyboard": []},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_order_cancel_callback_only_closes_interaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(_callback_update("seller_order:cancel:16"))
+
+    assert response.result == "order_action_cancelled"
+    assert seller_bot.shipped_order_ids == []
+    assert telegram.callback_answers == [("callback-id", "Действие отменено.")]
+    assert telegram.markup_edits == [("-100", 11, {"inline_keyboard": []})]
+
+
+@pytest.mark.asyncio
 async def test_new_product_help_command_is_routed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -531,7 +629,7 @@ async def test_new_product_help_command_is_routed(
     assert response.handled is True
     assert response.result == "new_product_help_sent"
     assert "Размеры одежды: XS, S, M" in telegram.messages[0][1]
-    assert "российские целые размеры 35-46" in telegram.messages[0][1]
+    assert "европейские целые размеры EU 35-46" in telegram.messages[0][1]
     assert "RU/EU/US/UK" in telegram.messages[0][1]
     assert telegram.parse_modes == ["HTML"]
 
@@ -564,7 +662,7 @@ async def test_new_product_validation_error_reply_is_seller_friendly(
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, seller_bot, telegram = _seller_command_webhook_service()
     seller_bot.product_exception = AppError(
-        "размер `RU 39` недопустим для обуви. Используй российский размер без "
+        "размер `RU 39` недопустим для обуви. Используй европейский размер без "
         "префикса: `39`. Разрешены размеры обуви: 35, 36, ..., 46.",
         status.HTTP_400_BAD_REQUEST,
     )
@@ -575,7 +673,7 @@ async def test_new_product_validation_error_reply_is_seller_friendly(
     reply = telegram.messages[0][1]
     assert reply.startswith("Не удалось создать товар.")
     assert "Ошибка: размер `RU 39` недопустим для обуви" in reply
-    assert "Используй российский размер без префикса: `39`" in reply
+    assert "Используй европейский размер без префикса: `39`" in reply
     assert "/new_product_help" in reply
 
 
@@ -806,14 +904,61 @@ class FakeSellerBotCommandService:
     def __init__(self) -> None:
         self.blocked_user_ids: list[int] = []
         self.unblocked_user_ids: list[int] = []
+        self.chetam_actor_ids: list[int | None] = []
+        self.order_detail_requests: list[tuple[int, int | None]] = []
+        self.shipped_order_ids: list[tuple[int, int | None]] = []
         self.product_messages: list[str] = []
         self.product_exception: Exception | None = None
+
+    def format_help_command(self, *, chat_id: int) -> str:
+        return f"Help for {chat_id}: /chetam /orders <ID>"
 
     async def format_sellers_command(self, *, chat_id: int) -> str:
         return f"Seller list for {chat_id}"
 
     async def format_active_orders_command(self, *, chat_id: int) -> list[str]:
         return [f"Active orders for {chat_id}"]
+
+    async def format_chetam_command(
+        self,
+        *,
+        chat_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        self.chetam_actor_ids.append(actor_telegram_user_id)
+        return [f"Chetam for {chat_id}", "Second page"]
+
+    async def format_order_detail_command(
+        self,
+        *,
+        chat_id: int,
+        order_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        del chat_id
+        self.order_detail_requests.append((order_id, actor_telegram_user_id))
+        return [f"ID заказа: {order_id}\nСтатус заказа: В обработке"]
+
+    def order_action_reply_markup(self, order_id: int) -> dict[str, object]:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "SHIPPED", "callback_data": f"seller_order:ship:{order_id}"},
+                    {"text": "CANCEL", "callback_data": f"seller_order:cancel:{order_id}"},
+                ]
+            ]
+        }
+
+    async def mark_order_shipped_command(
+        self,
+        *,
+        chat_id: int,
+        order_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        del chat_id
+        self.shipped_order_ids.append((order_id, actor_telegram_user_id))
+        return [f"ID заказа: {order_id}\nСтатус заказа: Отправлен"]
 
     async def block_seller_command(
         self,
@@ -856,7 +1001,7 @@ class FakeSellerBotCommandService:
         del chat_id
         return (
             "Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.\n"
-            "Размеры обуви: российские целые размеры 35-46. "
+            "Размеры обуви: европейские целые размеры EU 35-46. "
             "RU/EU/US/UK и половинные размеры не поддерживаются."
         )
 

@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.db.models import (
+    ManualPaymentStatus,
     Order,
     OrderItem,
     OrderStatus,
@@ -62,3 +63,46 @@ class SellerBotRepository:
             select(func.count(Order.id)).where(*filters)
         )
         return list(orders_result.scalars().all()), count_result.scalar_one()
+
+    async def list_paid_unshipped_orders(self, *, limit: int) -> tuple[list[Order], int]:
+        filters = (
+            Order.status.notin_(
+                (OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED)
+            ),
+            Order.manual_payment.has(status=ManualPaymentStatus.APPROVED),
+        )
+        orders_result = await self.session.execute(
+            select(Order)
+            .options(*self._order_detail_loads())
+            .where(*filters)
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .limit(limit)
+        )
+        count_result = await self.session.execute(select(func.count(Order.id)).where(*filters))
+        return list(orders_result.scalars().all()), count_result.scalar_one()
+
+    async def get_order(self, order_id: int) -> Order | None:
+        result = await self.session.execute(
+            select(Order).options(*self._order_detail_loads()).where(Order.id == order_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_actor_user(self, telegram_user_id: int) -> User | None:
+        result = await self.session.execute(
+            select(User).where(
+                User.telegram_id == telegram_user_id,
+                User.is_active.is_(True),
+                User.role.in_((UserRole.SELLER, UserRole.ADMIN)),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    def _order_detail_loads(self) -> tuple:
+        return (
+            selectinload(Order.user),
+            selectinload(Order.items)
+            .selectinload(OrderItem.product)
+            .selectinload(Product.images),
+            selectinload(Order.items).selectinload(OrderItem.product_variant),
+            selectinload(Order.manual_payment),
+        )

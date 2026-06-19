@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
+    OrderStatus,
     ProductImageBadgeColor,
     ProductImageBadgePosition,
     ProductImageBadgeType,
@@ -32,6 +33,8 @@ from app.modules.audit.service import AuditService
 from app.modules.categories.repository import CategoriesRepository
 from app.modules.notifications.schemas import NotificationList
 from app.modules.notifications.service import NotificationsService
+from app.modules.orders.schemas import OrderStatusUpdate
+from app.modules.orders.service import OrdersService
 from app.modules.products.schemas import (
     ProductCategoryInput,
     ProductCreate,
@@ -41,6 +44,7 @@ from app.modules.products.schemas import (
 from app.modules.products.search import normalize_search_aliases
 from app.modules.products.service import ProductsService
 from app.modules.products.size_grids import (
+    SHOES_EU_SIZES,
     SizeGridValidationError,
     format_size_for_display,
     normalize_size,
@@ -65,6 +69,7 @@ SELLER_BOT_PRODUCT_DRAFT_CREATED = "bot_product_draft_created"
 SELLER_BOT_PRODUCT_POST_REJECTED = "bot_product_post_rejected"
 SELLER_BOT_COMMAND_LIMIT = 20
 ACTIVE_ORDERS_COMMAND_LIMIT = 10
+CHETAM_COMMAND_LIMIT = 20
 TELEGRAM_MESSAGE_LIMIT = 4096
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
 POSTGRES_INT32_MAX = 2_147_483_647
@@ -108,8 +113,9 @@ QUICK_PRODUCT_ALLOWED_FIELDS = {
 QUICK_PRODUCT_SIZE_GRID_ALIASES = {
     "одежда": ProductSizeGrid.CLOTHING_ALPHA,
     ProductSizeGrid.CLOTHING_ALPHA.value: ProductSizeGrid.CLOTHING_ALPHA,
-    "обувь": ProductSizeGrid.SHOES_RU,
-    ProductSizeGrid.SHOES_RU.value: ProductSizeGrid.SHOES_RU,
+    "обувь": ProductSizeGrid.SHOES_EU,
+    "eu": ProductSizeGrid.SHOES_EU,
+    ProductSizeGrid.SHOES_EU.value: ProductSizeGrid.SHOES_EU,
 }
 QUICK_PRODUCT_STATUS_ALIASES = {
     "черновик": ProductStatus.DRAFT,
@@ -408,6 +414,114 @@ class SellerBotService:
         )
         return self._chunk_command_message(header, blocks, footer=footer)
 
+    def format_help_command(self, *, chat_id: int) -> str:
+        self._require_seller_group(chat_id)
+        return "\n".join(
+            (
+                "Команды Bot 2 для группы продавцов",
+                "",
+                "/help — показать эту справку.",
+                "/active_orders — активные заказы, которые ещё не доставлены и не отменены.",
+                "/chetam — оплаченные заказы, которые ещё не отправлены.",
+                "/orders <ID> — детали заказа и кнопка SHIPPED. Пример: /orders 16",
+                "/new_product_help — формат создания товара через Bot 2.",
+                "/new_product — создать черновик товара из фото и подписи.",
+                "/sellers — список продавцов и администраторов.",
+                "/block_seller <Seller ID> — заблокировать продавца.",
+                "/unblock_seller <Seller ID> — разблокировать продавца.",
+                "",
+                "Кнопки в заказах:",
+                "SHIPPED — отметить заказ отправленным.",
+                "CANCEL — закрыть кнопки без изменения заказа.",
+            )
+        )
+
+    async def format_chetam_command(
+        self,
+        *,
+        chat_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        self._require_seller_group(chat_id)
+        await self._require_active_seller_actor(actor_telegram_user_id)
+        orders, total = await self.repository.list_paid_unshipped_orders(
+            limit=CHETAM_COMMAND_LIMIT
+        )
+        if not orders:
+            return ["Оплаченных заказов до отправки нет."]
+
+        header = f"Оплачены, но ещё не отправлены: {len(orders)}"
+        if total > len(orders):
+            header += f" из {total}"
+        blocks = [self._format_chetam_order(order) for order in orders]
+        footer = (
+            f"Показаны первые {len(orders)} из {total} заказов."
+            if total > len(orders)
+            else None
+        )
+        return self._chunk_command_message(header, blocks, footer=footer)
+
+    async def format_order_detail_command(
+        self,
+        *,
+        chat_id: int,
+        order_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        self._require_seller_group(chat_id)
+        await self._require_active_seller_actor(actor_telegram_user_id)
+        order = await self.repository.get_order(order_id)
+        if order is None:
+            raise AppError("Заказ не найден.", 404)
+        return self._split_command_text(self._format_order_detail(order))
+
+    def order_action_reply_markup(self, order_id: int) -> dict[str, object]:
+        return {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "SHIPPED",
+                        "callback_data": f"seller_order:ship:{order_id}",
+                    },
+                    {
+                        "text": "CANCEL",
+                        "callback_data": f"seller_order:cancel:{order_id}",
+                    },
+                ]
+            ]
+        }
+
+    async def mark_order_shipped_command(
+        self,
+        *,
+        chat_id: int,
+        order_id: int,
+        actor_telegram_user_id: int | None,
+    ) -> list[str]:
+        self._require_seller_group(chat_id)
+        actor = await self._require_active_seller_actor(actor_telegram_user_id)
+        order = await self.repository.get_order(order_id)
+        if order is None:
+            raise AppError("Заказ не найден.", 404)
+        if order.status == OrderStatus.SHIPPED:
+            return self._split_command_text(self._format_order_detail(order))
+        if order.status in {OrderStatus.DELIVERED, OrderStatus.CANCELLED}:
+            raise AppError(
+                "Нельзя отметить отправленным доставленный или отменённый заказ.",
+                409,
+            )
+
+        orders_service = OrdersService(self.session, audit_service=self.audit_service)
+        await orders_service.update_order_status(
+            order_id,
+            OrderStatusUpdate(status=OrderStatus.SHIPPED),
+            actor_user_id=actor.id,
+        )
+        updated_order = await self.repository.get_order(order_id)
+        return self._split_command_text(
+            self._format_order_detail(updated_order or order)
+        )
+
     async def block_seller_command(
         self,
         *,
@@ -439,6 +553,45 @@ class SellerBotService:
             actor_telegram_user_id=actor_telegram_user_id,
             actor_username=actor_username,
         )
+
+    def _format_chetam_order(self, order) -> str:
+        user = order.user
+        lines = [
+            f"ID заказа: {order.id}",
+            "Оплата: подтверждено",
+            f"Адрес: {order.delivery_address or MISSING_VALUE}",
+            "Товары:",
+            *self._order_item_summary_lines(order.items),
+            f"Рост: {self._height_label(getattr(user, 'height_cm', None))}",
+            f"Вес: {self._weight_label(getattr(user, 'weight_kg', None))}",
+            f"Контактный номер: {order.contact_phone or MISSING_VALUE}",
+            f"Телеграм тег: {self._telegram_tag(user)}",
+        ]
+        return "\n".join(lines)
+
+    def _format_order_detail(self, order) -> str:
+        user = order.user
+        payment = order.manual_payment
+        payment_label = (
+            payment_status_label(payment.status) if payment is not None else MISSING_VALUE
+        )
+        lines = [
+            f"ID заказа: {order.id}",
+            f"Статус заказа: {order_status_label(order.status)}",
+            f"Статус оплаты: {payment_label}",
+            f"Создан: {format_datetime_moscow(order.created_at)}",
+            f"Telegram: {self._telegram_tag(user)}",
+            f"Telegram ID: {getattr(user, 'telegram_id', None) or MISSING_VALUE}",
+            f"Способ доставки: {delivery_method_label(order.delivery_method)}",
+            f"Имя: {order.contact_name or MISSING_VALUE}",
+            f"Телефон: {order.contact_phone or MISSING_VALUE}",
+            f"Адрес/город: {order.delivery_address or MISSING_VALUE}",
+            f"Комментарий: {order.delivery_comment or MISSING_VALUE}",
+            "",
+            "Товары:",
+            *self._order_item_summary_lines(order.items),
+        ]
+        return "\n".join(lines)
 
     def _format_active_order(self, order) -> str:
         user = order.user
@@ -501,6 +654,50 @@ class SellerBotService:
         )
         return "\n".join(lines)
 
+    def _order_item_summary_lines(self, items: object) -> list[str]:
+        if not isinstance(items, list) or not items:
+            return [MISSING_VALUE]
+        lines: list[str] = []
+        multi_item = len(items) > 1
+        for index, item in enumerate(items, start=1):
+            prefix = f"{index}) " if multi_item else ""
+            product_name = getattr(item, "product_name", None) or MISSING_VALUE
+            lines.append(f"{prefix}Название: {product_name}")
+            lines.append(f"   Цвет: {getattr(item, 'variant_color', None) or MISSING_VALUE}")
+            lines.append(f"   Размер: {self._display_item_size(item)}")
+            lines.append(f"   Количество: {getattr(item, 'quantity', None) or MISSING_VALUE}")
+        return lines
+
+    def _display_item_size(self, item: object) -> str:
+        size = getattr(item, "variant_size", None)
+        if not size:
+            return MISSING_VALUE
+        size_grid = getattr(item, "variant_size_grid", None)
+        size_grid_value = (
+            getattr(size_grid, "value", size_grid) or ProductSizeGrid.CLOTHING_ALPHA.value
+        )
+        try:
+            return format_size_for_display(str(size_grid_value), str(size))
+        except ValueError:
+            return str(size)
+
+    def _height_label(self, value: object) -> str:
+        return f"{value} см" if value else MISSING_VALUE
+
+    def _weight_label(self, value: object) -> str:
+        if not value:
+            return MISSING_VALUE
+        return f"{str(value).rstrip('0').rstrip('.')} кг"
+
+    def _telegram_tag(self, user: object | None) -> str:
+        if user is None:
+            return MISSING_VALUE
+        for field in ("telegram_username", "username"):
+            value = getattr(user, field, None)
+            if value:
+                return f"@{str(value).lstrip('@')}"
+        return MISSING_VALUE
+
     def _chunk_command_message(
         self,
         header: str,
@@ -533,6 +730,47 @@ class SellerBotService:
         if current:
             messages.append(current)
         return messages
+
+    def _split_command_text(
+        self,
+        text: str,
+        *,
+        limit: int = TELEGRAM_MESSAGE_LIMIT,
+    ) -> list[str]:
+        if len(text) <= limit:
+            return [text]
+
+        parts: list[str] = []
+        current = ""
+        for line in text.splitlines(keepends=True):
+            if len(line) > limit:
+                if current:
+                    parts.append(current.rstrip())
+                    current = ""
+                parts.extend(line[index : index + limit] for index in range(0, len(line), limit))
+                continue
+            if len(current) + len(line) > limit:
+                parts.append(current.rstrip())
+                current = line
+            else:
+                current += line
+        if current:
+            parts.append(current.rstrip())
+        return [part for part in parts if part]
+
+    async def _require_active_seller_actor(self, telegram_user_id: int | None):
+        if telegram_user_id is None:
+            raise AppError(
+                "Команда доступна только активным продавцам и администраторам.",
+                403,
+            )
+        actor = await self.repository.get_active_actor_user(telegram_user_id)
+        if actor is None:
+            raise AppError(
+                "Команда доступна только активным продавцам и администраторам.",
+                403,
+            )
+        return actor
 
     async def create_quick_product_draft_command(
         self,
@@ -888,7 +1126,7 @@ class SellerBotService:
         if size_grid is None:
             raise AppError(
                 "поле `Тип размеров` должно быть `одежда`, `обувь`, "
-                "`clothing_alpha` или `shoes_ru`.",
+                "`clothing_alpha` или `shoes_eu`.",
                 400,
             )
         return size_grid
@@ -950,6 +1188,23 @@ class SellerBotService:
         return variants
 
     def _invalid_size_message(self, size_grid: ProductSizeGrid, value: str) -> str:
+        if size_grid == ProductSizeGrid.SHOES_EU:
+            prefix_match = re.fullmatch(r"(?:RU|EU|US|UK)\s*(\d+)", value, re.IGNORECASE)
+            if prefix_match and prefix_match.group(1) in SHOES_EU_SIZES:
+                return (
+                    f"размер `{value}` недопустим для обуви. Используй европейский размер "
+                    f"без префикса: `{prefix_match.group(1)}`. Разрешены размеры обуви EU: "
+                    "35, 36, ..., 46."
+                )
+            if "." in value or "," in value:
+                return (
+                    f"размер `{value}` недопустим для обуви: половинные размеры не "
+                    "поддерживаются. Разрешены целые размеры EU 35-46."
+                )
+            return (
+                f"размер `{value}` недопустим для обуви. Разрешены только европейские "
+                "целые размеры: 35, 36, ..., 46."
+            )
         if size_grid == ProductSizeGrid.SHOES_RU:
             prefix_match = re.fullmatch(r"(?:RU|EU|US|UK)\s*(\d+)", value, re.IGNORECASE)
             if prefix_match and 35 <= int(prefix_match.group(1)) <= 46:
@@ -1117,13 +1372,13 @@ class SellerBotService:
 Теги: футболка, hermes
 Тип размеров: одежда
 Размеры:
-M / White / 10 / HERMES-M-W
-L / White / 8 / HERMES-L-W
-XL / Black / 5 / HERMES-XL-B
-3XL / Black / 3 / HERMES-3XL-B
+M / Белый / 10 / HERMES-M-W
+L / Белый / 8 / HERMES-L-W
+XL / Черный / 5 / HERMES-XL-B
+3XL / Черный / 3 / HERMES-3XL-B
 Похожие товары: 11, 12, 13
 Виджет фото: Распродажа
-Цвет виджета фото: red
+Цвет виджета фото: красный
 Положение виджета фото: снизу слева
 Псевдонимы поиска: футболка, фудболка, футбалка
 Статус: черновик"""
@@ -1137,9 +1392,9 @@ XL / Black / 5 / HERMES-XL-B
 Теги: кроссовки, nike, premium
 Тип размеров: обувь
 Размеры:
-39 / White / 3 / SKU-NIKE-39-W
-40 / White / 2 / SKU-NIKE-40-W
-41 / Black / 4 / SKU-NIKE-41-B
+39 / Белый / 3 / SKU-NIKE-39-W
+40 / Белый / 2 / SKU-NIKE-40-W
+41 / Черный / 4 / SKU-NIKE-41-B
 Похожие товары: 11, 12, 13
 Виджет фото: NEW
 Цвет виджета фото: purple
@@ -1162,14 +1417,18 @@ XL / Black / 5 / HERMES-XL-B
                 "\n".join(
                     (
                         "Формат варианта: размер / цвет / остаток / SKU.",
+                        "Цвет варианта можно писать по-русски или латиницей; он сохранится "
+                        "и будет показан как введён.",
                         "SKU можно оставить пустым, тогда Bot 2 создаст безопасное значение.",
                         "Размеры одежды: XS, S, M, L, XL, XXL, 3XL, ONE_SIZE.",
-                        "Размеры обуви: только российские целые размеры 35-46 без "
+                        "Размеры обуви: только европейские целые размеры EU 35-46 без "
                         "RU/EU/US/UK и без половинных размеров.",
                         "Похожие товары указываются ID через запятую.",
                         "Виджет фото: нет, NEW, Распродажа, Хит, Эксклюзив, custom.",
                         "Для custom добавь: Текст виджета фото: ...",
-                        "Цвет виджета фото: purple, pink, red, orange, blue, green, black, white.",
+                        "Цвет виджета фото: purple, pink, red, orange, blue, green, black, white "
+                        "или по-русски: фиолетовый, розовый, красный, оранжевый, синий, "
+                        "зелёный, чёрный, белый.",
                         "Положение виджета фото: сверху слева, сверху справа, "
                         "снизу слева, снизу справа.",
                         "Категории и теги должны уже существовать.",
@@ -1200,7 +1459,11 @@ XL / Black / 5 / HERMES-XL-B
         return "черновик" if status_value == ProductStatus.DRAFT else "активен"
 
     def _quick_product_size_grid_label(self, size_grid: ProductSizeGrid) -> str:
-        return "обувь" if size_grid == ProductSizeGrid.SHOES_RU else "одежда"
+        if size_grid == ProductSizeGrid.SHOES_EU:
+            return "обувь EU"
+        if size_grid == ProductSizeGrid.SHOES_RU:
+            return "обувь RU (legacy)"
+        return "одежда"
 
     def _format_product_validation_error(self, exc: ValidationError) -> str:
         error = exc.errors(include_url=False)[0]

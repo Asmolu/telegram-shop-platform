@@ -323,6 +323,22 @@ export function ProductDetailPage() {
     }
   }
 
+  function changeReviewRating(nextRating: number) {
+    setReviewRating(Math.min(Math.max(nextRating, 1), 5));
+  }
+
+  function handleReviewRatingKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      changeReviewRating(reviewRating + 1);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      changeReviewRating(reviewRating - 1);
+    }
+  }
+
   if (loading) {
     return (
       <div className="page">
@@ -411,7 +427,7 @@ export function ProductDetailPage() {
           </>
         ) : null}
 
-        <h2>{product.size_grid === 'shoes_ru' ? 'Российский размер' : 'Размер'}</h2>
+        <h2>{product.size_grid === 'shoes_eu' ? 'EU размер' : product.size_grid === 'shoes_ru' ? 'RU размер' : 'Размер'}</h2>
         {selectedColorVariants.length > 0 ? (
           <div className="variant-carousel" aria-label="Доступные размеры">
             {selectedColorVariants.map((variant) => (
@@ -478,14 +494,31 @@ export function ProductDetailPage() {
         )}
 
         <form className="review-form" onSubmit={submitReview}>
-          <label>
-            Оценка
-            <select value={reviewRating} onChange={(event) => setReviewRating(Number(event.target.value))}>
-              {[5, 4, 3, 2, 1].map((rating) => (
-                <option value={rating} key={rating}>{rating}</option>
+          <div className="review-rating-field">
+            <span id="review-rating-label">Оценка</span>
+            <div
+              className="star-rating"
+              role="radiogroup"
+              aria-labelledby="review-rating-label"
+              onKeyDown={handleReviewRatingKeyDown}
+            >
+              {[1, 2, 3, 4, 5].map((rating) => (
+                <button
+                  className={`star-rating__button ${rating <= reviewRating ? 'is-selected' : ''}`}
+                  key={rating}
+                  type="button"
+                  role="radio"
+                  aria-checked={reviewRating === rating}
+                  aria-label={`${rating} из 5`}
+                  disabled={reviewBusy}
+                  onClick={() => changeReviewRating(rating)}
+                >
+                  <span aria-hidden="true">★</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+            <small>{reviewRating} из 5</small>
+          </div>
           <label>
             Текст отзыва
             <textarea

@@ -79,7 +79,8 @@ const initialForm: ProductFormState = {
 };
 
 const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'] as const;
-const SHOE_SIZES_RU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+const SHOE_SIZES_EU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
+const SHOE_SIZES_RU = SHOE_SIZES_EU;
 const BADGE_COLORS: Array<{ value: ProductImageBadgeColor; labelKey: string }> = [
   { value: 'purple', labelKey: 'productEditor.badgeColorPurple' },
   { value: 'pink', labelKey: 'productEditor.badgeColorPink' },
@@ -98,7 +99,9 @@ const BADGE_POSITIONS: Array<{ value: ProductImageBadgePosition; labelKey: strin
 ];
 
 function allowedSizes(sizeGrid: ProductSizeGrid): readonly string[] {
-  return sizeGrid === 'shoes_ru' ? SHOE_SIZES_RU : CLOTHING_SIZES;
+  if (sizeGrid === 'shoes_eu') return SHOE_SIZES_EU;
+  if (sizeGrid === 'shoes_ru') return SHOE_SIZES_RU;
+  return CLOTHING_SIZES;
 }
 
 function createCategoryAssignmentRow(priority: '1' | '2' | '3' = '1'): CategoryAssignmentRow {
@@ -236,6 +239,14 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   }
 
   function changeSizeGrid(nextGrid: ProductSizeGrid) {
+    if (
+      form.sizeGrid === 'shoes_ru' &&
+      nextGrid === 'shoes_eu' &&
+      variants.some((variant) => !variant.remove && variant.size.trim())
+    ) {
+      setFormError(t('productEditor.legacyRuToEuBlocked'));
+      return;
+    }
     const persistedIncompatible = variants
       .filter((variant) => variant.id && variant.size.trim())
       .map((variant) => variant.size.trim())
@@ -428,7 +439,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
     const variantKeys = variants
       .filter((variant) => !variant.remove && variant.size.trim())
-      .map((variant) => `${variant.size.trim()}::${variant.color.trim().toLocaleLowerCase()}`);
+      .map((variant) => `${variant.size.trim()}::${normalizeVariantColorKey(variant.color)}`);
     if (hasDuplicateValues(variantKeys)) {
       setFormError(t('productEditor.duplicateVariants'));
       setSaving(false);
@@ -980,7 +991,10 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             onChange={(event) => changeSizeGrid(event.target.value as ProductSizeGrid)}
           >
             <option value="clothing_alpha">{t('productEditor.sizeGridClothing')}</option>
-            <option value="shoes_ru">{t('productEditor.sizeGridShoesRu')}</option>
+            <option value="shoes_eu">{t('productEditor.sizeGridShoesEu')}</option>
+            {form.sizeGrid === 'shoes_ru' ? (
+              <option value="shoes_ru">{t('productEditor.sizeGridShoesRuLegacy')}</option>
+            ) : null}
           </select>
         </label>
         <div className="variant-grid">
@@ -1006,9 +1020,11 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               <label>
                 <span>{t('productEditor.color')}</span>
                 <input
+                  autoComplete="off"
                   value={variant.color}
                   onChange={(event) => updateVariant(variant.localId, { color: event.target.value })}
                 />
+                <small className="field-hint">{t('productEditor.colorHint')}</small>
               </label>
               <label>
                 <span>{t('productEditor.sku')}</span>
@@ -1107,8 +1123,11 @@ function getBadgePreviewText(
 function getDefaultBadgeColor(badgeType: ProductImageBadgeType): ProductImageBadgeColor {
   if (badgeType === 'sale') return 'red';
   if (badgeType === 'hit') return 'orange';
-  if (badgeType === 'exclusive') return 'black';
   return 'purple';
+}
+
+function normalizeVariantColorKey(color: string) {
+  return color.trim().toLocaleLowerCase('ru-RU');
 }
 
 function getDefaultBadgePosition(badgeType: ProductImageBadgeType): ProductImageBadgePosition {

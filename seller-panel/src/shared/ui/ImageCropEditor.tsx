@@ -48,12 +48,12 @@ export const CATEGORY_IMAGE_CROP_SPEC: ImageCropSpec = {
 export const NATIVE_BANNER_CROP_SPEC: ImageCropSpec = {
   id: 'native-banner',
   title: 'Horizontal banner crop',
-  aspectLabel: '60:23',
-  aspectRatio: 60 / 23,
-  outputWidth: 1800,
-  outputHeight: 690,
-  minWidth: 900,
-  minHeight: 345,
+  aspectLabel: '400:207',
+  aspectRatio: 400 / 207,
+  outputWidth: 2000,
+  outputHeight: 1035,
+  minWidth: 1200,
+  minHeight: 621,
 };
 
 export const VERTICAL_BANNER_CROP_SPEC: ImageCropSpec = {

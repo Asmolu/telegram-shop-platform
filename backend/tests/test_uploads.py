@@ -126,7 +126,7 @@ async def test_product_upload_rejects_below_minimum_dimensions(tmp_path: Path) -
 async def test_banner_upload_rejects_below_minimum_dimensions(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
-    with pytest.raises(AppError, match="900x345") as exc_info:
+    with pytest.raises(AppError, match="1200x621") as exc_info:
         await service.upload_banner_image(
             file=_upload_file("small-banner.png", _image_bytes(600, 200, "PNG"), "image/png"),
         )
@@ -138,9 +138,9 @@ async def test_banner_upload_rejects_below_minimum_dimensions(tmp_path: Path) ->
 async def test_banner_upload_rejects_wrong_aspect_ratio(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
-    with pytest.raises(AppError, match="60:23") as exc_info:
+    with pytest.raises(AppError, match="400:207") as exc_info:
         await service.upload_banner_image(
-            file=_upload_file("portrait-banner.png", _image_bytes(900, 600, "PNG"), "image/png"),
+            file=_upload_file("portrait-banner.png", _image_bytes(1200, 800, "PNG"), "image/png"),
         )
 
     assert exc_info.value.status_code == 422
@@ -151,7 +151,7 @@ async def test_native_banner_upload_accepts_taller_passive_profile(tmp_path: Pat
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
     banner = await service.upload_banner_image(
-        file=_upload_file("native-promo.png", _image_bytes(1800, 690, "PNG"), "image/png"),
+        file=_upload_file("native-promo.png", _image_bytes(2000, 1035, "PNG"), "image/png"),
         alt_text="Native promo",
     )
 
@@ -163,7 +163,7 @@ async def test_native_banner_upload_accepts_taller_passive_profile(tmp_path: Pat
 async def test_banner_image_upload_stores_file_without_creating_banner(tmp_path: Path) -> None:
     session = DummySession()
     service = UploadsService(session, storage=LocalStorageService(tmp_path))
-    content = _image_bytes(1800, 690, "PNG")
+    content = _image_bytes(2000, 1035, "PNG")
 
     banner = await service.upload_banner_image(
         file=_upload_file("../promo.png", content, "image/png"),

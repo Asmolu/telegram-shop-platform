@@ -34,14 +34,29 @@ class FakeTelegramService:
         self.error = error
         self.messages: list[str] = []
         self.photos: list[tuple[str, str | None]] = []
+        self.parse_modes: list[str | None] = []
+        self.photo_parse_modes: list[str | None] = []
 
-    async def send_seller_notification(self, message: str) -> None:
+    async def send_seller_notification(
+        self,
+        message: str,
+        *,
+        parse_mode: str | None = None,
+    ) -> None:
         self.messages.append(message)
+        self.parse_modes.append(parse_mode)
         if self.error is not None:
             raise self.error
 
-    async def send_seller_photo(self, photo: str, *, caption: str | None = None) -> None:
+    async def send_seller_photo(
+        self,
+        photo: str,
+        *,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+    ) -> None:
         self.photos.append((photo, caption))
+        self.photo_parse_modes.append(parse_mode)
         if self.error is not None:
             raise self.error
 
@@ -97,15 +112,17 @@ async def test_order_created_event_creates_and_sends_seller_notification() -> No
     assert stored.sent_at is not None
     assert len(telegram.messages) == 1
     message = telegram.messages[0]
-    assert "🛍 Новый заказ #ORD-00000001" in message
+    assert "<b>🛍 Новый заказ #ORD-00000001</b>" in message
     assert "ID заказа: 1" in message
     assert "ID клиента: 1" in message
-    assert "📦 Товары" in message
+    assert "Клиент" in message
+    assert "Товары" in message
     assert "Промокод: SAVE10" in message
     assert "Скидка: 20 ₽" in message
     assert "К оплате: 99,80 ₽" in message
     assert "Способ доставки: СДЭК" in message
     assert "Панель продавца: https://seller.tsplatform.ru/orders" in message
+    assert telegram.parse_modes == ["HTML"]
     assert session.commits == 2
 
 
@@ -151,12 +168,29 @@ async def test_order_created_seller_notification_can_send_photo_caption() -> Non
     photo_url, caption = telegram.photos[0]
     assert photo_url == "https://api.tsplatform.ru/uploads/products/hoodie.jpg"
     assert caption is not None
+    assert caption.startswith("<b>🛍 Новый заказ #ORD-00000001</b>")
     assert "ID товара: 10" in caption
     assert "Фото: https://api.tsplatform.ru/uploads/products/hoodie.jpg" in caption
+    assert telegram.photo_parse_modes == ["HTML"]
 
 
 @pytest.mark.asyncio
-async def test_order_created_seller_notification_formats_ru_shoe_size() -> None:
+async def test_order_created_seller_notification_formats_eu_shoe_size() -> None:
+    service, _, _, telegram = _notifications_service()
+    payload = _detailed_order_created_payload()
+    item = payload["items"][0]
+    item["variant_size"] = "39"
+    item["variant_size_grid"] = "shoes_eu"
+
+    notification = await service.create_for_event(name=ORDER_CREATED, payload=payload)
+
+    assert notification is not None
+    assert telegram.photos
+    assert "Размер: EU 39" in (telegram.photos[0][1] or "")
+
+
+@pytest.mark.asyncio
+async def test_order_created_seller_notification_formats_legacy_ru_shoe_size() -> None:
     service, _, _, telegram = _notifications_service()
     payload = _detailed_order_created_payload()
     item = payload["items"][0]
@@ -275,7 +309,10 @@ async def test_failed_telegram_notification_retry_sends_again() -> None:
 
     assert retried.status == NotificationStatus.SENT
     assert repository.notifications[1].error_message is None
-    assert telegram.messages == ["New order ORD-00000001\n\nOrder ORD-00000001 was created."]
+    assert telegram.messages == [
+        "<b>New order ORD-00000001</b>\n\nOrder ORD-00000001 was created."
+    ]
+    assert telegram.parse_modes == ["HTML"]
 
 
 def test_seller_admin_can_list_notifications() -> None:

@@ -140,7 +140,7 @@ Seller/Admin может управлять товарами, Mini App может
 Image standards:
 
 - Product card/detail images: 4:5, recommended 1200x1500, minimum 600x750, maximum 1600x2000.
-- Native banners: 60:23, recommended 1800x690, minimum 900x345, maximum 2400x920.
+- Native banners: 400:207, recommended 2000x1035, minimum 1200x621, maximum 2400x1242.
 - Aggressive popup banners: 9:16, recommended 900x1600, minimum 450x800, maximum 1350x2400.
 
 ## Backend modules

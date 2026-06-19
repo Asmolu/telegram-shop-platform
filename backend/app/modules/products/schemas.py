@@ -16,6 +16,7 @@ from app.modules.products.inventory import InventoryValidationError, validate_in
 from app.modules.products.search import (
     SEARCH_ALIAS_MAX_LENGTH,
     SEARCH_PRIORITY_DEFAULT,
+    SearchSuggestionKind,
     normalize_search_aliases,
 )
 from app.modules.tags.schemas import TagRead
@@ -52,6 +53,11 @@ class ProductVariantBase(BaseModel):
     reserved_quantity: int = Field(default=0, ge=0)
     is_active: bool = True
 
+    @field_validator("color", mode="before")
+    @classmethod
+    def normalize_color(cls, value: object) -> object:
+        return _normalize_optional_text(value)
+
     @model_validator(mode="after")
     def validate_inventory(self) -> "ProductVariantBase":
         try:
@@ -72,6 +78,11 @@ class ProductVariantUpdate(BaseModel):
     stock_quantity: int | None = Field(default=None, ge=0)
     reserved_quantity: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
+
+    @field_validator("color", mode="before")
+    @classmethod
+    def normalize_color(cls, value: object) -> object:
+        return _normalize_optional_text(value)
 
     @model_validator(mode="after")
     def validate_inventory_when_complete(self) -> "ProductVariantUpdate":
@@ -347,3 +358,13 @@ class ProductList(BaseModel):
 
 class ProductVariantList(BaseModel):
     items: list[ProductVariantRead]
+
+
+class ProductSearchSuggestion(BaseModel):
+    value: str
+    kind: SearchSuggestionKind
+    label: str | None = None
+
+
+class ProductSearchSuggestionList(BaseModel):
+    items: list[ProductSearchSuggestion]

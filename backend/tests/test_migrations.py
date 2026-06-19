@@ -554,11 +554,30 @@ def test_product_size_grid_migration_and_model_contract() -> None:
     assert "product_size_grid" in content
     assert "clothing_alpha" in content
     assert "shoes_ru" in content
+    assert Product.__table__.c.size_grid.type.enums == [
+        ProductSizeGrid.CLOTHING_ALPHA.value,
+        ProductSizeGrid.SHOES_EU.value,
+        ProductSizeGrid.SHOES_RU.value,
+    ]
     assert product_table.c.size_grid.nullable is False
     assert product_table.c.size_grid.default.arg == ProductSizeGrid.CLOTHING_ALPHA
     assert order_item_table.c.variant_size_grid.nullable is False
     assert order_item_table.c.variant_size_grid.default.arg == ProductSizeGrid.CLOTHING_ALPHA
     assert "ix_product_variants_size_active_product" in variant_index_names
+
+
+def test_eu_footwear_size_grid_migration_is_additive() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260619_0033_add_eu_footwear_size_grid.py"
+    )
+    content = migration_path.read_text()
+
+    assert "ALTER TYPE product_size_grid ADD VALUE IF NOT EXISTS 'shoes_eu'" in content
+    assert "UPDATE products" not in content
+    assert "UPDATE order_items" not in content
 
 
 def test_related_products_and_image_badges_migration_contract() -> None:

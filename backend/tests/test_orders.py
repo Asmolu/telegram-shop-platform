@@ -301,7 +301,13 @@ class FakeNotificationsRepository:
 
 
 class FailingTelegramService:
-    async def send_seller_notification(self, message: str) -> None:
+    async def send_seller_notification(
+        self,
+        message: str,
+        *,
+        parse_mode: str | None = None,
+    ) -> None:
+        del parse_mode
         del message
         raise TelegramDeliveryError("Telegram unavailable")
 

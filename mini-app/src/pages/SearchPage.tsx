@@ -1,7 +1,8 @@
 import React from 'react';
 import { getCategories, getTags, toApiErrorMessage, type Category, type ProductSizeGrid, type Tag } from '../shared/api';
+import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
 import { useRouter } from '../shared/router/RouterProvider';
-import { ErrorState, PageLoader, SearchIcon, TopBar } from '../shared/ui';
+import { ErrorState, PageLoader, TopBar } from '../shared/ui';
 import { displaySize, sizesForGrid } from '../shared/utils/sizes';
 
 export function SearchPage() {
@@ -48,10 +49,9 @@ export function SearchPage() {
     };
   }, []);
 
-  function showProducts(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function resultsPath(nextQuery = query) {
     const params = new URLSearchParams();
-    if (query.trim()) params.set('q', query.trim());
+    if (nextQuery.trim()) params.set('q', nextQuery.trim());
     if (categoryId) params.set('category_id', categoryId);
     if (tagId) params.set('tag_id', tagId);
     params.set('size_grid', sizeGrid);
@@ -60,7 +60,16 @@ export function SearchPage() {
     if (priceFrom) params.set('price_from', priceFrom);
     if (priceTo) params.set('price_to', priceTo);
     if (sort) params.set('sort', sort);
-    navigate(`/search/results?${params.toString()}`);
+    return `/search/results?${params.toString()}`;
+  }
+
+  function navigateToResults(nextQuery = query) {
+    navigate(resultsPath(nextQuery));
+  }
+
+  function showProducts(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    navigateToResults();
   }
 
   return (
@@ -70,20 +79,14 @@ export function SearchPage() {
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error ? (
         <form className="filter-form filter-form--compact" onSubmit={showProducts}>
-          <div className="search-row search-row--filters">
-            <label className="search-field search-field--input">
-              <SearchIcon className="search-icon" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Найти одежду, бренд, размер..."
-                type="search"
-              />
-            </label>
-            <button className="search-submit-button" type="submit">
-              Найти
-            </button>
-          </div>
+          <SearchAutocomplete
+            className="search-row--filters"
+            value={query}
+            onChange={setQuery}
+            onSearch={navigateToResults}
+            placeholder="Найти одежду, бренд, размер..."
+            submitLabel="Найти"
+          />
 
           <section className="filter-section">
             <h2>Категория</h2>
@@ -108,11 +111,11 @@ export function SearchPage() {
                 Одежда
               </button>
               <button
-                className={sizeGrid === 'shoes_ru' ? 'is-selected' : ''}
+                className={sizeGrid === 'shoes_eu' ? 'is-selected' : ''}
                 type="button"
-                onClick={() => { setSizeGrid('shoes_ru'); setSize(''); }}
+                onClick={() => { setSizeGrid('shoes_eu'); setSize(''); }}
               >
-                Обувь · RU
+                Обувь · EU
               </button>
             </div>
           </section>

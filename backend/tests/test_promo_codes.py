@@ -297,7 +297,7 @@ async def test_validate_promo_code_uses_selected_cart_items_only() -> None:
         slug="sneakers",
         description="Light",
         base_price=Decimal("80.00"),
-        size_grid=ProductSizeGrid.SHOES_RU,
+        size_grid=ProductSizeGrid.SHOES_EU,
         status=ProductStatus.ACTIVE,
         category_id=None,
         created_at=_now(),

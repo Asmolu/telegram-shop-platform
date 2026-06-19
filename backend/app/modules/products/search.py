@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from difflib import get_close_matches
+from typing import Literal
 
 SEARCH_PRIORITY_DEFAULT = 2
 SEARCH_PRIORITY_VALUES = (1, 2, 3)
 SEARCH_TRIGRAM_SIMILARITY_THRESHOLD = 0.2
 SEARCH_ALIAS_MAX_LENGTH = 2000
+SearchSuggestionKind = Literal["product", "brand", "alias", "category", "tag"]
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -82,6 +84,14 @@ COLOR_SYNONYMS: dict[str, tuple[str, ...]] = {
     "хаки": ("khaki",),
 }
 LATIN_COLOR_TERMS = frozenset(term for terms in COLOR_SYNONYMS.values() for term in terms)
+RUSSIAN_COLOR_ALIASES_BY_LATIN: dict[str, tuple[str, ...]] = {
+    latin_term: tuple(
+        russian_alias
+        for russian_alias, latin_terms in COLOR_SYNONYMS.items()
+        if latin_term in latin_terms
+    )
+    for latin_term in LATIN_COLOR_TERMS
+}
 
 
 @dataclass(frozen=True)
@@ -92,6 +102,14 @@ class SearchToken:
     @property
     def is_numeric_size(self) -> bool:
         return self.value.isascii() and self.value.isdigit()
+
+
+@dataclass(frozen=True)
+class SearchSuggestionCandidate:
+    value: str
+    kind: SearchSuggestionKind
+    label: str | None = None
+    score: int = 0
 
 
 def sanitize_search_query(value: str | None, *, max_length: int = 255) -> str | None:
@@ -141,22 +159,39 @@ def expand_color_query(value: str | None) -> tuple[str, ...]:
         return ()
     exact = COLOR_SYNONYMS.get(normalized)
     if exact:
-        return exact
+        return _dedupe((normalized, *_expanded_color_terms(exact)))
     tokens = _TOKEN_RE.findall(normalized)
     expanded = [term for token in tokens for term in _color_terms_for_token(token)]
-    return tuple(dict.fromkeys(expanded or [normalized]))
+    return _dedupe((normalized, *expanded))
 
 
 def _color_terms_for_token(token: str) -> tuple[str, ...]:
     exact = COLOR_SYNONYMS.get(token)
     if exact:
-        return exact
+        return _expanded_color_terms(exact)
     if token in LATIN_COLOR_TERMS:
-        return (token,)
+        return _expanded_color_terms((token,))
     if not _CYRILLIC_RE.search(token) or len(token) < 4:
         return ()
     match = get_close_matches(token, COLOR_SYNONYMS, n=1, cutoff=0.78)
-    return COLOR_SYNONYMS[match[0]] if match else ()
+    return _expanded_color_terms(COLOR_SYNONYMS[match[0]]) if match else ()
+
+
+def _expanded_color_terms(latin_terms: tuple[str, ...]) -> tuple[str, ...]:
+    return _dedupe(
+        (
+            *latin_terms,
+            *(
+                alias
+                for latin_term in latin_terms
+                for alias in RUSSIAN_COLOR_ALIASES_BY_LATIN.get(latin_term, ())
+            ),
+        )
+    )
+
+
+def _dedupe(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
 
 
 def search_text_matches_query(text: str | None, query: str | None) -> bool:

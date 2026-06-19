@@ -1,6 +1,6 @@
 export type UserRole = 'USER' | 'SELLER' | 'ADMIN';
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
-export type ProductSizeGrid = 'clothing_alpha' | 'shoes_ru';
+export type ProductSizeGrid = 'clothing_alpha' | 'shoes_eu' | 'shoes_ru';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type ProductImageBadgeColor =
   | 'purple'

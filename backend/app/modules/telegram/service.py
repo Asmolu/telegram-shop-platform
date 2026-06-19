@@ -26,6 +26,9 @@ SELLER_ID_RE = re.compile(r"^[0-9]+$")
 MANUAL_PAYMENT_CALLBACK_RE = re.compile(
     r"^manual_payment:(?P<action>approve|reject):(?P<payment_id>[1-9][0-9]*)$"
 )
+SELLER_ORDER_CALLBACK_RE = re.compile(
+    r"^seller_order:(?P<action>ship|cancel):(?P<order_id>[1-9][0-9]*)$"
+)
 POSTGRES_INT32_MAX = 2_147_483_647
 TELEGRAM_ID_HINT_MAX = 20_000_000_000
 TELEGRAM_ID_GUIDANCE_MESSAGE = (
@@ -87,17 +90,28 @@ class TelegramService:
         )
         self.timeout_seconds = timeout_seconds
 
-    async def send_seller_notification(self, message: str) -> None:
+    async def send_seller_notification(
+        self,
+        message: str,
+        *,
+        parse_mode: str | None = None,
+    ) -> None:
         if not self.bot_token or not self.seller_chat_id:
             raise TelegramDeliveryError("Telegram seller notification is not configured")
 
-        await self.send_message(self.seller_chat_id, message)
+        await self.send_message(self.seller_chat_id, message, parse_mode=parse_mode)
 
-    async def send_seller_photo(self, photo: str, *, caption: str | None = None) -> None:
+    async def send_seller_photo(
+        self,
+        photo: str,
+        *,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+    ) -> None:
         if not self.bot_token or not self.seller_chat_id:
             raise TelegramDeliveryError("Telegram seller notification is not configured")
 
-        await self.send_photo(self.seller_chat_id, photo, caption=caption)
+        await self.send_photo(self.seller_chat_id, photo, caption=caption, parse_mode=parse_mode)
 
     async def send_message(
         self,
@@ -468,12 +482,15 @@ class SellerBotWebhookService:
             command = command_match.group("command").lower()
             args = (command_match.group("args") or "").strip()
             if command in {
+                "/help",
                 "/sellers",
                 "/block_seller",
                 "/unblock_seller",
                 "/new_product",
                 "/new_product_help",
                 "/active_orders",
+                "/chetam",
+                "/orders",
             }:
                 return await self._handle_seller_group_command(
                     command=command,
@@ -535,6 +552,14 @@ class SellerBotWebhookService:
                 callback_query=callback_query,
                 action=payment_callback.group("action"),
                 payment_id=int(payment_callback.group("payment_id")),
+            )
+
+        order_callback = SELLER_ORDER_CALLBACK_RE.fullmatch(callback_query.data)
+        if order_callback is not None:
+            return await self._handle_seller_order_callback(
+                callback_query=callback_query,
+                action=order_callback.group("action"),
+                order_id=int(order_callback.group("order_id")),
             )
 
         try:
@@ -638,6 +663,66 @@ class SellerBotWebhookService:
             handled=True,
             result=f"manual_payment_{payment.status.value.lower()}",
         )
+
+    async def _handle_seller_order_callback(
+        self,
+        *,
+        callback_query,
+        action: str,
+        order_id: int,
+    ) -> SellerBotWebhookResponse:
+        if self.seller_bot_service is None:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Seller bot commands are not configured.",
+            )
+            return self._response(handled=True, result="seller_bot_commands_unconfigured")
+
+        if action == "cancel":
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Действие отменено.",
+            )
+            await self._clear_callback_markup(callback_query)
+            return self._response(handled=True, result="order_action_cancelled")
+
+        try:
+            response_parts = await self.seller_bot_service.mark_order_shipped_command(
+                chat_id=callback_query.message.chat.id,
+                order_id=order_id,
+                actor_telegram_user_id=callback_query.from_user.id,
+            )
+        except AppError as exc:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text=exc.message[:180],
+            )
+            return self._response(handled=True, result="order_action_error")
+
+        await self.telegram_service.answer_callback_query(
+            callback_query.id,
+            text="Статус заказа: Отправлен.",
+        )
+        if callback_query.message.message_id is None:
+            for response_text in response_parts:
+                await self._send_chat_message(callback_query.message.chat.id, response_text)
+            return self._response(handled=True, result="order_shipped")
+
+        try:
+            await self.telegram_service.edit_message_text(
+                str(callback_query.message.chat.id),
+                callback_query.message.message_id,
+                response_parts[0],
+                reply_markup={"inline_keyboard": []},
+            )
+        except TelegramDeliveryError:
+            await self._clear_callback_markup(callback_query)
+            for response_text in response_parts:
+                await self._send_chat_message(callback_query.message.chat.id, response_text)
+        else:
+            for response_text in response_parts[1:]:
+                await self._send_chat_message(callback_query.message.chat.id, response_text)
+        return self._response(handled=True, result="order_shipped")
 
     async def _finalize_payment_callback_message(self, callback_query, payment) -> None:
         status_value = payment.status.value
@@ -751,6 +836,18 @@ class SellerBotWebhookService:
             result="edited_caption" if has_photo else "edited_text",
         )
 
+    async def _clear_callback_markup(self, callback_query) -> None:
+        if callback_query.message.message_id is None:
+            return
+        try:
+            await self.telegram_service.edit_message_reply_markup(
+                str(callback_query.message.chat.id),
+                callback_query.message.message_id,
+                reply_markup={"inline_keyboard": []},
+            )
+        except TelegramDeliveryError:
+            return
+
     @staticmethod
     def _log_payment_callback_finalization(
         *,
@@ -789,6 +886,14 @@ class SellerBotWebhookService:
             return self._response(handled=True, result="seller_bot_commands_unconfigured")
 
         try:
+            actor_user = message.from_user
+            if command == "/help":
+                response_text = self.seller_bot_service.format_help_command(
+                    chat_id=message.chat.id,
+                )
+                await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="help_sent")
+
             if command == "/sellers":
                 response_text = await self.seller_bot_service.format_sellers_command(
                     chat_id=message.chat.id,
@@ -804,7 +909,15 @@ class SellerBotWebhookService:
                     await self._send_chat_message(message.chat.id, response_text)
                 return self._response(handled=True, result="active_orders_sent")
 
-            actor_user = message.from_user
+            if command == "/chetam":
+                response_parts = await self.seller_bot_service.format_chetam_command(
+                    chat_id=message.chat.id,
+                    actor_telegram_user_id=actor_user.id if actor_user is not None else None,
+                )
+                for response_text in response_parts:
+                    await self._send_chat_message(message.chat.id, response_text)
+                return self._response(handled=True, result="chetam_sent")
+
             if command == "/new_product_help":
                 response_text = self.seller_bot_service.format_new_product_help_command(
                     chat_id=message.chat.id,
@@ -825,6 +938,24 @@ class SellerBotWebhookService:
                 )
                 await self._send_chat_message(message.chat.id, response_text)
                 return self._response(handled=True, result="bot_product_draft_created")
+
+            if command == "/orders":
+                order_id = self._parse_order_id_arg(args, command=command)
+                response_parts = await self.seller_bot_service.format_order_detail_command(
+                    chat_id=message.chat.id,
+                    order_id=order_id,
+                    actor_telegram_user_id=actor_user.id if actor_user is not None else None,
+                )
+                reply_markup = self.seller_bot_service.order_action_reply_markup(order_id)
+                for index, response_text in enumerate(response_parts):
+                    await self._send_chat_message(
+                        message.chat.id,
+                        response_text,
+                        reply_markup=reply_markup
+                        if index == len(response_parts) - 1
+                        else None,
+                    )
+                return self._response(handled=True, result="order_detail_sent")
 
             target_user_id = self._parse_seller_id_arg(args, command=command)
             if command == "/block_seller":
@@ -890,12 +1021,14 @@ class SellerBotWebhookService:
         message: str,
         *,
         parse_mode: str | None = None,
+        reply_markup: dict[str, object] | None = None,
     ) -> bool:
         try:
             await self.telegram_service.send_message(
                 str(chat_id),
                 message,
                 parse_mode=parse_mode,
+                reply_markup=reply_markup,
             )
         except TelegramDeliveryError:
             return False
@@ -919,6 +1052,16 @@ class SellerBotWebhookService:
                 raise AppError(TELEGRAM_ID_GUIDANCE_MESSAGE, 400)
             raise AppError(SELLER_ID_RANGE_MESSAGE, 400)
         return seller_id
+
+    def _parse_order_id_arg(self, args: str, *, command: str) -> int:
+        order_id_text = args.strip()
+        usage_message = f"Формат: {command} <ID заказа>. Пример: {command} 16."
+        if not order_id_text or SELLER_ID_RE.fullmatch(order_id_text) is None:
+            raise AppError(usage_message, 400)
+        order_id = int(order_id_text)
+        if not 1 <= order_id <= POSTGRES_INT32_MAX:
+            raise AppError("ID заказа вне поддерживаемого диапазона.", 400)
+        return order_id
 
     def _message_text(self, message: object | None) -> str | None:
         if message is None:

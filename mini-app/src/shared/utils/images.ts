@@ -109,7 +109,6 @@ export function getProductBadgeColor(
 
   if (badgeType === 'sale') return 'red';
   if (badgeType === 'hit') return 'orange';
-  if (badgeType === 'exclusive') return 'black';
   return 'purple';
 }
 

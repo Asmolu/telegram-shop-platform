@@ -37,6 +37,7 @@ from app.modules.products.schemas import (
 )
 from app.modules.products.search import (
     SEARCH_PRIORITY_DEFAULT,
+    SearchSuggestionCandidate,
     expand_color_query,
     normalize_search_aliases,
     search_text_matches_query,
@@ -44,6 +45,7 @@ from app.modules.products.search import (
 from app.modules.products.service import ProductsService
 from app.modules.products.size_grids import (
     CLOTHING_ALPHA_SIZES,
+    SHOES_EU_SIZES,
     SHOES_RU_SIZES,
     SizeGridValidationError,
     normalize_size,
@@ -364,6 +366,39 @@ async def test_public_product_search_tracks_sanitized_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_search_suggestions_sanitize_limit_and_skip_analytics() -> None:
+    tracker = FakeAnalyticsTracker()
+    service = ProductsService(DummySession(), analytics_tracker=tracker)
+    service.repository.list_search_suggestions = AsyncMock(
+        return_value=[
+            SearchSuggestionCandidate(value="Hoodie", kind="product", score=0),
+            SearchSuggestionCandidate(value="Gadji", kind="brand", score=20),
+        ]
+    )
+
+    result = await service.list_search_suggestions(query=" \n Hoodie \t ", limit=99)
+
+    assert [item.value for item in result.items] == ["Hoodie", "Gadji"]
+    assert [item.kind for item in result.items] == ["product", "brand"]
+    service.repository.list_search_suggestions.assert_awaited_once_with(
+        query="Hoodie",
+        limit=10,
+    )
+    assert tracker.events == []
+
+
+@pytest.mark.asyncio
+async def test_product_search_suggestions_ignore_tiny_queries() -> None:
+    service = ProductsService(DummySession())
+    service.repository.list_search_suggestions = AsyncMock(return_value=[])
+
+    result = await service.list_search_suggestions(query="h", limit=8)
+
+    assert result.items == []
+    service.repository.list_search_suggestions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_public_product_detail_tracks_product_view() -> None:
     tracker = FakeAnalyticsTracker()
     service = ProductsService(DummySession(), analytics_tracker=tracker)
@@ -462,8 +497,13 @@ def test_clothing_size_grid_accepts_all_mvp_sizes(size: str) -> None:
     assert normalize_size(ProductSizeGrid.CLOTHING_ALPHA, f" {size.lower()} ") == size
 
 
+@pytest.mark.parametrize("size", SHOES_EU_SIZES)
+def test_shoes_eu_size_grid_accepts_all_mvp_sizes(size: str) -> None:
+    assert normalize_size(ProductSizeGrid.SHOES_EU, f" {size} ") == size
+
+
 @pytest.mark.parametrize("size", SHOES_RU_SIZES)
-def test_shoes_ru_size_grid_accepts_all_mvp_sizes(size: str) -> None:
+def test_legacy_shoes_ru_size_grid_accepts_existing_snapshot_sizes(size: str) -> None:
     assert normalize_size(ProductSizeGrid.SHOES_RU, f" {size} ") == size
 
 
@@ -471,9 +511,9 @@ def test_shoes_ru_size_grid_accepts_all_mvp_sizes(size: str) -> None:
     "size",
     ["M", "XL", "ONE_SIZE", "34", "47", "39.0", "39,5", "RU 39", "EU 39"],
 )
-def test_shoes_ru_size_grid_rejects_invalid_values(size: str) -> None:
+def test_shoes_eu_size_grid_rejects_invalid_values(size: str) -> None:
     with pytest.raises(SizeGridValidationError):
-        normalize_size(ProductSizeGrid.SHOES_RU, size)
+        normalize_size(ProductSizeGrid.SHOES_EU, size)
 
 
 @pytest.mark.parametrize("size", ["42", "XXXL", "XX", "39.0"])
@@ -491,10 +531,41 @@ async def test_product_grid_switch_allows_zero_or_compatible_variants() -> None:
 
         updated = await service.update_product(
             product.id,
-            ProductUpdate(size_grid=ProductSizeGrid.SHOES_RU),
+            ProductUpdate(size_grid=ProductSizeGrid.SHOES_EU),
         )
 
-        assert updated.size_grid == ProductSizeGrid.SHOES_RU
+        assert updated.size_grid == ProductSizeGrid.SHOES_EU
+
+
+@pytest.mark.asyncio
+async def test_product_create_rejects_legacy_ru_footwear_grid() -> None:
+    service = ProductsService(DummySession())
+
+    with pytest.raises(AppError, match="shoes_ru is legacy"):
+        await service.create_product(
+            ProductCreate(
+                name="Legacy Shoes",
+                slug="legacy-shoes",
+                base_price=Decimal("99.00"),
+                size_grid=ProductSizeGrid.SHOES_RU,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_product_grid_switch_blocks_legacy_ru_to_eu_with_variants() -> None:
+    product = _product(
+        size_grid=ProductSizeGrid.SHOES_RU,
+        variants=[_variant(size="39")],
+    )
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    with pytest.raises(AppError, match="legacy shoes_ru and shoes_eu"):
+        await service.update_product(
+            product.id,
+            ProductUpdate(size_grid=ProductSizeGrid.SHOES_EU),
+        )
 
 
 @pytest.mark.asyncio
@@ -506,7 +577,7 @@ async def test_product_grid_switch_rejects_incompatible_inactive_variants() -> N
     with pytest.raises(AppError, match="incompatible variant sizes: M"):
         await service.update_product(
             product.id,
-            ProductUpdate(size_grid=ProductSizeGrid.SHOES_RU),
+            ProductUpdate(size_grid=ProductSizeGrid.SHOES_EU),
         )
 
 
@@ -533,11 +604,11 @@ async def test_variant_size_is_normalized_against_product_grid() -> None:
 
 @pytest.mark.asyncio
 async def test_variant_service_rejects_size_outside_product_grid() -> None:
-    product = _product(size_grid=ProductSizeGrid.SHOES_RU)
+    product = _product(size_grid=ProductSizeGrid.SHOES_EU)
     service = ProductsService(DummySession())
     service.repository.get_by_id = AsyncMock(return_value=product)
 
-    with pytest.raises(AppError, match="not valid for shoes_ru"):
+    with pytest.raises(AppError, match="not valid for shoes_eu"):
         await service.create_product_variant(
             product.id,
             ProductVariantCreate(size="M", sku="SHOE-M", stock_quantity=1),
@@ -977,11 +1048,21 @@ def test_typo_tolerant_search_matches_required_russian_queries() -> None:
 @pytest.mark.parametrize("query", ["белый", "белая", "блеый", "белий"])
 def test_russian_white_color_queries_expand_to_latin(query: str) -> None:
     assert "white" in expand_color_query(query)
+    assert "белый" in expand_color_query(query)
 
 
 @pytest.mark.parametrize("query", ["черный", "чёрный"])
 def test_russian_black_color_queries_expand_to_latin(query: str) -> None:
-    assert expand_color_query(query) == ("black",)
+    expanded = expand_color_query(query)
+    assert "black" in expanded
+    assert "черный" in expanded
+
+
+def test_latin_color_queries_expand_to_russian_aliases() -> None:
+    expanded = expand_color_query("black")
+
+    assert "black" in expanded
+    assert "черный" in expanded
 
 
 def test_general_search_matches_active_variant_color_and_multiword_query() -> None:
@@ -1013,7 +1094,7 @@ def test_size_and_color_filters_use_the_same_active_variant() -> None:
         tag_id=None,
         status=ProductStatus.ACTIVE,
         search=None,
-        size_grid=ProductSizeGrid.SHOES_RU,
+        size_grid=ProductSizeGrid.SHOES_EU,
         size="42",
         color="белая",
     )
@@ -1022,7 +1103,32 @@ def test_size_and_color_filters_use_the_same_active_variant() -> None:
     assert rendered.count("EXISTS") == 1
     assert "product_variants.size = '42'" in rendered
     assert "white" in rendered
+    assert "белый" in rendered
     assert "product_variants.is_active IS true" in rendered
+
+
+def test_color_filter_keeps_latin_and_russian_variant_colors_searchable() -> None:
+    repository = ProductsRepository(DummySession())
+    filters = repository._build_filters(
+        category_id=None,
+        tag_id=None,
+        status=ProductStatus.ACTIVE,
+        search=None,
+        color="black",
+    )
+
+    rendered = _literal_sql(filters[-1])
+    assert "black" in rendered
+    assert "черный" in rendered
+    assert "product_variants.color" in rendered
+
+
+def test_product_variant_color_is_stored_as_trimmed_display_text() -> None:
+    variant = ProductVariantCreate(size="M", color="  Красный  ", sku="RED-M")
+    update = ProductVariantUpdate(color="  ")
+
+    assert variant.color == "Красный"
+    assert update.color is None
 
 
 def test_repository_search_ordering_prioritizes_lower_numeric_priority() -> None:

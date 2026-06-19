@@ -77,15 +77,15 @@ CATEGORY_IMAGE_PROFILE = ImageUploadProfile(
 
 NATIVE_BANNER_IMAGE_PROFILE = ImageUploadProfile(
     display_name="баннера",
-    aspect_label="60:23",
-    aspect_ratio=60 / 23,
-    recommended_width=1800,
-    recommended_height=690,
-    min_width=900,
-    min_height=345,
+    aspect_label="400:207",
+    aspect_ratio=400 / 207,
+    recommended_width=2000,
+    recommended_height=1035,
+    min_width=1200,
+    min_height=621,
     max_width=2400,
-    max_height=920,
-    max_pixels=2_208_000,
+    max_height=1242,
+    max_pixels=2_980_800,
 )
 
 VERTICAL_BANNER_IMAGE_PROFILE = ImageUploadProfile(

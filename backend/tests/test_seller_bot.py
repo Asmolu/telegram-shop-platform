@@ -12,8 +12,11 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     Category,
+    ManualPaymentStatus,
     NotificationChannel,
     NotificationStatus,
+    OrderDeliveryMethod,
+    OrderStatus,
     ProductImageBadgeColor,
     ProductImageBadgePosition,
     ProductImageBadgeType,
@@ -70,6 +73,7 @@ class FakeSellerBotRepository:
             created_at=_now(),
             updated_at=_now(),
         )
+        self.paid_orders = [self._paid_order()]
 
     async def list_sellers(self, *, limit: int):
         assert limit == 20
@@ -106,6 +110,66 @@ class FakeSellerBotRepository:
             items=[item],
         )
         return [order], 1
+
+    async def list_paid_unshipped_orders(self, *, limit: int):
+        assert limit == 20
+        return self.paid_orders[:limit], len(self.paid_orders)
+
+    async def get_order(self, order_id: int):
+        return next((order for order in self.paid_orders if order.id == order_id), None)
+
+    async def get_active_actor_user(self, telegram_user_id: int) -> User | None:
+        if telegram_user_id == self.user.telegram_id:
+            return self.user
+        return None
+
+    def _paid_order(self, *, order_id: int = 16, address: str = "г. Москва, ул. Тверская, 1"):
+        items = [
+            SimpleNamespace(
+                product_name="Футболка Hermes",
+                variant_size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+                variant_size="M",
+                variant_color="Белый",
+                variant_sku="HERMES-M-W",
+                quantity=1,
+                unit_price=Decimal("700.00"),
+                subtotal=Decimal("700.00"),
+            ),
+            SimpleNamespace(
+                product_name="Футболка Hermes",
+                variant_size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+                variant_size="L",
+                variant_color="Черный",
+                variant_sku="HERMES-L-B",
+                quantity=2,
+                unit_price=Decimal("700.00"),
+                subtotal=Decimal("1400.00"),
+            ),
+        ]
+        buyer = SimpleNamespace(
+            telegram_id=6902459394,
+            username="buyer",
+            telegram_username="buyer_profile",
+            first_name="Иван",
+            last_name="Иванов",
+            height_cm=180,
+            weight_kg=Decimal("75.50"),
+        )
+        return SimpleNamespace(
+            id=order_id,
+            order_number=f"ORD-{order_id}",
+            status=OrderStatus.PROCESSING,
+            delivery_method=OrderDeliveryMethod.CDEK,
+            contact_name="Иван Иванов",
+            contact_phone="+79990000000",
+            delivery_address=address,
+            delivery_comment="Позвонить перед доставкой",
+            total_amount=Decimal("2100.00"),
+            created_at=_now(),
+            user=buyer,
+            manual_payment=SimpleNamespace(status=ManualPaymentStatus.APPROVED),
+            items=items,
+        )
 
 
 class FakeAuditService:
@@ -381,6 +445,121 @@ async def test_active_orders_command_is_russian_and_complete(
     assert "2 × 700 ₽ = 1 400 ₽" in message
     assert "https://seller.tsplatform.ru/orders?order=10" in message
     assert len(message) <= 4096
+
+
+def test_help_command_lists_operator_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    message = service.format_help_command(chat_id=-100)
+
+    assert "Команды Bot 2 для группы продавцов" in message
+    assert "/active_orders" in message
+    assert "/chetam" in message
+    assert "/orders <ID>" in message
+    assert "/new_product_help" in message
+    assert "/block_seller <Seller ID>" in message
+    assert "SHIPPED" in message
+    assert "CANCEL" in message
+    assert len(message) <= 4096
+
+
+@pytest.mark.asyncio
+async def test_chetam_command_lists_paid_unshipped_orders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    messages = await service.format_chetam_command(
+        chat_id=-100,
+        actor_telegram_user_id=42,
+    )
+
+    assert len(messages) == 1
+    message = messages[0]
+    assert "Оплачены, но ещё не отправлены: 1" in message
+    assert "ID заказа: 16" in message
+    assert "Оплата: подтверждено" in message
+    assert "Адрес: г. Москва, ул. Тверская, 1" in message
+    assert "1) Название: Футболка Hermes" in message
+    assert "2) Название: Футболка Hermes" in message
+    assert "Цвет: Белый" in message
+    assert "Цвет: Черный" in message
+    assert "Рост: 180 см" in message
+    assert "Вес: 75.5 кг" in message
+    assert "Контактный номер: +79990000000" in message
+    assert "Телеграм тег: @buyer_profile" in message
+    assert all(len(part) <= 4096 for part in messages)
+
+
+@pytest.mark.asyncio
+async def test_chetam_command_splits_long_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _ = _seller_bot_command_service()
+    repository.paid_orders = [
+        repository._paid_order(order_id=index, address="Очень длинный адрес " + ("x" * 900))
+        for index in range(1, 8)
+    ]
+
+    messages = await service.format_chetam_command(
+        chat_id=-100,
+        actor_telegram_user_id=42,
+    )
+
+    assert len(messages) > 1
+    assert all(len(message) <= 4096 for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_orders_command_formats_detail_and_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    messages = await service.format_order_detail_command(
+        chat_id=-100,
+        order_id=16,
+        actor_telegram_user_id=42,
+    )
+    markup = service.order_action_reply_markup(16)
+
+    assert len(messages) == 1
+    message = messages[0]
+    assert "ID заказа: 16" in message
+    assert "Статус заказа: В обработке" in message
+    assert "Статус оплаты: Оплачено" in message
+    assert "Создан: 01.06.2026 03:00" in message
+    assert "Telegram: @buyer_profile" in message
+    assert "Telegram ID: 6902459394" in message
+    assert "Способ доставки: СДЭК" in message
+    assert "Имя: Иван Иванов" in message
+    assert "Телефон: +79990000000" in message
+    assert "Адрес/город: г. Москва, ул. Тверская, 1" in message
+    assert "Комментарий: Позвонить перед доставкой" in message
+    assert markup["inline_keyboard"][0][0]["text"] == "SHIPPED"
+    assert markup["inline_keyboard"][0][0]["callback_data"] == "seller_order:ship:16"
+    assert markup["inline_keyboard"][0][1]["text"] == "CANCEL"
+
+
+@pytest.mark.asyncio
+async def test_order_commands_require_active_seller_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    with pytest.raises(AppError, match="активным продавцам"):
+        await service.format_order_detail_command(
+            chat_id=-100,
+            order_id=16,
+            actor_telegram_user_id=999,
+        )
 
 
 @pytest.mark.asyncio
@@ -749,12 +928,12 @@ async def test_new_product_command_creates_footwear_with_boundary_sizes(
         actor_username="operator",
     )
 
-    assert product_repository.products[0].size_grid == ProductSizeGrid.SHOES_RU
+    assert product_repository.products[0].size_grid == ProductSizeGrid.SHOES_EU
     assert [variant.size for variant in variant_repository.variants] == ["35", "46"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("invalid_size", ["M", "RU 39", "39.5", "47"])
+@pytest.mark.parametrize("invalid_size", ["M", "RU 39", "EU 39", "39.5", "47"])
 async def test_new_product_command_rejects_invalid_footwear_sizes(
     monkeypatch: pytest.MonkeyPatch,
     invalid_size: str,
@@ -999,10 +1178,12 @@ def test_new_product_help_contains_clothing_and_footwear_examples(
     assert all("Похожие товары: 11, 12, 13" in block for block in code_blocks[:2])
     assert "Виджет фото: custom" in code_blocks[2]
     assert "XS, S, M, L, XL, XXL, 3XL, ONE_SIZE" in help_text
-    assert "российские целые размеры 35-46" in help_text
+    assert "европейские целые размеры EU 35-46" in help_text
     assert "RU/EU/US/UK" in help_text
+    assert "Цвет варианта можно писать по-русски" in help_text
     assert "Похожие товары указываются ID через запятую" in help_text
     assert "Виджет фото: нет, NEW, Распродажа, Хит, Эксклюзив, custom" in help_text
+    assert "зелёный, чёрный, белый" in help_text
     assert "по умолчанию товар создаётся как черновик" in help_text.lower()
     assert "Traceback" not in help_text
     assert "secret" not in help_text.casefold()
