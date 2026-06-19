@@ -172,8 +172,14 @@ label {
   position: relative;
 }
 
-:root[data-swipe-back-state] .mini-app-frame,
-:root[data-swipe-back-state] .launch-screen {
+#root > .mini-app-frame,
+#root > .launch-screen {
+  position: relative;
+  z-index: 2;
+}
+
+:root[data-swipe-back-state] #root > .mini-app-frame,
+:root[data-swipe-back-state] #root > .launch-screen {
   position: relative;
   z-index: 2;
   transform: translate3d(var(--swipe-back-x, 0px), 0, 0);
@@ -203,9 +209,9 @@ label {
   overflow: hidden;
   background: var(--bg);
   visibility: hidden;
-  opacity: var(--swipe-back-underlay-opacity, 0.9);
+  opacity: var(--swipe-back-underlay-opacity, 0.98);
   pointer-events: none;
-  transform: scale(var(--swipe-back-underlay-scale, 0.985));
+  transform: translate3d(var(--swipe-back-underlay-x, -18px), 0, 0) scale(var(--swipe-back-underlay-scale, 0.97));
   transform-origin: left center;
   will-change: opacity, transform;
 }
@@ -214,26 +220,31 @@ label {
   visibility: visible;
 }
 
-.swipe-back-underlay > .mini-app-frame {
+.swipe-back-underlay > .mini-app-frame,
+.swipe-back-underlay > .launch-screen {
   min-height: 100%;
   margin: 0;
   box-shadow: none;
 }
 
-:root[data-swipe-back-state='tracking'] .mini-app-frame,
-:root[data-swipe-back-state='tracking'] .launch-screen {
+.swipe-back-underlay__snapshot {
+  transform: translate3d(0, var(--swipe-back-snapshot-y, 0px), 0);
+}
+
+:root[data-swipe-back-state='tracking'] #root > .mini-app-frame,
+:root[data-swipe-back-state='tracking'] #root > .launch-screen {
   transition: none;
-  box-shadow: -14px 0 30px rgba(0, 0, 0, 0.18);
+  box-shadow: -18px 0 34px rgba(0, 0, 0, 0.16);
 }
 
-:root[data-swipe-back-state='cancel'] .mini-app-frame,
-:root[data-swipe-back-state='cancel'] .launch-screen {
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+:root[data-swipe-back-state='cancel'] #root > .mini-app-frame,
+:root[data-swipe-back-state='cancel'] #root > .launch-screen {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-:root[data-swipe-back-state='complete'] .mini-app-frame,
-:root[data-swipe-back-state='complete'] .launch-screen {
-  transition: transform 190ms cubic-bezier(0.32, 0.72, 0, 1);
+:root[data-swipe-back-state='complete'] #root > .mini-app-frame,
+:root[data-swipe-back-state='complete'] #root > .launch-screen {
+  transition: transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .app-content {
@@ -254,11 +265,9 @@ label {
   background: var(--bg);
 }
 
-.page--feed > .top-bar {
-  position: relative;
-  top: auto;
-  z-index: 2;
-  margin-bottom: 0;
+.page--feed > .top-bar--feed {
+  z-index: 32;
+  margin-bottom: 12px;
 }
 
 .page--gradient-header {
@@ -274,9 +283,8 @@ label {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  display: grid;
   align-items: center;
-  justify-content: space-between;
   min-height: 52px;
   margin: 0 -12px 10px;
   padding: 8px 12px;
@@ -298,6 +306,15 @@ label {
   box-shadow: 0 14px 30px rgba(124, 58, 237, 0.24);
 }
 
+.top-bar--feed {
+  align-content: start;
+  min-height: calc(var(--app-header-top-padding) + 112px);
+  gap: 10px;
+  padding-bottom: 12px;
+  border-radius: 0 0 26px 26px;
+  box-shadow: 0 16px 34px rgba(124, 58, 237, 0.28);
+}
+
 .top-bar--marketplace h1 {
   color: #ffffff;
 }
@@ -312,6 +329,8 @@ label {
 
 .top-bar__left,
 .top-bar__right,
+.top-bar__main,
+.top-bar__brand-lockup,
 .button-row,
 .search-row,
 .sort-row,
@@ -323,6 +342,12 @@ label {
   align-items: center;
 }
 
+.top-bar__main {
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+}
+
 .top-bar__left {
   min-width: 0;
   min-height: 40px;
@@ -330,8 +355,44 @@ label {
 }
 
 .top-bar__right {
+  justify-content: flex-end;
   min-height: 46px;
   gap: 8px;
+}
+
+.top-bar__brand-lockup {
+  min-width: 0;
+  gap: 7px;
+}
+
+.top-bar--feed .top-bar__main {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.top-bar--feed .top-bar__left,
+.top-bar--feed .top-bar__right {
+  min-width: 44px;
+}
+
+.top-bar__left--edge {
+  justify-content: flex-start;
+}
+
+.top-bar__edge-spacer {
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+
+.top-bar--feed .top-bar__brand-lockup {
+  justify-content: center;
+}
+
+.top-bar__content {
+  width: 100%;
+  min-width: 0;
 }
 
 .top-bar h1 {
@@ -343,6 +404,59 @@ label {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.top-bar--feed h1 {
+  max-width: 146px;
+  font-size: 16px;
+  letter-spacing: 0.7px;
+}
+
+.brand-mark {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 13px;
+  background: rgba(17, 24, 39, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    0 10px 22px rgba(17, 24, 39, 0.18);
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.brand-mark__shield {
+  fill: rgba(255, 255, 255, 0.2);
+  stroke: #ffffff;
+  stroke-width: 1.7;
+}
+
+.brand-mark__flash {
+  fill: #f9a8d4;
+  stroke: #ffffff;
+  stroke-width: 0.7;
+}
+
+.brand-mark__shoe {
+  fill: none;
+  stroke: #ffffff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.brand-mark text {
+  fill: #ffffff;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
 }
 
 .icon-button,
@@ -361,24 +475,25 @@ label {
 }
 
 .top-bar__back-button {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border-radius: 16px;
-  background: var(--surface-elevated);
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary) 6%);
   color: var(--text);
-  box-shadow: 0 10px 22px rgba(17, 24, 39, 0.14);
+  box-shadow: 0 12px 24px rgba(17, 24, 39, 0.16);
 }
 
 .top-bar__back-button svg {
-  width: 25px;
-  height: 25px;
+  width: 27px;
+  height: 27px;
 }
 
 .top-bar--marketplace .top-bar__back-button {
-  border-color: rgba(255, 255, 255, 0.72);
-  background: rgba(255, 255, 255, 0.24);
-  color: #ffffff;
-  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.22);
+  border-color: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.92);
+  color: #5b21b6;
+  box-shadow: 0 12px 26px rgba(17, 24, 39, 0.24);
 }
 
 .avatar-button {
@@ -508,37 +623,27 @@ label {
 }
 
 .search-row--feed {
-  position: sticky;
-  top: var(--app-header-top-padding);
-  z-index: 24;
-  margin: -1px -12px 12px;
-  padding: 8px 12px 11px;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg) 98%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 94%, transparent) 78%,
-      color-mix(in srgb, var(--bg) 0%, transparent) 100%
-    );
-  backdrop-filter: blur(16px);
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .search-row--feed .search-field {
-  min-height: 52px;
+  min-height: 50px;
   gap: 9px;
-  border-color: #e5e7eb;
-  border-radius: 18px;
+  border-color: rgba(255, 255, 255, 0.94);
+  border-radius: 19px;
   padding: 0 15px;
   background: #ffffff;
   color: #6b7280;
-  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.12);
+  box-shadow: 0 12px 26px rgba(17, 24, 39, 0.16);
 }
 
 .search-row--feed .search-field--input input {
-  min-height: 50px;
+  min-height: 48px;
   color: #111827;
-  font-size: 14px;
-  line-height: 1.2;
+  font-size: 15px;
+  line-height: 1.25;
 }
 
 .search-row--feed .search-field--input input::placeholder {
@@ -552,10 +657,13 @@ label {
 }
 
 .search-row--feed .search-submit-button {
-  min-height: 52px;
-  border-radius: 17px;
-  padding: 0 14px;
+  min-height: 50px;
+  border-radius: 18px;
+  padding: 0 16px;
+  background: #ffffff;
+  color: #7c1af8;
   font-size: 14px;
+  box-shadow: 0 12px 26px rgba(17, 24, 39, 0.14);
 }
 
 .search-field--static {
@@ -2902,16 +3010,13 @@ label {
 }
 
 .logo-mark {
-  display: grid;
-  place-items: center;
   width: 68px;
   height: 68px;
   border-radius: 22px;
-  background: var(--primary);
-  color: var(--primary-contrast);
-  font-size: 34px;
-  font-weight: 900;
-  box-shadow: 0 18px 36px rgba(124, 58, 237, 0.25);
+  background: var(--marketplace-gradient);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24),
+    0 18px 36px rgba(124, 58, 237, 0.25);
 }
 
 .launch-brand strong {
@@ -3033,13 +3138,6 @@ label {
   }
 
   .top-bar {
-    margin-right: -10px;
-    margin-left: -10px;
-    padding-right: 10px;
-    padding-left: 10px;
-  }
-
-  .search-row--feed {
     margin-right: -10px;
     margin-left: -10px;
     padding-right: 10px;

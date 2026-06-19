@@ -32,6 +32,8 @@ type TelegramWebAppEvent =
   | 'safeAreaChanged'
   | 'contentSafeAreaChanged';
 
+export const SUPPORT_TELEGRAM_URL = 'https://t.me/stylexas';
+
 export type TelegramWebApp = {
   initData: string;
   initDataUnsafe?: {

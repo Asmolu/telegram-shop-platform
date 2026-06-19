@@ -22,35 +22,77 @@ function isActive(pathname: string, item: (typeof navItems)[number]) {
   return item.match.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
+export function BrandMark({ className = '' }: { className?: string }) {
+  return (
+    <span className={`brand-mark ${className}`.trim()} aria-hidden="true">
+      <svg viewBox="0 0 40 40" focusable="false">
+        <path className="brand-mark__shield" d="M20 3.8 33.2 8v11.1c0 8.1-5.1 14-13.2 17.1C11.9 33.1 6.8 27.2 6.8 19.1V8L20 3.8Z" />
+        <path className="brand-mark__flash" d="M14.4 25.7c4.9-1 8.8-3.2 12.5-7.4l-3.4-.3 3.1-6.1c-4.9 3.2-8.7 6.8-12.2 13.8Z" />
+        <path className="brand-mark__shoe" d="M11.4 27.8c4.1 1.4 9.1 1.1 15.2-.9 1.3-.4 2.4-.2 3.5.8-5.3 2.9-11.6 3.6-18.7 2.1" />
+        <text x="20" y="18.1" textAnchor="middle">MS</text>
+      </svg>
+    </span>
+  );
+}
+
 export function TopBar({
   title,
   onBack,
   backFallback = '/main',
   hideBack = false,
   right,
+  children,
+  variant = 'marketplace',
 }: {
   title: string;
   onBack?: () => void;
   backFallback?: string;
   hideBack?: boolean;
   right?: React.ReactNode;
-  variant?: 'marketplace';
+  children?: React.ReactNode;
+  variant?: 'marketplace' | 'feed';
 }) {
   const { pathname, goBack } = useRouter();
   const showBack = !hideBack && pathname !== '/' && pathname !== '/main';
   const handleBack = onBack ?? (() => goBack(backFallback));
+  const isFeed = variant === 'feed';
+  const className = `top-bar top-bar--marketplace${isFeed ? ' top-bar--feed' : ''}`;
 
   return (
-    <header className="top-bar top-bar--marketplace">
-      <div className="top-bar__left">
-        {showBack ? (
-          <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
-            <BackIcon />
-          </button>
-        ) : null}
-        <h1>{title}</h1>
+    <header className={className}>
+      <div className="top-bar__main">
+        {isFeed ? (
+          <>
+            <div className="top-bar__left top-bar__left--edge">
+              {showBack ? (
+                <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
+                  <BackIcon />
+                </button>
+              ) : (
+                <span className="top-bar__edge-spacer" aria-hidden="true" />
+              )}
+            </div>
+            <div className="top-bar__brand-lockup">
+              <BrandMark />
+              <h1>{title}</h1>
+            </div>
+            <div className="top-bar__right">{right}</div>
+          </>
+        ) : (
+          <>
+            <div className="top-bar__left">
+              {showBack ? (
+                <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
+                  <BackIcon />
+                </button>
+              ) : null}
+              <h1>{title}</h1>
+            </div>
+            <div className="top-bar__right">{right}</div>
+          </>
+        )}
       </div>
-      <div className="top-bar__right">{right}</div>
+      {children ? <div className="top-bar__content">{children}</div> : null}
     </header>
   );
 }
@@ -63,6 +105,76 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [popupBanners, setPopupBanners] = React.useState<Banner[]>([]);
   const [showAggressivePopup, setShowAggressivePopup] = React.useState(false);
   const [showPopup, setShowPopup] = React.useState(false);
+
+  React.useEffect(() => {
+    let startX = 0;
+    let startY = 0;
+    let touchTarget: EventTarget | null = null;
+    let blurredForGesture = false;
+
+    const isTextEntryElement = (element: Element | null): element is HTMLElement => {
+      if (!element) {
+        return false;
+      }
+
+      return element.matches(
+        'textarea, [contenteditable="true"], input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="reset"])',
+      );
+    };
+
+    const blurActiveInput = () => {
+      const activeElement = document.activeElement;
+      if (isTextEntryElement(activeElement)) {
+        activeElement.blur();
+      }
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch || event.touches.length !== 1) {
+        touchTarget = null;
+        return;
+      }
+
+      startX = touch.clientX;
+      startY = touch.clientY;
+      touchTarget = event.target;
+      blurredForGesture = false;
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch || event.touches.length !== 1 || blurredForGesture) {
+        return;
+      }
+
+      const deltaX = Math.abs(touch.clientX - startX);
+      const deltaY = Math.abs(touch.clientY - startY);
+      const target = touchTarget instanceof Element ? touchTarget : null;
+      const keepFocus = target?.closest('[data-keyboard-keep-focus], [role="listbox"]');
+
+      if (!keepFocus && deltaY > 12 && deltaY > deltaX * 1.15) {
+        blurActiveInput();
+        blurredForGesture = true;
+      }
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && Math.abs(event.deltaY) > 2) {
+        blurActiveInput();
+      }
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('wheel', onWheel, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('wheel', onWheel);
+    };
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;

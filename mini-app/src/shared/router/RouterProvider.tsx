@@ -39,6 +39,7 @@ const SWIPE_BACK_IGNORE_SELECTOR = [
   '.tab-row',
   '.segmented-control',
 ].join(',');
+const SWIPE_BACK_SURFACE_SELECTOR = '#root > .mini-app-frame, #root > .launch-screen';
 
 function getCurrentPath() {
   return `${window.location.pathname}${window.location.search}`;
@@ -50,17 +51,19 @@ function getHistoryIndex() {
 }
 
 function createSwipeBackSnapshot() {
-  const frame = document.querySelector<HTMLElement>('.mini-app-frame');
+  const frame = document.querySelector<HTMLElement>(SWIPE_BACK_SURFACE_SELECTOR);
   if (!frame) {
     return null;
   }
 
   const underlay = document.createElement('div');
   const snapshot = frame.cloneNode(true) as HTMLElement;
+  const scrollTop = Math.max(window.scrollY, 0);
   underlay.className = SWIPE_UNDERLAY_CLASS;
-  underlay.dataset.scrollTop = String(window.scrollY);
   underlay.setAttribute('aria-hidden', 'true');
   underlay.setAttribute('inert', '');
+  snapshot.classList.add('swipe-back-underlay__snapshot');
+  snapshot.style.setProperty('--swipe-back-snapshot-y', `-${scrollTop}px`);
   snapshot.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
   underlay.appendChild(snapshot);
   return underlay;
@@ -72,7 +75,6 @@ function mountSwipeBackSnapshot(snapshot: HTMLElement | null) {
   }
 
   document.body.appendChild(snapshot);
-  snapshot.scrollTop = Number(snapshot.dataset.scrollTop ?? 0);
 }
 
 function clearSwipeBackVisual() {
@@ -82,6 +84,7 @@ function clearSwipeBackVisual() {
   root.style.removeProperty('--swipe-back-progress');
   root.style.removeProperty('--swipe-back-underlay-opacity');
   root.style.removeProperty('--swipe-back-underlay-scale');
+  root.style.removeProperty('--swipe-back-underlay-x');
   document.querySelectorAll(`.${SWIPE_UNDERLAY_CLASS}`).forEach((element) => element.remove());
 }
 
@@ -173,11 +176,15 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         document.documentElement.style.setProperty('--swipe-back-progress', String(progress));
         document.documentElement.style.setProperty(
           '--swipe-back-underlay-opacity',
-          String(0.9 + progress * 0.1),
+          String(0.98 + progress * 0.02),
         );
         document.documentElement.style.setProperty(
           '--swipe-back-underlay-scale',
-          String(0.985 + progress * 0.015),
+          String(0.97 + progress * 0.03),
+        );
+        document.documentElement.style.setProperty(
+          '--swipe-back-underlay-x',
+          `${-18 + progress * 18}px`,
         );
       });
     };

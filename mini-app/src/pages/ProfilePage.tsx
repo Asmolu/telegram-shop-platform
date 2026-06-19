@@ -8,7 +8,7 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
-import { openTelegramLink } from '../shared/telegram/webApp';
+import { SUPPORT_TELEGRAM_URL, openTelegramLink } from '../shared/telegram/webApp';
 import { useTheme } from '../shared/theme/ThemeProvider';
 import { EmptyState, TopBar } from '../shared/ui';
 import { getUserDisplayName } from '../shared/utils/format';
@@ -151,7 +151,7 @@ export function ProfilePage() {
         <button type="button" onClick={() => navigate('/faq')}>
           FAQ<span>›</span>
         </button>
-        <button type="button" onClick={() => navigate('/faq')}>
+        <button type="button" onClick={() => openTelegramLink(SUPPORT_TELEGRAM_URL)}>
           Поддержка<span>›</span>
         </button>
       </section>

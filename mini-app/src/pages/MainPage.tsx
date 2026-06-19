@@ -77,28 +77,29 @@ export function MainPage() {
   return (
     <div className="page page--feed">
       <TopBar
-        title="Gadji Store"
-        variant="marketplace"
+        title="MENS STYLE"
+        variant="feed"
         right={
           <button className="avatar-button" type="button" onClick={() => navigate('/profile')} aria-label="Профиль">
-            {telegramUser?.photo_url ? <img src={telegramUser.photo_url} alt="" /> : '◌'}
+            {telegramUser?.photo_url ? <img src={telegramUser.photo_url} alt="" /> : 'MS'}
           </button>
         }
-      />
-      <form className="search-row search-row--feed" onSubmit={submitFeedSearch}>
-        <label className="search-field search-field--input">
-          <SearchIcon className="search-icon" />
-          <input
-            value={feedQuery}
-            onChange={(event) => setFeedQuery(event.target.value)}
-            placeholder="Найти одежду, бренд, размер..."
-            type="search"
-          />
-        </label>
-        <button className="search-submit-button" type="submit" aria-label="Искать">
-          Найти
-        </button>
-      </form>
+      >
+        <form className="search-row search-row--feed" onSubmit={submitFeedSearch}>
+          <label className="search-field search-field--input">
+            <SearchIcon className="search-icon" />
+            <input
+              value={feedQuery}
+              onChange={(event) => setFeedQuery(event.target.value)}
+              placeholder="Найти одежду, бренд, размер..."
+              type="search"
+            />
+          </label>
+          <button className="search-submit-button" type="submit" aria-label="Искать">
+            Найти
+          </button>
+        </form>
+      </TopBar>
 
       {notice ? (
         <InlineNotice tone={notice.includes('добавлен') ? 'success' : 'warning'}>
