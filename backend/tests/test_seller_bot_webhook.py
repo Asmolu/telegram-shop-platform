@@ -544,6 +544,7 @@ async def test_chetam_command_is_routed_and_split(
     assert response.result == "chetam_sent"
     assert seller_bot.chetam_actor_ids == [500]
     assert telegram.messages == [("-100", "Chetam for -100"), ("-100", "Second page")]
+    assert telegram.parse_modes == ["HTML", "HTML"]
 
 
 @pytest.mark.asyncio

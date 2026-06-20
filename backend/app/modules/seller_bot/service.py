@@ -459,7 +459,7 @@ class SellerBotService:
             if total > len(orders)
             else None
         )
-        return self._chunk_command_message(header, blocks, footer=footer)
+        return self._chunk_command_message(header, blocks, footer=footer, html_safe=True)
 
     async def format_order_detail_command(
         self,
@@ -556,16 +556,25 @@ class SellerBotService:
 
     def _format_chetam_order(self, order) -> str:
         user = order.user
+        address = self._telegram_html_text(order.delivery_address or MISSING_VALUE)
+        height = self._telegram_html_text(
+            self._height_label(getattr(user, "height_cm", None))
+        )
+        weight = self._telegram_html_text(
+            self._weight_label(getattr(user, "weight_kg", None))
+        )
+        contact_phone = self._telegram_html_text(order.contact_phone or MISSING_VALUE)
+        telegram_tag = self._telegram_html_text(self._telegram_tag(user))
         lines = [
-            f"ID заказа: {order.id}",
+            f"<b><i>ID заказа: {self._telegram_html_text(order.id)}</i></b>",
             "Оплата: подтверждено",
-            f"Адрес: {order.delivery_address or MISSING_VALUE}",
+            f"Адрес: {address}",
             "Товары:",
-            *self._order_item_summary_lines(order.items),
-            f"Рост: {self._height_label(getattr(user, 'height_cm', None))}",
-            f"Вес: {self._weight_label(getattr(user, 'weight_kg', None))}",
-            f"Контактный номер: {order.contact_phone or MISSING_VALUE}",
-            f"Телеграм тег: {self._telegram_tag(user)}",
+            *self._order_item_summary_lines(order.items, html_safe=True),
+            f"Рост: {height}",
+            f"Вес: {weight}",
+            f"Контактный номер: {contact_phone}",
+            f"Телеграм тег: {telegram_tag}",
         ]
         return "\n".join(lines)
 
@@ -654,19 +663,47 @@ class SellerBotService:
         )
         return "\n".join(lines)
 
-    def _order_item_summary_lines(self, items: object) -> list[str]:
+    def _order_item_summary_lines(
+        self,
+        items: object,
+        *,
+        html_safe: bool = False,
+    ) -> list[str]:
         if not isinstance(items, list) or not items:
-            return [MISSING_VALUE]
+            return [self._message_text_value(MISSING_VALUE, html_safe=html_safe)]
         lines: list[str] = []
         multi_item = len(items) > 1
         for index, item in enumerate(items, start=1):
             prefix = f"{index}) " if multi_item else ""
-            product_name = getattr(item, "product_name", None) or MISSING_VALUE
+            product_name = self._message_text_value(
+                getattr(item, "product_name", None) or MISSING_VALUE,
+                html_safe=html_safe,
+            )
+            color = self._message_text_value(
+                getattr(item, "variant_color", None) or MISSING_VALUE,
+                html_safe=html_safe,
+            )
+            size = self._message_text_value(
+                self._display_item_size(item),
+                html_safe=html_safe,
+            )
+            quantity = self._message_text_value(
+                getattr(item, "quantity", None) or MISSING_VALUE,
+                html_safe=html_safe,
+            )
             lines.append(f"{prefix}Название: {product_name}")
-            lines.append(f"   Цвет: {getattr(item, 'variant_color', None) or MISSING_VALUE}")
-            lines.append(f"   Размер: {self._display_item_size(item)}")
-            lines.append(f"   Количество: {getattr(item, 'quantity', None) or MISSING_VALUE}")
+            lines.append(f"   Цвет: {color}")
+            lines.append(f"   Размер: {size}")
+            lines.append(f"   Количество: {quantity}")
         return lines
+
+    def _message_text_value(self, value: object, *, html_safe: bool = False) -> str:
+        text = str(value)
+        return self._telegram_html_text(text) if html_safe else text
+
+    @staticmethod
+    def _telegram_html_text(value: object) -> str:
+        return html.escape(str(value), quote=False)
 
     def _display_item_size(self, item: object) -> str:
         size = getattr(item, "variant_size", None)
@@ -704,6 +741,7 @@ class SellerBotService:
         blocks: list[str],
         *,
         footer: str | None = None,
+        html_safe: bool = False,
     ) -> list[str]:
         messages: list[str] = []
         current = header
@@ -715,9 +753,11 @@ class SellerBotService:
             messages.append(current)
             current = block
             while len(current) > TELEGRAM_MESSAGE_LIMIT:
-                split_at = current.rfind("\n", 0, TELEGRAM_MESSAGE_LIMIT)
-                if split_at <= 0:
-                    split_at = TELEGRAM_MESSAGE_LIMIT
+                split_at = self._message_split_at(
+                    current,
+                    TELEGRAM_MESSAGE_LIMIT,
+                    html_safe=html_safe,
+                )
                 messages.append(current[:split_at].rstrip())
                 current = current[split_at:].lstrip()
         if footer:
@@ -730,6 +770,26 @@ class SellerBotService:
         if current:
             messages.append(current)
         return messages
+
+    def _message_split_at(self, text: str, limit: int, *, html_safe: bool = False) -> int:
+        split_at = text.rfind("\n", 0, limit)
+        if split_at > 0:
+            return split_at
+        if not html_safe:
+            return limit
+
+        split_at = limit
+        ampersand_at = text.rfind("&", 0, split_at)
+        semicolon_at = text.rfind(";", 0, split_at)
+        if ampersand_at > semicolon_at:
+            split_at = ampersand_at
+
+        tag_open_at = text.rfind("<", 0, split_at)
+        tag_close_at = text.rfind(">", 0, split_at)
+        if tag_open_at > tag_close_at:
+            split_at = min(split_at, tag_open_at)
+
+        return split_at if split_at > 0 else limit
 
     def _split_command_text(
         self,

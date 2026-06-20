@@ -915,7 +915,11 @@ class SellerBotWebhookService:
                     actor_telegram_user_id=actor_user.id if actor_user is not None else None,
                 )
                 for response_text in response_parts:
-                    await self._send_chat_message(message.chat.id, response_text)
+                    await self._send_chat_message(
+                        message.chat.id,
+                        response_text,
+                        parse_mode="HTML",
+                    )
                 return self._response(handled=True, result="chetam_sent")
 
             if command == "/new_product_help":

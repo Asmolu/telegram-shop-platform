@@ -482,6 +482,8 @@ async def test_chetam_command_lists_paid_unshipped_orders(
     message = messages[0]
     assert "Оплачены, но ещё не отправлены: 1" in message
     assert "ID заказа: 16" in message
+    assert "<b><i>ID заказа: 16</i></b>\nОплата: подтверждено" in message
+    assert "<b><i>Оплата" not in message
     assert "Оплата: подтверждено" in message
     assert "Адрес: г. Москва, ул. Тверская, 1" in message
     assert "1) Название: Футболка Hermes" in message
@@ -493,6 +495,36 @@ async def test_chetam_command_lists_paid_unshipped_orders(
     assert "Контактный номер: +79990000000" in message
     assert "Телеграм тег: @buyer_profile" in message
     assert all(len(part) <= 4096 for part in messages)
+    ElementTree.fromstring(f"<root>{message}</root>")
+
+
+@pytest.mark.asyncio
+async def test_chetam_command_escapes_html_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _ = _seller_bot_command_service()
+    order = repository._paid_order(address="Склад <A> & подъезд 1")
+    order.items[0].product_name = "Футболка <Hermes> & Co"
+    order.items[0].variant_color = "Белый & красный"
+    order.contact_phone = "+7 <900> & 00"
+    order.user.telegram_username = "buyer&profile"
+    repository.paid_orders = [order]
+
+    messages = await service.format_chetam_command(
+        chat_id=-100,
+        actor_telegram_user_id=42,
+    )
+
+    message = messages[0]
+    assert "<b><i>ID заказа: 16</i></b>" in message
+    assert "Адрес: Склад &lt;A&gt; &amp; подъезд 1" in message
+    assert "Название: Футболка &lt;Hermes&gt; &amp; Co" in message
+    assert "Цвет: Белый &amp; красный" in message
+    assert "Контактный номер: +7 &lt;900&gt; &amp; 00" in message
+    assert "Телеграм тег: @buyer&amp;profile" in message
+    assert "Футболка <Hermes> & Co" not in message
+    ElementTree.fromstring(f"<root>{message}</root>")
 
 
 @pytest.mark.asyncio
@@ -502,8 +534,7 @@ async def test_chetam_command_splits_long_output(
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
     service, repository, _ = _seller_bot_command_service()
     repository.paid_orders = [
-        repository._paid_order(order_id=index, address="Очень длинный адрес " + ("x" * 900))
-        for index in range(1, 8)
+        repository._paid_order(order_id=1, address="&" * 2_000),
     ]
 
     messages = await service.format_chetam_command(
@@ -513,6 +544,9 @@ async def test_chetam_command_splits_long_output(
 
     assert len(messages) > 1
     assert all(len(message) <= 4096 for message in messages)
+    assert any("<b><i>ID заказа: 1</i></b>" in message for message in messages)
+    for message in messages:
+        ElementTree.fromstring(f"<root>{message}</root>")
 
 
 @pytest.mark.asyncio
