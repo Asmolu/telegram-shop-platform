@@ -76,6 +76,7 @@ export function ProductDetailPage() {
   const [reviewText, setReviewText] = React.useState('');
   const [reviewRating, setReviewRating] = React.useState(5);
   const [reviewBusy, setReviewBusy] = React.useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = React.useState(false);
   const requireAuth = React.useCallback(() => {
     if (isAuthenticated) {
       return true;
@@ -110,6 +111,7 @@ export function ProductDetailPage() {
 
         if (!cancelled) {
           setProduct(productResult);
+          setDescriptionExpanded(false);
           setReviews(reviewsResult.items);
           setFavorite(favoritesResult.items.some((item) => item.product_id === productResult.id));
           setCart(cartResult);
@@ -359,6 +361,16 @@ export function ProductDetailPage() {
 
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
+  const detailSpecs = [
+    { label: 'Категория', value: product.category?.name ?? 'Не указана' },
+    { label: 'Артикул', value: selectedVariant?.sku ?? 'Выберите размер' },
+    { label: 'Цвет', value: selectedVariant?.color ?? 'Не указан' },
+    {
+      label: 'Размер',
+      value: selectedVariant ? displaySize(product.size_grid, selectedVariant.size, true) : 'Выберите размер',
+    },
+    { label: 'Остаток', value: selectedVariant ? `${selectedVariant.available_quantity} шт.` : '—' },
+  ];
 
   return (
     <div className="page page--detail">
@@ -460,21 +472,26 @@ export function ProductDetailPage() {
         </section>
       ) : null}
 
-      {product.description ? (
-        <section className="detail-card">
-          <h2>Описание</h2>
-          <p>{product.description}</p>
-        </section>
-      ) : null}
-
-      <section className="detail-card">
-        <h2>Характеристики</h2>
-        <dl className="spec-list">
-          <div><dt>Категория</dt><dd>{product.category?.name ?? 'Не указана'}</dd></div>
-          <div><dt>Артикул</dt><dd>{selectedVariant?.sku ?? 'Выберите размер'}</dd></div>
-          <div><dt>Цвет</dt><dd>{selectedVariant?.color ?? 'Не указан'}</dd></div>
-          <div><dt>Остаток</dt><dd>{selectedVariant ? `${selectedVariant.available_quantity} шт.` : '—'}</dd></div>
-        </dl>
+      <section className="detail-card description-card">
+        <h2>Описание</h2>
+        <p className={`description-card__copy ${descriptionExpanded ? '' : 'is-collapsed'}`}>
+          {product.description?.trim() || 'Описание скоро появится.'}
+        </p>
+        {descriptionExpanded ? (
+          <dl className="spec-list description-card__specs">
+            {detailSpecs.map((spec) => (
+              <div key={spec.label}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>
+            ))}
+          </dl>
+        ) : null}
+        <button
+          className="description-card__toggle"
+          type="button"
+          aria-expanded={descriptionExpanded}
+          onClick={() => setDescriptionExpanded((current) => !current)}
+        >
+          {descriptionExpanded ? 'Скрыть' : 'Ещё...'}
+        </button>
       </section>
 
       <section className="detail-card">

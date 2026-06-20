@@ -21,7 +21,7 @@ import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
-import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
+import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
@@ -411,6 +411,18 @@ function CartItemsTab({
           const product = productMap.get(item.product.id);
           const imageUrl = product ? getProductImageUrl(product) : null;
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
+          const brand = product?.brand?.trim() || 'MENS STYLE';
+          const sizeLabel = displaySize(item.product.size_grid, item.product_variant.size, true);
+          const variantInfo = [
+            sizeLabel,
+            item.product_variant.color,
+            item.product_variant.sku ? `арт. ${item.product_variant.sku}` : '',
+          ].filter(Boolean).join(' · ');
+          const oldPrice = getDisplayOldPrice(
+            item.unit_price,
+            item.product.old_price,
+            item.product.compare_at_price,
+          );
 
           return (
             <article className={`cart-item ${item.is_selected ? '' : 'cart-item--unselected'}`} key={item.id}>
@@ -424,16 +436,26 @@ function CartItemsTab({
               <span className="cart-item__image">
                 {imageUrl ? <img src={imageUrl} alt="" /> : <span>{item.product.name[0]}</span>}
               </span>
-              <div>
-                <strong>{item.product.name}</strong>
-                <small>{displaySize(item.product.size_grid, item.product_variant.size, true)}{item.product_variant.color ? ` · ${item.product_variant.color}` : ''}</small>
+              <div className="cart-item__content">
+                <div className="cart-item__price-row">
+                  <strong>{formatPrice(item.unit_price)}</strong>
+                  {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
+                </div>
+                <span className="cart-item__brand">{brand}</span>
+                <strong className="cart-item__title">{item.product.name}</strong>
+                <small className="cart-item__variant">{variantInfo}</small>
                 {unavailable ? <em>Проверьте наличие</em> : null}
-                <span>{formatPrice(item.unit_price)}</span>
+                <small className="cart-item__delivery">Доступно к оформлению</small>
               </div>
-              <div className="quantity-stepper">
-                <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity - 1)}>−</button>
-                <span>{item.quantity}</span>
-                <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity + 1)}>+</button>
+              <div className="cart-item__actions">
+                <div className="quantity-stepper" aria-label="Количество">
+                  <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity - 1)}>−</button>
+                  <span>{item.quantity}</span>
+                  <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity + 1)}>+</button>
+                </div>
+                <button className="cart-item__buy-button" type="button" disabled={!item.is_selected || unavailable} onClick={onCheckout}>
+                  Купить
+                </button>
               </div>
               <button className="icon-button" type="button" onClick={() => void onRemove(item.id)} aria-label="Удалить">
                 ×

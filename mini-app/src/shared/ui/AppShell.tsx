@@ -6,6 +6,7 @@ import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
 import { BackIcon } from './Icons';
+import mensStyleLogo from '../assets/mens-style-logo.png';
 
 const navItems = [
   { to: '/main', label: 'Лента', icon: 'home', match: ['/main', '/'] },
@@ -25,12 +26,7 @@ function isActive(pathname: string, item: (typeof navItems)[number]) {
 export function BrandMark({ className = '' }: { className?: string }) {
   return (
     <span className={`brand-mark ${className}`.trim()} aria-hidden="true">
-      <svg viewBox="0 0 40 40" focusable="false">
-        <path className="brand-mark__shield" d="M20 3.8 33.2 8v11.1c0 8.1-5.1 14-13.2 17.1C11.9 33.1 6.8 27.2 6.8 19.1V8L20 3.8Z" />
-        <path className="brand-mark__flash" d="M14.4 25.7c4.9-1 8.8-3.2 12.5-7.4l-3.4-.3 3.1-6.1c-4.9 3.2-8.7 6.8-12.2 13.8Z" />
-        <path className="brand-mark__shoe" d="M11.4 27.8c4.1 1.4 9.1 1.1 15.2-.9 1.3-.4 2.4-.2 3.5.8-5.3 2.9-11.6 3.6-18.7 2.1" />
-        <text x="20" y="18.1" textAnchor="middle">MS</text>
-      </svg>
+      <img src={mensStyleLogo} alt="" />
     </span>
   );
 }

@@ -18,7 +18,7 @@ import { useProductActions } from '../features/catalog/useProductActions';
 
 export function MainPage() {
   const { navigate } = useRouter();
-  const { isAuthenticated, telegramUser } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [products, setProducts] = React.useState<Product[]>([]);
   const [banners, setBanners] = React.useState<Banner[]>([]);
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
@@ -84,11 +84,6 @@ export function MainPage() {
       <TopBar
         title="MENS STYLE"
         variant="feed"
-        right={
-          <button className="avatar-button" type="button" onClick={() => navigate('/profile')} aria-label="Профиль">
-            {telegramUser?.photo_url ? <img src={telegramUser.photo_url} alt="" /> : 'MS'}
-          </button>
-        }
       >
         <form onSubmit={submitFeedSearch}>
           <SearchAutocomplete
