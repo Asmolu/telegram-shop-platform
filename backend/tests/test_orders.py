@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.common.deps import get_current_user
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     Cart,
@@ -313,7 +314,10 @@ class FailingTelegramService:
 
 
 @pytest.mark.asyncio
-async def test_checkout_from_valid_cart() -> None:
+async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "public_mini_app_base_url", "https://mini.stylexac.ru/")
+    monkeypatch.setattr(settings, "public_seller_panel_base_url", "https://seller.stylexac.ru/")
+    monkeypatch.setattr(settings, "public_uploads_url", "https://api.stylexac.ru/uploads/")
     service, repository, session, events = _orders_service()
 
     order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
@@ -346,14 +350,17 @@ async def test_checkout_from_valid_cart() -> None:
     assert event_payload["customer"]["user_id"] == 1
     assert event_payload["items"][0]["product_title"] == "Hoodie"
     assert event_payload["items"][0]["product_id"] == 1
-    assert event_payload["items"][0]["product_link"] == "https://mini.tsplatform.ru/product/1"
+    assert event_payload["items"][0]["product_link"] == "https://mini.stylexac.ru/product/1"
+    assert event_payload["items"][0]["product_image_url"] == (
+        "https://api.stylexac.ru/uploads/products/hoodie.webp"
+    )
     assert event_payload["items"][0]["variant_color"] == "Black"
     assert event_payload["items"][0]["variant_sku"] == "HOODIE-M-BLK"
     assert event_payload["items"][0]["quantity"] == 2
     assert event_payload["contact"]["name"] == "Ada Lovelace"
     assert event_payload["contact"]["delivery_method"] == "ROUTE_TAXI"
     assert event_payload["contact"]["delivery_method_label"] == "Маршруткой"
-    assert event_payload["seller_panel_url"] == "https://seller.tsplatform.ru/orders"
+    assert event_payload["seller_panel_url"] == "https://seller.stylexac.ru/orders"
     assert events.commit_states == [True]
 
 

@@ -19,7 +19,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telegram_shop}:${POSTGRES_PASSWORD:-change-me-postgres-password}@postgres:5432/${POSTGRES_DB:-telegram_shop}
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - uploads_data:/app/uploads
     depends_on:
@@ -43,7 +43,7 @@ services:
       args:
         VITE_API_BASE_URL: ${SELLER_PANEL_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -57,7 +57,7 @@ services:
         VITE_API_BASE_URL: ${MINI_APP_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
         VITE_TELEGRAM_BOT_USERNAME: ${VITE_TELEGRAM_BOT_USERNAME:-}
     ports:
-      - "8081:80"
+      - "127.0.0.1:8081:80"
     depends_on:
       backend:
         condition: service_healthy

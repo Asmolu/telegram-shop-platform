@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.common.deps import get_current_user
 from app.common.pagination import PageMeta
+from app.core.config import settings
 from app.db.models import Notification, NotificationChannel, NotificationStatus, User, UserRole
 from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
 from app.main import create_app
@@ -96,7 +97,10 @@ class FakeNotificationsRepository:
 
 
 @pytest.mark.asyncio
-async def test_order_created_event_creates_and_sends_seller_notification() -> None:
+async def test_order_created_event_creates_and_sends_seller_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "public_seller_panel_base_url", "https://seller.stylexac.ru/")
     service, repository, session, telegram = _notifications_service()
 
     notification = await service.create_for_event(
@@ -121,7 +125,7 @@ async def test_order_created_event_creates_and_sends_seller_notification() -> No
     assert "Скидка: 20 ₽" in message
     assert "К оплате: 99,80 ₽" in message
     assert "Способ доставки: СДЭК" in message
-    assert "Панель продавца: https://seller.tsplatform.ru/orders" in message
+    assert "Панель продавца: https://seller.stylexac.ru/orders" in message
     assert telegram.parse_modes == ["HTML"]
     assert session.commits == 2
 
@@ -134,7 +138,7 @@ async def test_order_created_seller_notification_splits_long_messages() -> None:
         {
             "product_id": index,
             "product_title": f"Long Product {index} " + ("x" * 80),
-            "product_link": f"https://mini.tsplatform.ru/product/{index}",
+            "product_link": f"https://mini.stylexac.ru/product/{index}",
             "product_image_url": None,
             "variant_size": "XL",
             "variant_color": "White",
@@ -166,11 +170,11 @@ async def test_order_created_seller_notification_can_send_photo_caption() -> Non
     assert telegram.messages == []
     assert telegram.photos
     photo_url, caption = telegram.photos[0]
-    assert photo_url == "https://api.tsplatform.ru/uploads/products/hoodie.jpg"
+    assert photo_url == "https://api.stylexac.ru/uploads/products/hoodie.jpg"
     assert caption is not None
     assert caption.startswith("<b>🛍 Новый заказ #ORD-00000001</b>")
     assert "ID товара: 10" in caption
-    assert "Фото: https://api.tsplatform.ru/uploads/products/hoodie.jpg" in caption
+    assert "Фото: https://api.stylexac.ru/uploads/products/hoodie.jpg" in caption
     assert telegram.photo_parse_modes == ["HTML"]
 
 
@@ -447,8 +451,8 @@ def _detailed_order_created_payload() -> dict[str, object]:
                 {
                     "product_id": 10,
                     "product_title": "Hoodie",
-                    "product_link": "https://mini.tsplatform.ru/product/10",
-                    "product_image_url": "https://api.tsplatform.ru/uploads/products/hoodie.jpg",
+                    "product_link": "https://mini.stylexac.ru/product/10",
+                    "product_image_url": "https://api.stylexac.ru/uploads/products/hoodie.jpg",
                     "variant_size": "M",
                     "variant_color": "White",
                     "variant_sku": "HD-M-W",
@@ -465,7 +469,7 @@ def _detailed_order_created_payload() -> dict[str, object]:
                 "delivery_address": "Moscow",
                 "delivery_comment": "Call first",
             },
-            "seller_panel_url": "https://seller.tsplatform.ru/orders",
+            "seller_panel_url": "https://seller.stylexac.ru/orders",
         }
     )
     return payload

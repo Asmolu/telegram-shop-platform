@@ -2,6 +2,13 @@
 
 Sprint 14 adds a small Docker Compose production profile for MVP staging or single-node production.
 
+Production domain map:
+
+- `https://stylexac.ru` and `https://www.stylexac.ru`: Mini App
+- `https://mini.stylexac.ru`: Mini App
+- `https://api.stylexac.ru`: backend API
+- `https://seller.stylexac.ru`: Seller Panel
+
 ## Required files
 
 Create these files from examples and replace every placeholder before starting services:
@@ -24,6 +31,10 @@ Backend:
 - `REDIS_URL`
 - `JWT_SECRET_KEY`
 - `CORS_ORIGINS`
+- `PUBLIC_API_BASE_URL=https://api.stylexac.ru`
+- `PUBLIC_UPLOADS_URL=https://api.stylexac.ru/uploads`
+- `PUBLIC_MINI_APP_BASE_URL=https://mini.stylexac.ru`
+- `PUBLIC_SELLER_PANEL_BASE_URL=https://seller.stylexac.ru`
 - `TELEGRAM_WEBAPP_BOT_TOKEN`
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` for Bot 2 seller verification,
   seller notifications, and seller-chat broadcast
@@ -84,7 +95,7 @@ Set the webhook after deployment:
 
 ```bash
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.ru
+  python scripts/set_seller_bot_webhook.py set --base-url https://api.stylexac.ru
 ```
 
 Verify Telegram webhook state without printing the bot token:
@@ -97,7 +108,7 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml exe
 The webhook URL should be:
 
 ```text
-https://api.tsplatform.ru/api/v1/telegram/seller-bot/webhook
+https://api.stylexac.ru/api/v1/telegram/seller-bot/webhook
 ```
 
 Bot 1 customer notification registry is connected through:
@@ -110,7 +121,7 @@ Set the Bot 1 webhook after deployment:
 
 ```bash
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_customer_bot_webhook.py set --base-url https://api.tsplatform.ru
+  python scripts/set_customer_bot_webhook.py set --base-url https://api.stylexac.ru
 ```
 
 Verify Bot 1 webhook state without printing the bot token or webhook secret:
@@ -123,13 +134,13 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml exe
 The Bot 1 webhook URL should be:
 
 ```text
-https://api.tsplatform.ru/api/v1/telegram/customer-bot/webhook
+https://api.stylexac.ru/api/v1/telegram/customer-bot/webhook
 ```
 
 Customer campaign staging flow before production enablement:
 
 1. Use one internal Telegram account and open Bot 1 with `/start`.
-2. In `https://seller.tsplatform.ru`, verify Customer Notifications shows the
+2. In `https://seller.stylexac.ru`, verify Customer Notifications shows the
    internal recipient with a masked chat id and the expected opt-in state.
 3. Create a plain-text template or draft campaign.
 4. Run preview and confirm marketing counts exclude non-opted-in recipients.
@@ -141,7 +152,7 @@ Customer campaign staging flow before production enablement:
 
 Seller registration verification:
 
-1. Open `https://seller.tsplatform.ru`.
+1. Open `https://seller.stylexac.ru`.
 2. Start seller registration and copy the `/start seller_<token>` command.
 3. Open Bot 2 and send the command.
 4. Confirm Bot 2 posts an approval request in `TELEGRAM_SELLER_CHAT_ID`.
@@ -195,9 +206,11 @@ curl http://localhost:8000/api/v1/tags
 Public production smoke checks:
 
 ```bash
-curl -i https://api.tsplatform.ru/health
-curl -i https://tsplatform.ru
-curl -i https://seller.tsplatform.ru
+curl -i https://api.stylexac.ru/health
+curl -i https://stylexac.ru
+curl -i https://www.stylexac.ru
+curl -i https://mini.stylexac.ru
+curl -i https://seller.stylexac.ru
 ```
 
 ## Services

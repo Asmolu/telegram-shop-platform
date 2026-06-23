@@ -509,6 +509,21 @@ def test_order_payment_summary_includes_receipt_url() -> None:
     assert summary.receipt_image_url == "/uploads/payment_receipts/receipt.png"
 
 
+def test_order_payment_summary_uses_configured_public_uploads_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "public_uploads_url", "https://api.stylexac.ru/uploads/")
+    order, _ = _order_and_variant()
+    payment = _payment(order, expires_at=NOW + timedelta(minutes=30))
+    payment.receipt_image_path = "payment_receipts/receipt.png"
+
+    summary = ManualPaymentSummary.model_validate(payment)
+
+    assert summary.receipt_image_url == (
+        "https://api.stylexac.ru/uploads/payment_receipts/receipt.png"
+    )
+
+
 @pytest.mark.asyncio
 async def test_receipt_upload_is_visible_in_customer_and_seller_reads() -> None:
     service, _, _, _, _, _ = _service(with_payment=True)
@@ -603,7 +618,10 @@ async def test_notification_failure_does_not_rollback_payment_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_attempts_configured_seller_bot_notification() -> None:
+async def test_submit_attempts_configured_seller_bot_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "public_seller_panel_base_url", "https://seller.stylexac.ru/")
     service, repository, _, _, _, _ = _service(with_payment=True)
     telegram = FakeTelegramService()
     service.event_publisher = ManualPaymentEventPublisher(
@@ -621,6 +639,7 @@ async def test_submit_attempts_configured_seller_bot_notification() -> None:
     assert "ORD-00000010" in telegram.messages[0][1]
     assert "Способ доставки: СДЭК" in telegram.messages[0][1]
     assert "Без фото" in telegram.messages[0][1]
+    assert "https://seller.stylexac.ru/orders?payment=1" in telegram.messages[0][1]
 
 
 @pytest.mark.asyncio

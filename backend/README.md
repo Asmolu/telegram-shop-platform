@@ -132,7 +132,7 @@ Verification codes and passwords are stored hashed, not in plain text.
 Set and verify the production Bot 2 webhook without printing the bot token:
 
 ```bash
-python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.ru
+python scripts/set_seller_bot_webhook.py set --base-url https://api.stylexac.ru
 python scripts/set_seller_bot_webhook.py info
 ```
 
@@ -186,6 +186,6 @@ worker process are intentionally out of scope.
 Set and verify the production Bot 1 webhook without printing the bot token:
 
 ```bash
-python scripts/set_customer_bot_webhook.py set --base-url https://api.tsplatform.ru
+python scripts/set_customer_bot_webhook.py set --base-url https://api.stylexac.ru
 python scripts/set_customer_bot_webhook.py info
 ```

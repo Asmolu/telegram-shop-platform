@@ -1,7 +1,7 @@
 # Backup and Restore
 
 Production backups are automated for the single-node VDS deployment under
-`tsplatform.ru`. PostgreSQL is the source of truth for business data. Uploaded
+`stylexac.ru`. PostgreSQL is the source of truth for business data. Uploaded
 files live on disk in the `uploads_data` Docker volume and are backed up
 separately. Redis is cache and rate-limit state only and is not backed up as
 durable data.
@@ -234,10 +234,12 @@ backups during an incident.
 
 ```bash
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic current
-curl -i https://api.tsplatform.ru/health
-curl -i https://api.tsplatform.ru/api/v1/products
-curl -i https://tsplatform.ru
-curl -i https://seller.tsplatform.ru
+curl -i https://api.stylexac.ru/health
+curl -i https://api.stylexac.ru/api/v1/products
+curl -i https://stylexac.ru
+curl -i https://www.stylexac.ru
+curl -i https://mini.stylexac.ru
+curl -i https://seller.stylexac.ru
 ```
 
 For local VDS-only smoke checks, use `http://localhost:8000`,

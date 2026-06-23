@@ -15,6 +15,7 @@ from app.common.labels import (
     payment_status_label,
 )
 from app.common.pagination import PageMeta
+from app.core.config import join_public_url, settings
 from app.core.errors import AppError
 from app.db.models import Notification, NotificationChannel, NotificationStatus
 from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
@@ -293,7 +294,7 @@ class NotificationsService:
         seller_panel_url = self._payload_value(
             payload,
             "seller_panel_url",
-            fallback="https://seller.tsplatform.ru/orders",
+            fallback=_seller_panel_orders_url(),
         )
 
         lines = [
@@ -474,3 +475,7 @@ class NotificationsService:
 
     def _now(self) -> datetime:
         return datetime.now(UTC)
+
+
+def _seller_panel_orders_url() -> str:
+    return join_public_url(settings.public_seller_panel_base_url, "orders")

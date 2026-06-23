@@ -1,12 +1,32 @@
 from functools import cached_property
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PRODUCTION_ENVS = {"production", "prod", "staging"}
 DEFAULT_JWT_SECRET_KEY = "change-me-in-local-env"
+DEFAULT_UPLOADS_MOUNT_PATH = "/uploads"
+
+
+def normalize_public_url(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        msg = "Public URL settings must not be empty"
+        raise ValueError(msg)
+    return stripped.rstrip("/") or "/"
+
+
+def join_public_url(base_url: str, path: str) -> str:
+    base = normalize_public_url(base_url)
+    suffix = path.strip().lstrip("/")
+    if not suffix:
+        return base
+    if base == "/":
+        return f"/{suffix}"
+    return f"{base}/{suffix}"
 
 
 class Settings(BaseSettings):
@@ -42,6 +62,9 @@ class Settings(BaseSettings):
 
     uploads_dir: str = "uploads"
     public_uploads_url: str = "/uploads"
+    public_api_base_url: str = "http://localhost:8000"
+    public_mini_app_base_url: str = "http://localhost:5173"
+    public_seller_panel_base_url: str = "http://localhost:5174"
     upload_subdirs: tuple[str, ...] = (
         "products",
         "banners",
@@ -102,12 +125,44 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
 
+    @field_validator(
+        "public_uploads_url",
+        "public_api_base_url",
+        "public_mini_app_base_url",
+        "public_seller_panel_base_url",
+    )
+    @classmethod
+    def normalize_public_url_setting(cls, value: str) -> str:
+        return normalize_public_url(value)
+
     @cached_property
     def uploads_dir_path(self) -> Path:
         uploads_path = Path(self.uploads_dir)
         if uploads_path.is_absolute():
             return uploads_path
         return BACKEND_DIR / uploads_path
+
+    @property
+    def public_uploads_mount_path(self) -> str:
+        value = normalize_public_url(self.public_uploads_url)
+        if value.startswith(("http://", "https://")):
+            mount_path = urlsplit(value).path.rstrip("/")
+        else:
+            mount_path = value.rstrip("/")
+        if not mount_path or mount_path == "/":
+            return DEFAULT_UPLOADS_MOUNT_PATH
+        return mount_path if mount_path.startswith("/") else f"/{mount_path}"
+
+    def public_upload_url_for(self, path: str) -> str:
+        value = path.strip()
+        if value.startswith(("http://", "https://")):
+            return value
+        mount_path = self.public_uploads_mount_path
+        if value == mount_path:
+            value = ""
+        elif value.startswith(f"{mount_path}/"):
+            value = value.removeprefix(mount_path)
+        return join_public_url(self.public_uploads_url, value)
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":

@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
     app.mount(
-        settings.public_uploads_url,
+        settings.public_uploads_mount_path,
         StaticFiles(directory=settings.uploads_dir_path),
         name="uploads",
     )

@@ -106,7 +106,4 @@ class ManualPaymentExpireBatchRead(BaseModel):
 def _receipt_image_url(receipt_image_path: str | None) -> str | None:
     if not receipt_image_path:
         return None
-    return (
-        f"{settings.public_uploads_url.rstrip('/')}/"
-        f"{receipt_image_path.lstrip('/')}"
-    )
+    return settings.public_upload_url_for(receipt_image_path)

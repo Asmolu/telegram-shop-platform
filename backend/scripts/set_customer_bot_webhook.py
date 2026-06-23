@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     set_parser.add_argument(
         "--base-url",
         required=True,
-        help="Public backend base URL, for example https://api.tsplatform.ru",
+        help="Public backend base URL, for example https://api.stylexac.ru",
     )
 
     subparsers.add_parser("info", help="Show redacted Customer Bot 1 webhook info")

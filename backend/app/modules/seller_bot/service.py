@@ -17,7 +17,7 @@ from app.common.labels import (
     order_status_label,
     payment_status_label,
 )
-from app.core.config import settings
+from app.core.config import join_public_url, settings
 from app.core.errors import AppError
 from app.db.models import (
     NotificationChannel,
@@ -73,7 +73,6 @@ CHETAM_COMMAND_LIMIT = 20
 TELEGRAM_MESSAGE_LIMIT = 4096
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
 POSTGRES_INT32_MAX = 2_147_483_647
-SELLER_PANEL_PRODUCT_EDIT_URL = "https://seller.tsplatform.ru/products/{product_id}/edit"
 QUICK_PRODUCT_ALLOWED_FIELDS = {
     "название": "title",
     "цена": "price",
@@ -658,7 +657,7 @@ class SellerBotService:
             (
                 "",
                 f"К оплате: {format_rubles(order.total_amount)}",
-                f"Панель продавца: https://seller.tsplatform.ru/orders?order={order.id}",
+                f"Панель продавца: {_seller_panel_order_url(order.id)}",
             )
         )
         return "\n".join(lines)
@@ -1416,7 +1415,7 @@ class SellerBotService:
         lines.extend(
             (
                 "",
-                f"Редактировать: {SELLER_PANEL_PRODUCT_EDIT_URL.format(product_id=product_id)}",
+                f"Редактировать: {_seller_panel_product_edit_url(product_id)}",
             )
         )
         return "\n".join(lines)
@@ -1727,3 +1726,14 @@ XL / Черный / 5 / HERMES-XL-B
         configured_chat_id = settings.telegram_seller_chat_id
         if not configured_chat_id or str(chat_id) != configured_chat_id.strip():
             raise AppError(SELLER_GROUP_ONLY_MESSAGE, 403)
+
+
+def _seller_panel_order_url(order_id: int) -> str:
+    return join_public_url(settings.public_seller_panel_base_url, f"orders?order={order_id}")
+
+
+def _seller_panel_product_edit_url(product_id: int) -> str:
+    return join_public_url(
+        settings.public_seller_panel_base_url,
+        f"products/{product_id}/edit",
+    )

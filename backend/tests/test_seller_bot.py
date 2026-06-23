@@ -430,6 +430,7 @@ async def test_active_orders_command_is_russian_and_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    monkeypatch.setattr(settings, "public_seller_panel_base_url", "https://seller.stylexac.ru/")
     service, _, _ = _seller_bot_command_service()
 
     messages = await service.format_active_orders_command(chat_id=-100)
@@ -443,7 +444,7 @@ async def test_active_orders_command_is_russian_and_complete(
     assert "Доставка: СДЭК" in message
     assert "Клиент: @buyer, Иван" in message
     assert "2 × 700 ₽ = 1 400 ₽" in message
-    assert "https://seller.tsplatform.ru/orders?order=10" in message
+    assert "https://seller.stylexac.ru/orders?order=10" in message
     assert len(message) <= 4096
 
 
@@ -674,6 +675,7 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    monkeypatch.setattr(settings, "public_seller_panel_base_url", "https://seller.stylexac.ru/")
     service, product_repository, variant_repository, storage, audit = _quick_product_service()
     prepared_sizes: list[str] = []
     prepare_variant = service.products_service.prepare_product_variant
@@ -709,7 +711,7 @@ async def test_new_product_command_creates_draft_with_photo_and_variants(
     assert prepared_sizes == ["M", "L", "3XL"]
     assert "ID: 101" in message
     assert "Статус: черновик" in message
-    assert "https://seller.tsplatform.ru/products/101/edit" in message
+    assert "https://seller.stylexac.ru/products/101/edit" in message
     assert storage.saved == [(b"image-bytes", "products", ".jpg")]
     assert audit.records[0]["action"] == "bot_product_draft_created"
 

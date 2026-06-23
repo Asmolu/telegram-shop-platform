@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import DEFAULT_JWT_SECRET_KEY, Settings, settings
+from app.core.config import DEFAULT_JWT_SECRET_KEY, Settings, join_public_url, settings
 from app.core.rate_limit import reset_in_memory_rate_limiter
 from app.db.models import Category, Product, ProductSizeGrid, ProductStatus
 from app.main import create_app
@@ -108,6 +108,30 @@ def test_production_settings_reject_wildcard_cors() -> None:
             jwt_secret_key="production-secret",
             CORS_ORIGINS="*",
         )
+
+
+def test_public_url_settings_normalize_trailing_slashes() -> None:
+    production_settings = Settings(
+        public_api_base_url="https://api.stylexac.ru/",
+        public_mini_app_base_url="https://mini.stylexac.ru/",
+        public_seller_panel_base_url="https://seller.stylexac.ru/",
+        public_uploads_url="https://api.stylexac.ru/uploads/",
+    )
+
+    assert production_settings.public_api_base_url == "https://api.stylexac.ru"
+    assert production_settings.public_mini_app_base_url == "https://mini.stylexac.ru"
+    assert production_settings.public_seller_panel_base_url == "https://seller.stylexac.ru"
+    assert production_settings.public_uploads_url == "https://api.stylexac.ru/uploads"
+    assert production_settings.public_uploads_mount_path == "/uploads"
+    assert production_settings.public_upload_url_for("/uploads/products/hoodie.jpg") == (
+        "https://api.stylexac.ru/uploads/products/hoodie.jpg"
+    )
+
+
+def test_join_public_url_avoids_duplicate_slashes() -> None:
+    assert join_public_url("https://mini.stylexac.ru/", "/product/42") == (
+        "https://mini.stylexac.ru/product/42"
+    )
 
 
 def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:

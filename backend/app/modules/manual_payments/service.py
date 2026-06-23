@@ -11,7 +11,7 @@ from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import join_public_url, settings
 from app.core.errors import AppError
 from app.db.models import (
     ManualPayment,
@@ -51,7 +51,6 @@ ACTIVE_PAYMENT_STATUSES = {
     ManualPaymentStatus.PENDING,
     ManualPaymentStatus.SUBMITTED,
 }
-SELLER_PANEL_PAYMENT_URL = "https://seller.tsplatform.ru/orders?payment={payment_id}"
 SELLER_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 
@@ -238,7 +237,7 @@ class ManualPaymentEventPublisher:
             f"Комментарий к переводу: {payload['payment_comment']}\n"
             f"{receipt_line}"
             f"Резерв до: {expires_at.astimezone(SELLER_TIMEZONE).strftime('%H:%M')}\n"
-            f"{SELLER_PANEL_PAYMENT_URL.format(payment_id=payment_id)}"
+            f"{_seller_panel_payment_url(payment_id)}"
         )
 
     async def _finalize_seller_message(
@@ -926,10 +925,7 @@ class ManualPaymentsService:
     ) -> ManualPaymentRead:
         receipt_url = None
         if payment.receipt_image_path:
-            receipt_url = (
-                f"{settings.public_uploads_url.rstrip('/')}/"
-                f"{payment.receipt_image_path.lstrip('/')}"
-            )
+            receipt_url = settings.public_upload_url_for(payment.receipt_image_path)
         order = payment.order
         return ManualPaymentRead(
             id=payment.id,
@@ -1028,3 +1024,10 @@ class ManualPaymentsService:
 
     def _now(self) -> datetime:
         return self.now_factory()
+
+
+def _seller_panel_payment_url(payment_id: int) -> str:
+    return join_public_url(
+        settings.public_seller_panel_base_url,
+        f"orders?payment={payment_id}",
+    )

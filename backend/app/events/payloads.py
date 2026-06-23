@@ -1,12 +1,9 @@
 from decimal import Decimal
 from typing import Any
 
+from app.core.config import join_public_url, settings
 from app.db.models import Order, OrderItem, OrderStatus, ProductImage
 from app.modules.orders.delivery import delivery_method_label
-
-MINI_APP_PRODUCT_URL = "https://mini.tsplatform.ru/product/{product_id}"
-SELLER_PANEL_ORDERS_URL = "https://seller.tsplatform.ru/orders"
-API_PUBLIC_BASE_URL = "https://api.tsplatform.ru"
 
 
 def order_created_payload(order: Order) -> dict[str, object]:
@@ -36,7 +33,7 @@ def order_created_payload(order: Order) -> dict[str, object]:
             "delivery_address": order.delivery_address,
             "delivery_comment": order.delivery_comment,
         },
-        "seller_panel_url": SELLER_PANEL_ORDERS_URL,
+        "seller_panel_url": _seller_panel_orders_url(),
     }
 
 
@@ -110,7 +107,7 @@ def _order_item_payload(item: OrderItem) -> dict[str, object | None]:
     return {
         "product_id": item.product_id,
         "product_title": item.product_name,
-        "product_link": MINI_APP_PRODUCT_URL.format(product_id=item.product_id),
+        "product_link": _mini_app_product_url(item.product_id),
         "product_image_url": image_url,
         "variant_id": item.product_variant_id,
         "variant_size": item.variant_size,
@@ -133,8 +130,12 @@ def _primary_or_first_image(images: list[ProductImage]) -> ProductImage | None:
 def _absolute_upload_url(url: str | None) -> str | None:
     if not url:
         return None
-    if url.startswith(("http://", "https://")):
-        return url
-    if url.startswith("/"):
-        return f"{API_PUBLIC_BASE_URL}{url}"
-    return f"{API_PUBLIC_BASE_URL}/{url.lstrip('/')}"
+    return settings.public_upload_url_for(url)
+
+
+def _mini_app_product_url(product_id: int) -> str:
+    return join_public_url(settings.public_mini_app_base_url, f"product/{product_id}")
+
+
+def _seller_panel_orders_url() -> str:
+    return join_public_url(settings.public_seller_panel_base_url, "orders")

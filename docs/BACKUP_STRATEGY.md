@@ -1,7 +1,7 @@
 # Production Backup Strategy
 
 This document defines the implemented MVP backup strategy for the single-node
-Docker Compose production profile on the VDS serving `tsplatform.ru`.
+Docker Compose production profile on the VDS serving `stylexac.ru`.
 
 ## Goals
 

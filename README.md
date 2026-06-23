@@ -195,7 +195,7 @@ Set the production webhook with:
 
 ```bash
 cd backend
-python scripts/set_seller_bot_webhook.py set --base-url https://api.tsplatform.ru
+python scripts/set_seller_bot_webhook.py set --base-url https://api.stylexac.ru
 python scripts/set_seller_bot_webhook.py info
 ```
 
