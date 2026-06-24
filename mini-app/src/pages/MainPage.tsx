@@ -10,10 +10,12 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
+import { scheduleRoutePrefetch } from '../shared/router/routePrefetch';
 import { useRouter } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
+import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
 import { useProductActions } from '../features/catalog/useProductActions';
 
 export function MainPage() {
@@ -65,6 +67,14 @@ export function MainPage() {
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  React.useEffect(() => {
+    if (loading || error || products.length === 0) {
+      return undefined;
+    }
+
+    return scheduleRoutePrefetch('product-detail');
+  }, [error, loading, products.length]);
 
   const horizontalBanners = banners.filter((banner) => banner.display_type === 'horizontal');
   const verticalBanners = banners.filter((banner) => banner.display_type === 'vertical');
@@ -126,9 +136,11 @@ export function MainPage() {
       ) : null}
       {!loading && !error && products.length > 0 ? (
         <div className="product-grid">
-          {products.map((product) => (
+          {products.map((product, index) => (
             <ProductCard
               favorite={favoriteIds.has(product.id)}
+              imageFetchPriority={index === 0 ? 'high' : 'auto'}
+              imageLoading={index === 0 ? 'eager' : 'lazy'}
               key={product.id}
               product={product}
               onAddToCart={addToCart}
@@ -142,7 +154,15 @@ export function MainPage() {
   );
 }
 
-function MainBanner({ banner, onNotice }: { banner: Banner; onNotice: (message: string) => void }) {
+function MainBanner({
+  banner,
+  loading = 'lazy',
+  onNotice,
+}: {
+  banner: Banner;
+  loading?: 'eager' | 'lazy';
+  onNotice: (message: string) => void;
+}) {
   const { navigate } = useRouter();
   const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
   const action = getBannerAction(banner);
@@ -157,7 +177,7 @@ function MainBanner({ banner, onNotice }: { banner: Banner; onNotice: (message: 
     >
       {imageUrl ? (
         <span className="native-banner__image" aria-hidden="true">
-          <img src={imageUrl} alt="" />
+          <img src={imageUrl} alt="" width={2000} height={1035} loading={loading} decoding="async" />
         </span>
       ) : <span className="banner-image-fallback" aria-hidden="true" />}
       {ctaLabel ? <span className="banner-cta">{ctaLabel}</span> : null}
@@ -189,7 +209,9 @@ function VerticalBannerCard({ banner, onNotice }: { banner: Banner; onNotice: (m
       onClick={() => void activateBanner(banner, navigate, onNotice)}
     >
       <span className="vertical-banner-card__media" aria-hidden="true">
-        {imageUrl ? <img src={imageUrl} alt="" /> : <span className="banner-image-fallback" />}
+        {imageUrl ? (
+          <img src={imageUrl} alt="" width={900} height={1600} loading="lazy" decoding="async" />
+        ) : <span className="banner-image-fallback" />}
       </span>
       {ctaLabel ? <span className="banner-cta">{ctaLabel}</span> : null}
     </button>
@@ -224,7 +246,7 @@ function BannerCarousel({ banners, onNotice }: { banners: Banner[]; onNotice: (m
       }
 
       const nextIndex = (activeIndex + 1) % banners.length;
-      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: 'smooth' });
+      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: getMotionAwareScrollBehavior() });
       setActiveIndex(nextIndex);
     }, 4500);
 
@@ -238,7 +260,7 @@ function BannerCarousel({ banners, onNotice }: { banners: Banner[]; onNotice: (m
   function scrollToBanner(index: number) {
     const track = trackRef.current;
     pauseAutoplay();
-    track?.scrollTo({ left: track.clientWidth * index, behavior: 'smooth' });
+    track?.scrollTo({ left: track.clientWidth * index, behavior: getMotionAwareScrollBehavior() });
     setActiveIndex(index);
   }
 
@@ -250,9 +272,9 @@ function BannerCarousel({ banners, onNotice }: { banners: Banner[]; onNotice: (m
         onPointerDown={pauseAutoplay}
         onScroll={updateActiveIndex}
       >
-        {banners.map((banner) => (
+        {banners.map((banner, index) => (
           <div className="banner-carousel__slide" key={banner.id}>
-            <MainBanner banner={banner} onNotice={onNotice} />
+            <MainBanner banner={banner} loading={index === 0 ? 'eager' : 'lazy'} onNotice={onNotice} />
           </div>
         ))}
       </div>

@@ -27,6 +27,7 @@ from app.db.models import (
     PendingSellerRegistration,
     Product,
     ProductCategory,
+    ProductImage,
     ProductImageBadgeColor,
     ProductImageBadgePosition,
     ProductImageBadgeType,
@@ -819,3 +820,27 @@ def test_product_brand_migration_and_model_contract() -> None:
     assert "brand" in content
     assert Product.__table__.c.brand.nullable is True
     assert Product.__table__.c.brand.type.length == 120
+
+
+def test_product_image_derivatives_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260624_0035_add_product_image_derivatives.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_product_image_derivatives", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260624_0034"
+    assert "thumbnail_path" in content
+    assert ProductImage.__table__.c.thumbnail_path.nullable is True
+    assert ProductImage.__table__.c.thumbnail_path.type.length == 1024
+    assert ProductImage.__table__.c.card_path.nullable is True
+    assert ProductImage.__table__.c.card_path.type.length == 1024
+    assert ProductImage.__table__.c.detail_path.nullable is True
+    assert ProductImage.__table__.c.detail_path.type.length == 1024

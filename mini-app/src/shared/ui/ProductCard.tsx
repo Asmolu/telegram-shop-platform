@@ -61,16 +61,20 @@ function getReviewLine(product: Product) {
   return 'Пока нет отзывов';
 }
 
-export function ProductCard({
+function ProductCardComponent({
   product,
   favorite = false,
   onFavoriteToggle,
   onAddToCart,
+  imageLoading = 'lazy',
+  imageFetchPriority,
 }: {
   product: Product;
   favorite?: boolean;
   onFavoriteToggle?: (product: Product) => void | Promise<void>;
   onAddToCart?: (product: Product) => void | Promise<void>;
+  imageLoading?: 'eager' | 'lazy';
+  imageFetchPriority?: 'high' | 'low' | 'auto';
 }) {
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
   const badge = getProductBadge(product);
@@ -105,7 +109,12 @@ export function ProductCard({
     <article className="product-card">
       <div className="product-card__media-shell">
         <Link className="product-card__media" to={`/product/${product.id}`}>
-          <ProductImageCarousel product={product} variant="card" />
+          <ProductImageCarousel
+            product={product}
+            variant="card"
+            loading={imageLoading}
+            fetchPriority={imageFetchPriority}
+          />
           {badge ? (
             <span
               className={`product-badge product-badge--${badgeType} product-badge--color-${badgeColor} product-badge--position-${badgePosition} ${
@@ -158,3 +167,5 @@ export function ProductCard({
     </article>
   );
 }
+
+export const ProductCard = React.memo(ProductCardComponent);

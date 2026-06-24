@@ -5,21 +5,38 @@ import {
   getProductBadgePosition,
   getProductImageBadge,
   getProductImageItems,
+  type ProductImageItem,
 } from '../utils/images';
+import { getMotionAwareScrollBehavior } from '../utils/motion';
 
 type ProductImageCarouselVariant = 'card' | 'detail';
+type CarouselSlide = Omit<ProductImageItem, 'url'> & { url: string | null };
 
 export function ProductImageCarousel({
   product,
   variant = 'detail',
+  loading,
+  fetchPriority,
 }: {
   product: Product;
   variant?: ProductImageCarouselVariant;
+  loading?: 'eager' | 'lazy';
+  fetchPriority?: 'high' | 'low' | 'auto';
 }) {
   const trackRef = React.useRef<HTMLDivElement | null>(null);
+  const scrollFrameRef = React.useRef(0);
   const [activeIndex, setActiveIndex] = React.useState(0);
-  const images = getProductImageItems(product);
-  const slides = images.length > 0 ? images : [{ id: 'fallback', url: null, alt: product.name }];
+  const [brokenImageIds, setBrokenImageIds] = React.useState<Set<string>>(new Set());
+  const images = getProductImageItems(product, variant);
+  const slides: CarouselSlide[] = images.length > 0
+    ? images
+    : [{
+        id: 'fallback',
+        url: null,
+        alt: product.name,
+        srcSet: undefined,
+        sizes: undefined,
+      }];
   const fallbackLetter = product.name.slice(0, 1).toUpperCase();
   const hasMultipleImages = slides.length > 1;
   const imageBadge = variant === 'detail' ? getProductImageBadge(product) : null;
@@ -28,10 +45,15 @@ export function ProductImageCarousel({
 
   React.useEffect(() => {
     setActiveIndex(0);
-    trackRef.current?.scrollTo({ left: 0 });
+    setBrokenImageIds(new Set());
+    if (typeof trackRef.current?.scrollTo === 'function') {
+      trackRef.current.scrollTo({ left: 0 });
+    }
   }, [product.id]);
 
-  const handleScroll = React.useCallback(() => {
+  React.useEffect(() => () => window.cancelAnimationFrame(scrollFrameRef.current), []);
+
+  const updateActiveIndex = React.useCallback(() => {
     const track = trackRef.current;
 
     if (!track) {
@@ -42,6 +64,11 @@ export function ProductImageCarousel({
     setActiveIndex(Math.min(Math.max(nextIndex, 0), slides.length - 1));
   }, [slides.length]);
 
+  const handleScroll = React.useCallback(() => {
+    window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(updateActiveIndex);
+  }, [updateActiveIndex]);
+
   function scrollToSlide(index: number) {
     const track = trackRef.current;
 
@@ -51,7 +78,7 @@ export function ProductImageCarousel({
 
     track.scrollTo({
       left: track.clientWidth * index,
-      behavior: 'smooth',
+      behavior: getMotionAwareScrollBehavior(),
     });
   }
 
@@ -60,12 +87,25 @@ export function ProductImageCarousel({
       <div className="product-image-carousel__track" ref={trackRef} onScroll={handleScroll}>
         {slides.map((slide, index) => (
           <div className="product-image-carousel__slide" key={slide.id}>
-            {slide.url ? (
+            {slide.url && !brokenImageIds.has(slide.id) && shouldLoadSlide(variant, activeIndex, index) ? (
               <img
                 src={slide.url}
+                srcSet={slide.srcSet}
+                sizes={slide.sizes}
                 alt={slide.alt}
                 draggable={false}
-                loading={variant === 'detail' && index === 0 ? 'eager' : 'lazy'}
+                width={variant === 'detail' ? 1200 : 480}
+                height={variant === 'detail' ? 1500 : 600}
+                loading={loading ?? (variant === 'detail' && index === 0 ? 'eager' : 'lazy')}
+                fetchPriority={index === 0 ? fetchPriority : undefined}
+                decoding="async"
+                onError={() => {
+                  setBrokenImageIds((current) => {
+                    const next = new Set(current);
+                    next.add(slide.id);
+                    return next;
+                  });
+                }}
               />
             ) : (
               <div className="image-fallback">
@@ -109,4 +149,15 @@ export function ProductImageCarousel({
       ) : null}
     </div>
   );
+}
+
+function shouldLoadSlide(
+  variant: ProductImageCarouselVariant,
+  activeIndex: number,
+  index: number,
+) {
+  if (variant === 'detail') {
+    return index <= activeIndex + 1;
+  }
+  return index <= activeIndex + 1;
 }

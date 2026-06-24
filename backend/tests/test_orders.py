@@ -38,7 +38,7 @@ from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED,
 from app.main import create_app
 from app.modules.notifications.service import NotificationsEventPublisher, NotificationsService
 from app.modules.orders.router import get_orders_service
-from app.modules.orders.schemas import OrderCheckoutCreate, OrderStatusUpdate
+from app.modules.orders.schemas import OrderCheckoutCreate, OrderItemRead, OrderStatusUpdate
 from app.modules.orders.service import InternalOrderEventPublisher, OrdersService
 from app.modules.promo_codes.service import PromoCodeCalculation
 from app.modules.telegram.service import TelegramDeliveryError
@@ -893,6 +893,33 @@ async def test_order_response_contains_rich_item_and_total_fields() -> None:
     assert item["item_total"] == Decimal("119.80")
     assert item["product_thumbnail_path"] == "products/hoodie.webp"
     assert item["product_thumbnail_url"] == "/uploads/products/hoodie.webp"
+
+
+def test_order_item_read_prefers_product_thumbnail_derivative() -> None:
+    product = _product()
+    product.images[0].thumbnail_path = "products/hoodie.thumbnail.webp"
+    product.images[0].card_path = "products/hoodie.card.webp"
+    item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=product.id,
+        product_variant_id=1,
+        product_name=product.name,
+        variant_size="M",
+        variant_size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        variant_color="Black",
+        variant_sku="HOODIE-M-BLK",
+        unit_price=Decimal("59.90"),
+        quantity=1,
+        subtotal=Decimal("59.90"),
+        created_at=_now(),
+    )
+    item.product = product
+
+    read = OrderItemRead.model_validate(item)
+
+    assert read.product_thumbnail_path == "products/hoodie.thumbnail.webp"
+    assert read.product_thumbnail_url == "/uploads/products/hoodie.thumbnail.webp"
 
 
 @pytest.mark.asyncio

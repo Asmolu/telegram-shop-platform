@@ -22,7 +22,7 @@ import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
-import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
+import { getProductImageItems, getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
 
@@ -409,7 +409,8 @@ function CartItemsTab({
       <div className="cart-list">
         {items.map((item) => {
           const product = productMap.get(item.product.id);
-          const imageUrl = product ? getProductImageUrl(product) : null;
+          const productImage = product ? getProductImageItems(product, 'thumbnail')[0] : null;
+          const imageUrl = product ? getProductImageUrl(product, 'thumbnail') : null;
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
           const brand = product?.brand?.trim() || 'MENS STYLE';
           const sizeLabel = displaySize(item.product.size_grid, item.product_variant.size, true);
@@ -434,7 +435,18 @@ function CartItemsTab({
                 />
               </label>
               <span className="cart-item__image">
-                {imageUrl ? <img src={imageUrl} alt="" /> : <span>{item.product.name[0]}</span>}
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    srcSet={productImage?.srcSet}
+                    sizes={productImage?.sizes}
+                    alt=""
+                    width={96}
+                    height={120}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : <span>{item.product.name[0]}</span>}
               </span>
               <div className="cart-item__content">
                 <div className="cart-item__price-row">
@@ -544,7 +556,16 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                 return (
                   <div className="order-item-row" key={item.id}>
                     <Link className="order-item-row__image" to={`/product/${item.product_id}`}>
-                      {thumbnailUrl ? <img src={thumbnailUrl} alt="" /> : <span>{item.product_name.slice(0, 1)}</span>}
+                      {thumbnailUrl ? (
+                        <img
+                          src={thumbnailUrl}
+                          alt=""
+                          width={72}
+                          height={90}
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : <span>{item.product_name.slice(0, 1)}</span>}
                     </Link>
                     <div>
                       <Link to={`/product/${item.product_id}`}>{item.product_title ?? item.product_name}</Link>

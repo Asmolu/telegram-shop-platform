@@ -1,4 +1,6 @@
 import React from 'react';
+import { prefetchRouteForPath } from './routePrefetch';
+import { getMotionAwareScrollBehavior } from '../utils/motion';
 
 type NavigateOptions = {
   replace?: boolean;
@@ -133,7 +135,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
     }
 
     setLocation(getCurrentPath());
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: getMotionAwareScrollBehavior() });
   }, []);
 
   const goBack = React.useCallback((fallback = '/main') => {
@@ -150,7 +152,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
       );
       historyIndexRef.current = 0;
       setLocation(getCurrentPath());
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: getMotionAwareScrollBehavior() });
     }
   }, []);
 
@@ -335,12 +337,18 @@ export function Link({
   title?: string;
 }) {
   const { navigate } = useRouter();
+  const prefetch = React.useCallback(() => {
+    prefetchRouteForPath(to, (pathname) => (pathname === '/' ? 'launch' : getRouteId(pathname)));
+  }, [to]);
 
   return (
     <a
       className={className}
       href={to}
       title={title}
+      onFocus={prefetch}
+      onPointerEnter={prefetch}
+      onTouchStart={prefetch}
       onClick={(event) => {
         event.preventDefault();
         navigate(to);

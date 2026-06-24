@@ -72,7 +72,7 @@ export function CategoriesPage() {
                 ?? (category.image_path ? `/uploads/${category.image_path}` : null),
             );
             const imageUrl = categoryImageUrl
-              ?? (categoryProducts[0] ? getProductImageUrl(categoryProducts[0]) : null);
+              ?? (categoryProducts[0] ? getProductImageUrl(categoryProducts[0], 'card') : null);
 
             return (
               <button
@@ -82,7 +82,16 @@ export function CategoriesPage() {
                 onClick={() => navigate(`/category/${category.id}`)}
               >
                 <span className="category-card__media">
-                  {imageUrl ? <img src={imageUrl} alt="" /> : <span>{category.name.slice(0, 1).toUpperCase()}</span>}
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt=""
+                      width={480}
+                      height={360}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : <span>{category.name.slice(0, 1).toUpperCase()}</span>}
                 </span>
                 <strong>{category.name}</strong>
                 {categoryProducts.some((product) => product.tags.some((tag) => tag.slug.includes('sale'))) ? (
@@ -118,7 +127,16 @@ export function CategoriesPage() {
                   }
                 >
                   <span className="category-card__media">
-                    {imageUrl ? <img src={imageUrl} alt="" /> : <span>{tag.name.slice(0, 1).toUpperCase()}</span>}
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt=""
+                        width={480}
+                        height={360}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : <span>{tag.name.slice(0, 1).toUpperCase()}</span>}
                   </span>
                   <strong>{tag.name}</strong>
                 </button>

@@ -6,9 +6,10 @@ import { useNetworkState } from '../network/NetworkProvider';
 import { Link, useRouter } from '../router/RouterProvider';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
+import { getMotionAwareScrollBehavior } from '../utils/motion';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
 import { BackIcon } from './Icons';
-import mensStyleLogo from '../assets/mens-style-logo.png';
+import mensStyleLogo from '../assets/mens-style-logo.webp';
 
 const navItems = [
   { to: '/main', label: 'Лента', icon: 'home', match: ['/main', '/'] },
@@ -391,7 +392,7 @@ function BannerPopup({
       }
 
       const nextIndex = (activeIndex + 1) % banners.length;
-      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: 'smooth' });
+      track.scrollTo({ left: track.clientWidth * nextIndex, behavior: getMotionAwareScrollBehavior() });
       setActiveIndex(nextIndex);
     }, 4200);
 
@@ -405,7 +406,7 @@ function BannerPopup({
   function chooseSlide(index: number) {
     const track = trackRef.current;
     pauseAutoplay();
-    track?.scrollTo({ left: track.clientWidth * index, behavior: 'smooth' });
+    track?.scrollTo({ left: track.clientWidth * index, behavior: getMotionAwareScrollBehavior() });
     setActiveIndex(index);
   }
 

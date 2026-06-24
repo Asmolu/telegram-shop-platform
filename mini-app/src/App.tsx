@@ -1,89 +1,126 @@
+import React from 'react';
 import { AuthProvider } from './shared/auth/AuthProvider';
 import { NetworkProvider } from './shared/network/NetworkProvider';
 import { RouterProvider, getRouteId, useRouter } from './shared/router/RouterProvider';
+import { ChunkLoadRecovery } from './shared/router/ChunkLoadRecovery';
+import { registerRoutePrefetchers } from './shared/router/routePrefetch';
 import { ThemeProvider } from './shared/theme/ThemeProvider';
-import { AppShell, TopBar } from './shared/ui';
-import { CartPage } from './pages/CartPage';
-import { CategoryPage } from './pages/CategoryPage';
-import { CategoriesPage } from './pages/CategoriesPage';
-import { CheckoutPage } from './pages/CheckoutPage';
-import { FaqPage } from './pages/FaqPage';
-import { LaunchPage } from './pages/LaunchPage';
-import { MainPage } from './pages/MainPage';
-import { OrderSuccessPage } from './pages/OrderSuccessPage';
-import { PaymentPage } from './pages/PaymentPage';
-import { PersonalDataPage } from './pages/PersonalDataPage';
-import { ProductDetailPage } from './pages/ProductDetailPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { SearchPage } from './pages/SearchPage';
-import { SearchResultsPage } from './pages/SearchResultsPage';
-import type React from 'react';
+import { AppShell, TopBar } from './shared/ui/AppShell';
+
+const routeLoaders = {
+  launch: () => import('./pages/LaunchPage').then((module) => ({ default: module.LaunchPage })),
+  main: () => import('./pages/MainPage').then((module) => ({ default: module.MainPage })),
+  categories: () => import('./pages/CategoriesPage').then((module) => ({ default: module.CategoriesPage })),
+  'category-detail': () => import('./pages/CategoryPage').then((module) => ({ default: module.CategoryPage })),
+  search: () => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })),
+  'search-results': () => import('./pages/SearchResultsPage').then((module) => ({ default: module.SearchResultsPage })),
+  'product-detail': () => import('./pages/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })),
+  cart: () => import('./pages/CartPage').then((module) => ({ default: module.CartPage })),
+  checkout: () => import('./pages/CheckoutPage').then((module) => ({ default: module.CheckoutPage })),
+  'order-success': () => import('./pages/OrderSuccessPage').then((module) => ({ default: module.OrderSuccessPage })),
+  payment: () => import('./pages/PaymentPage').then((module) => ({ default: module.PaymentPage })),
+  profile: () => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })),
+  'personal-data': () => import('./pages/PersonalDataPage').then((module) => ({ default: module.PersonalDataPage })),
+  faq: () => import('./pages/FaqPage').then((module) => ({ default: module.FaqPage })),
+  'not-found': () => import('./pages/NotFoundPage').then((module) => ({ default: module.NotFoundPage })),
+} as const;
+
+type LazyRouteId = keyof typeof routeLoaders;
+
+const lazyRouteComponents = Object.fromEntries(
+  Object.entries(routeLoaders).map(([routeId, loader]) => [routeId, React.lazy(loader)]),
+) as unknown as Record<LazyRouteId, React.LazyExoticComponent<React.ComponentType>>;
+
+registerRoutePrefetchers(routeLoaders);
+
+function getLazyRouteId(pathname: string): LazyRouteId {
+  if (pathname === '/') {
+    return 'launch';
+  }
+
+  const routeId = getRouteId(pathname);
+  return routeId in lazyRouteComponents ? routeId as LazyRouteId : 'not-found';
+}
+
+function getFallbackTitle(routeId: LazyRouteId) {
+  if (routeId === 'main' || routeId === 'launch') {
+    return 'MENS STYLE';
+  }
+  if (routeId === 'categories' || routeId === 'category-detail') {
+    return 'Категории';
+  }
+  if (routeId === 'search' || routeId === 'search-results') {
+    return 'Поиск';
+  }
+  if (routeId === 'cart') {
+    return 'Покупки';
+  }
+  if (routeId === 'checkout') {
+    return 'Оформление';
+  }
+  if (routeId === 'payment') {
+    return 'Оплата';
+  }
+  if (routeId === 'profile' || routeId === 'personal-data') {
+    return 'Профиль';
+  }
+  if (routeId === 'faq') {
+    return 'FAQ';
+  }
+  return 'Страница';
+}
+
+function RouteFallback({ routeId }: { routeId: LazyRouteId }) {
+  if (routeId === 'launch') {
+    return (
+      <div className="launch-screen route-fallback route-fallback--launch" role="status" aria-live="polite">
+        <TopBar title="MENS STYLE" variant="feed" hideBack />
+        <div className="route-fallback__block">
+          <span className="skeleton route-fallback__logo" />
+          <span className="skeleton route-fallback__line route-fallback__line--wide" />
+          <span className="skeleton route-fallback__line" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page route-fallback" role="status" aria-live="polite">
+      <TopBar
+        title={getFallbackTitle(routeId)}
+        variant={routeId === 'main' ? 'feed' : 'marketplace'}
+        hideBack={routeId === 'main'}
+      />
+      <div className="route-fallback__grid" aria-hidden="true">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div className="route-fallback__card" key={index}>
+            <span className="skeleton route-fallback__image" />
+            <span className="skeleton route-fallback__line route-fallback__line--wide" />
+            <span className="skeleton route-fallback__line" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function RouteSwitch() {
-  const { pathname, navigate } = useRouter();
-  const routeId = getRouteId(pathname);
+  const { currentPath, pathname } = useRouter();
+  const routeId = getLazyRouteId(pathname);
+  const Page = lazyRouteComponents[routeId];
+  const route = (
+    <ChunkLoadRecovery resetKey={currentPath}>
+      <React.Suspense fallback={<RouteFallback routeId={routeId} />}>
+        <Page />
+      </React.Suspense>
+    </ChunkLoadRecovery>
+  );
 
-  if (pathname === '/') {
-    return <LaunchPage />;
+  if (routeId === 'launch') {
+    return route;
   }
 
-  let page: React.ReactElement;
-
-  switch (routeId) {
-    case 'main':
-      page = <MainPage />;
-      break;
-    case 'categories':
-      page = <CategoriesPage />;
-      break;
-    case 'category-detail':
-      page = <CategoryPage />;
-      break;
-    case 'search':
-      page = <SearchPage />;
-      break;
-    case 'search-results':
-      page = <SearchResultsPage />;
-      break;
-    case 'product-detail':
-      page = <ProductDetailPage />;
-      break;
-    case 'cart':
-      page = <CartPage />;
-      break;
-    case 'checkout':
-      page = <CheckoutPage />;
-      break;
-    case 'order-success':
-      page = <OrderSuccessPage />;
-      break;
-    case 'payment':
-      page = <PaymentPage />;
-      break;
-    case 'profile':
-      page = <ProfilePage />;
-      break;
-    case 'personal-data':
-      page = <PersonalDataPage />;
-      break;
-    case 'faq':
-      page = <FaqPage />;
-      break;
-    default:
-      page = (
-        <div className="page">
-          <TopBar title="Страница не найдена" backFallback="/main" />
-          <section className="state-block">
-            <h1>Страница не найдена</h1>
-            <button className="primary-button" type="button" onClick={() => navigate('/main')}>
-              К товарам
-            </button>
-          </section>
-        </div>
-      );
-  }
-
-  return <AppShell>{page}</AppShell>;
+  return <AppShell>{route}</AppShell>;
 }
 
 export function App() {

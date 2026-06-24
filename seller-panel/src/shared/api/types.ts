@@ -118,6 +118,18 @@ export interface ProductImage {
   product_id: number;
   file_path: string;
   url: string;
+  image_url?: string | null;
+  thumbnail_path?: string | null;
+  card_path?: string | null;
+  detail_path?: string | null;
+  thumbnail_url?: string | null;
+  card_url?: string | null;
+  detail_url?: string | null;
+  image_variants?: {
+    thumbnail?: string | null;
+    card?: string | null;
+    detail?: string | null;
+  } | null;
   alt_text: string | null;
   position: number;
   is_primary: boolean;

@@ -1,6 +1,16 @@
-import type { ApiClientError } from '../api/client';
-
 export type NetworkState = 'online' | 'slow' | 'offline' | 'recovering';
+export type NetworkFailureEvent = {
+  kind:
+    | 'authentication'
+    | 'validation'
+    | 'network_unavailable'
+    | 'timeout'
+    | 'request_aborted'
+    | 'rate_limited'
+    | 'temporary_server_failure'
+    | 'permanent_server_failure'
+    | string;
+};
 
 type Listener = (state: NetworkState) => void;
 
@@ -39,7 +49,7 @@ export function markNetworkRequestSuccess(durationMs: number) {
   setNetworkState(durationMs >= SLOW_REQUEST_THRESHOLD_MS ? 'slow' : 'online');
 }
 
-export function markNetworkRequestFailure(error: ApiClientError) {
+export function markNetworkRequestFailure(error: NetworkFailureEvent) {
   if (error.kind === 'request_aborted' || error.kind === 'authentication' || error.kind === 'validation') {
     return;
   }

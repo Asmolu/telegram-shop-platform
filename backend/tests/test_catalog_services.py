@@ -13,6 +13,7 @@ from app.db.models import (
     Category,
     Product,
     ProductCategory,
+    ProductImage,
     ProductImageBadgeColor,
     ProductImageBadgePosition,
     ProductImageBadgeType,
@@ -75,6 +76,11 @@ class DummySession:
 
     async def delete(self, _: object) -> None:
         self.deleted = True
+
+
+class FailingCommitSession(DummySession):
+    async def commit(self) -> None:
+        raise RuntimeError("commit failed")
 
 
 class FakeAnalyticsTracker:
@@ -276,6 +282,80 @@ async def test_product_service_create_update_delete_flow() -> None:
     assert created.id == 1
     assert updated.status == ProductStatus.ACTIVE
     service.repository.delete.assert_awaited_once_with(product)
+
+
+@pytest.mark.asyncio
+async def test_product_image_replacement_preserves_old_files_on_commit_failure(
+    tmp_path: Path,
+) -> None:
+    old_paths = [
+        "products/old.jpg",
+        "products/old.thumbnail.webp",
+        "products/old.card.webp",
+        "products/old.detail.webp",
+    ]
+    for path in old_paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"old")
+    product = _product()
+    product.images = [
+        ProductImage(
+            id=1,
+            product_id=product.id,
+            file_path=old_paths[0],
+            thumbnail_path=old_paths[1],
+            card_path=old_paths[2],
+            detail_path=old_paths[3],
+        )
+    ]
+    service = ProductsService(
+        FailingCommitSession(),
+        storage=LocalStorageService(tmp_path),
+    )
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await service.update_product(
+            product.id,
+            ProductUpdate(images=[ProductImageCreate(file_path="products/new.jpg")]),
+        )
+
+    for path in old_paths:
+        assert (tmp_path / path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_product_delete_removes_original_and_derivatives(tmp_path: Path) -> None:
+    image_paths = [
+        "products/old.jpg",
+        "products/old.thumbnail.webp",
+        "products/old.card.webp",
+        "products/old.detail.webp",
+    ]
+    for path in image_paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"old")
+    product = _product()
+    product.images = [
+        ProductImage(
+            id=1,
+            product_id=product.id,
+            file_path=image_paths[0],
+            thumbnail_path=image_paths[1],
+            card_path=image_paths[2],
+            detail_path=image_paths[3],
+        )
+    ]
+    service = ProductsService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.repository.delete = AsyncMock()
+
+    await service.delete_product(product.id)
+
+    for path in image_paths:
+        assert not (tmp_path / path).exists()
 
 
 @pytest.mark.asyncio

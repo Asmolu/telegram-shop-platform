@@ -191,7 +191,16 @@ def _product_thumbnail(product: object | None) -> tuple[str | None, str | None]:
         ),
     )
     image = ordered_images[0]
-    path = getattr(image, "file_path", None)
+    path = (
+        getattr(image, "thumbnail_path", None)
+        or getattr(image, "card_path", None)
+        or getattr(image, "file_path", None)
+    )
     if not path:
         return None, None
-    return path, getattr(image, "url", f"/uploads/{path}")
+    url = (
+        getattr(image, "thumbnail_url", None)
+        or getattr(image, "card_url", None)
+        or getattr(image, "url", f"/uploads/{path}")
+    )
+    return path, url

@@ -18,10 +18,17 @@ import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../sha
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
+import { prepareReceiptImage } from '../shared/utils/receiptImage';
 
 const ACTIVE_STATUSES: ManualPaymentStatus[] = ['PENDING', 'SUBMITTED'];
 const MAX_RECEIPT_SIZE = 5 * 1024 * 1024;
 type Notice = { message: string; tone: 'success' | 'info' | 'warning' | 'danger' };
+type PreparedReceiptUpload = {
+  file: File;
+  idempotencyKey: string;
+  originalName: string;
+  signature: string;
+};
 
 const STATUS_LABELS: Record<ManualPaymentStatus, string> = {
   PENDING: 'Ожидает оплату',
@@ -40,7 +47,8 @@ export function PaymentPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<Notice | null>(null);
-  const [busy, setBusy] = React.useState<'submit' | 'upload' | null>(null);
+  const [busy, setBusy] = React.useState<'submit' | 'preparing' | 'upload' | null>(null);
+  const [receiptRetry, setReceiptRetry] = React.useState<PreparedReceiptUpload | null>(null);
   const [clockOffsetMs, setClockOffsetMs] = React.useState(0);
   const [nowMs, setNowMs] = React.useState(Date.now());
   const loadControllerRef = React.useRef<AbortController | null>(null);
@@ -154,10 +162,11 @@ export function PaymentPage() {
   }
 
   async function uploadReceipt(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const selectedFile = event.target.files?.[0];
     event.target.value = '';
     await runLockedAction(uploadLockRef, async () => {
-      if (!payment || !file || !canAct) return;
+      if (!payment || !selectedFile || !canAct) return;
+      const file = selectedFile;
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
         setNotice({
           message: 'Загрузите изображение JPEG, PNG или WebP.',
@@ -165,17 +174,8 @@ export function PaymentPage() {
         });
         return;
       }
-      if (file.size > MAX_RECEIPT_SIZE) {
-        setNotice({
-          message: 'Размер скриншота не должен превышать 5 МБ.',
-          tone: 'warning',
-        });
-        return;
-      }
-
-      setBusy('upload');
+      setBusy('preparing');
       setNotice(null);
-      const previousReceiptPath = payment.receipt_image_path;
       const uploadSignature = getReceiptFileSignature(file);
       if (uploadActionRef.current?.signature !== uploadSignature) {
         uploadActionRef.current = {
@@ -184,10 +184,23 @@ export function PaymentPage() {
         };
       }
       const uploadAction = uploadActionRef.current!;
+      const prepared = await prepareReceiptImage(file);
+      if (prepared.file.size > MAX_RECEIPT_SIZE) {
+        uploadActionRef.current = null;
+        setBusy(null);
+        setNotice({
+          message: 'Размер скриншота не должен превышать 5 МБ.',
+          tone: 'warning',
+        });
+        return;
+      }
+
+      setBusy('upload');
+      const previousReceiptPath = payment.receipt_image_path;
       try {
         const result = await uploadOrderPaymentReceipt(
           payment.order_id,
-          file,
+          prepared.file,
           uploadAction.key,
         );
         if (!result.receipt_image_path || !result.receipt_image_url) {
@@ -203,10 +216,67 @@ export function PaymentPage() {
         }
         setPayment(refreshed);
         uploadActionRef.current = null;
+        setReceiptRetry(null);
+        setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
+      } catch (uploadError) {
+        if (isTemporaryNetworkError(uploadError)) {
+          setReceiptRetry({
+            file: prepared.file,
+            idempotencyKey: uploadAction.key,
+            originalName: file.name,
+            signature: uploadSignature,
+          });
+        } else {
+          uploadActionRef.current = null;
+          setReceiptRetry(null);
+        }
+        const errorMessage = toApiErrorMessage(uploadError);
+        const refreshed = await loadPayment();
+        const recovered = Boolean(
+          refreshed?.receipt_image_path
+          && refreshed.receipt_image_url
+          && refreshed.receipt_image_path !== previousReceiptPath,
+        );
+        setNotice(recovered
+          ? { message: 'Скриншот сохранен.', tone: 'success' }
+          : { message: errorMessage, tone: 'danger' });
+      } finally {
+        setBusy(null);
+      }
+    });
+  }
+
+  async function retryReceiptUpload() {
+    await runLockedAction(uploadLockRef, async () => {
+      if (!payment || !receiptRetry || !canAct) return;
+      setBusy('upload');
+      setNotice(null);
+      const previousReceiptPath = payment.receipt_image_path;
+      try {
+        const result = await uploadOrderPaymentReceipt(
+          payment.order_id,
+          receiptRetry.file,
+          receiptRetry.idempotencyKey,
+        );
+        if (!result.receipt_image_path || !result.receipt_image_url) {
+          throw new Error('Сервер не подтвердил сохранение скриншота.');
+        }
+        const refreshed = await loadPayment();
+        if (
+          !refreshed?.receipt_image_path
+          || !refreshed.receipt_image_url
+          || refreshed.receipt_image_path !== result.receipt_image_path
+        ) {
+          throw new Error('Не удалось подтвердить сохранение скриншота.');
+        }
+        setPayment(refreshed);
+        uploadActionRef.current = null;
+        setReceiptRetry(null);
         setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
       } catch (uploadError) {
         if (!isTemporaryNetworkError(uploadError)) {
           uploadActionRef.current = null;
+          setReceiptRetry(null);
         }
         const errorMessage = toApiErrorMessage(uploadError);
         const refreshed = await loadPayment();
@@ -354,6 +424,19 @@ export function PaymentPage() {
                   onChange={uploadReceipt}
                 />
               </label>
+              {busy === 'preparing' ? (
+                <span className="payment-upload-status">Готовим скриншот...</span>
+              ) : null}
+              {receiptRetry ? (
+                <button
+                  className="secondary-button"
+                  disabled={busy !== null}
+                  type="button"
+                  onClick={() => void retryReceiptUpload()}
+                >
+                  {busy === 'upload' ? 'Повторяем...' : 'Повторить загрузку'}
+                </button>
+              ) : null}
               <button
                 className="primary-button"
                 disabled={busy !== null || payment.status === 'SUBMITTED'}

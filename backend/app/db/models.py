@@ -1240,6 +1240,9 @@ class ProductImage(Base):
         index=True,
     )
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    card_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    detail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1262,6 +1265,30 @@ class ProductImage(Base):
     @property
     def url(self) -> str:
         return f"/uploads/{self.file_path}"
+
+    @property
+    def image_url(self) -> str:
+        return self.url
+
+    @property
+    def thumbnail_url(self) -> str | None:
+        return f"/uploads/{self.thumbnail_path}" if self.thumbnail_path else None
+
+    @property
+    def card_url(self) -> str | None:
+        return f"/uploads/{self.card_path}" if self.card_path else None
+
+    @property
+    def detail_url(self) -> str | None:
+        return f"/uploads/{self.detail_path}" if self.detail_path else None
+
+    @property
+    def image_variants(self) -> dict[str, str | None]:
+        return {
+            "thumbnail": self.thumbnail_url,
+            "card": self.card_url,
+            "detail": self.detail_url,
+        }
 
 
 class Banner(Base):

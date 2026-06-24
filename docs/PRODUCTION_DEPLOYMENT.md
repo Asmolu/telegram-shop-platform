@@ -223,6 +223,13 @@ curl -i https://seller.stylexac.ru
 - Uploads: persistent `uploads_data` volume mounted at `/app/uploads`
 - Manual payment receipts: writable `/app/uploads/payment_receipts/` inside that volume
 
+## Cache Headers
+
+- Frontend `index.html` must use revalidation (`Cache-Control: no-cache`) so Telegram WebView does not keep stale entry HTML after a deployment.
+- Vite hashed files under `/assets/`, including logo and fonts emitted by Vite, may use `Cache-Control: public, max-age=31536000, immutable`.
+- Product image derivatives with UUID-based paths ending in `.thumbnail.webp`, `.card.webp`, or `.detail.webp` may use immutable public cache.
+- Legacy upload originals and payment receipts must not be marked public immutable. Payment receipts should use private/no-store caching.
+
 ## Migrations
 
 - Add new Alembic migrations for schema changes.

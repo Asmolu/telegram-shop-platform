@@ -173,6 +173,7 @@ function syncTelegramViewportCss(webApp: TelegramWebApp | undefined, fullscreenR
 export function initTelegramApp() {
   const webApp = getTelegramWebApp();
   let fullscreenRequested = false;
+  let viewportFrame = 0;
 
   try {
     webApp?.ready?.();
@@ -193,11 +194,15 @@ export function initTelegramApp() {
     // Telegram WebApp methods can be unavailable in ordinary browsers.
   }
 
-  const syncViewport = () => {
+  const applyViewport = () => {
     if (typeof webApp?.isFullscreen === 'boolean') {
       fullscreenRequested = webApp.isFullscreen;
     }
     syncTelegramViewportCss(webApp, fullscreenRequested);
+  };
+  const syncViewport = () => {
+    window.cancelAnimationFrame(viewportFrame);
+    viewportFrame = window.requestAnimationFrame(applyViewport);
   };
   const viewportEvents: TelegramWebAppEvent[] = [
     'viewportChanged',
@@ -206,12 +211,13 @@ export function initTelegramApp() {
     'contentSafeAreaChanged',
   ];
 
-  syncViewport();
+  applyViewport();
   viewportEvents.forEach((eventType) => webApp?.onEvent?.(eventType, syncViewport));
   window.addEventListener('resize', syncViewport);
   window.visualViewport?.addEventListener('resize', syncViewport);
 
   return () => {
+    window.cancelAnimationFrame(viewportFrame);
     viewportEvents.forEach((eventType) => webApp?.offEvent?.(eventType, syncViewport));
     window.removeEventListener('resize', syncViewport);
     window.visualViewport?.removeEventListener('resize', syncViewport);

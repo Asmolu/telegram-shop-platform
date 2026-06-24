@@ -208,8 +208,12 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                       {image ? (
                         <img
                           className="table-image"
-                          src={resolveMediaUrl(image.url)}
+                          src={resolveMediaUrl(image.thumbnail_url ?? image.card_url ?? image.url)}
                           alt={image.alt_text ?? product.name}
+                          width={58}
+                          height={72}
+                          loading="lazy"
+                          decoding="async"
                         />
                       ) : (
                         <div className="table-image table-image-empty">{t('products.noImage')}</div>

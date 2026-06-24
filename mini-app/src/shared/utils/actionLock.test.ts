@@ -21,4 +21,27 @@ describe('runLockedAction', () => {
     await expect(first).resolves.toBe('done');
     expect(lock.current).toBe(false);
   });
+
+  it('does not release a lock early when an action triggers a route transition', async () => {
+    const lock = { current: false };
+    const navigate = vi.fn();
+    let releaseFirst: () => void = () => undefined;
+    const action = vi.fn(async () => {
+      navigate('/payment/1');
+      await new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+    });
+
+    const first = runLockedAction(lock, action);
+    const second = runLockedAction(lock, action);
+
+    expect(navigate).toHaveBeenCalledWith('/payment/1');
+    expect(action).toHaveBeenCalledTimes(1);
+    await expect(second).resolves.toBeUndefined();
+
+    releaseFirst();
+    await first;
+    expect(lock.current).toBe(false);
+  });
 });

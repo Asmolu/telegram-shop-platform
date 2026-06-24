@@ -69,6 +69,12 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+    @app.middleware("http")
+    async def upload_cache_headers(request, call_next):
+        response = await call_next(request)
+        _set_upload_cache_headers(request.url.path, response.headers)
+        return response
+
     app.mount(
         settings.public_uploads_mount_path,
         StaticFiles(directory=settings.uploads_dir_path),
@@ -83,3 +89,27 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def _set_upload_cache_headers(path: str, headers) -> None:
+    mount_path = settings.public_uploads_mount_path.rstrip("/") or "/uploads"
+    if not path.startswith(f"{mount_path}/"):
+        return
+
+    relative_path = path.removeprefix(f"{mount_path}/")
+    if relative_path.startswith("payment_receipts/"):
+        headers["Cache-Control"] = "private, no-store"
+        return
+
+    if _is_product_derivative_path(relative_path):
+        headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return
+
+    if "Cache-Control" not in headers:
+        headers["Cache-Control"] = "no-cache"
+
+
+def _is_product_derivative_path(relative_path: str) -> bool:
+    return relative_path.startswith("products/") and relative_path.endswith(
+        (".thumbnail.webp", ".card.webp", ".detail.webp")
+    )

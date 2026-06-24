@@ -1030,6 +1030,13 @@ label {
   background: transparent;
 }
 
+@supports (content-visibility: auto) {
+  .product-grid > .product-card {
+    content-visibility: auto;
+    contain-intrinsic-size: 320px;
+  }
+}
+
 .product-card__media-shell {
   position: relative;
   min-width: 0;
@@ -1492,6 +1499,72 @@ label {
 .state-block--soft {
   background: transparent;
   box-shadow: none;
+}
+
+.route-fallback {
+  min-height: 100%;
+}
+
+.route-fallback__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 6px;
+  margin-right: -12px;
+  margin-left: -12px;
+}
+
+.route-fallback__card,
+.route-fallback__block {
+  display: grid;
+  gap: 9px;
+  padding: 0 6px;
+}
+
+.route-fallback__block {
+  justify-items: center;
+  min-height: 260px;
+  align-content: center;
+}
+
+.route-fallback__image {
+  aspect-ratio: 4 / 5;
+  border-radius: 18px 18px 6px 6px;
+}
+
+.route-fallback__logo {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+}
+
+.route-fallback__line {
+  width: 68%;
+  height: 12px;
+}
+
+.route-fallback__line--wide {
+  width: 92%;
+}
+
+.route-error-state {
+  display: grid;
+  gap: 12px;
+  min-height: 260px;
+  align-content: center;
+  justify-items: center;
+  padding: 24px 18px;
+  text-align: center;
+}
+
+.route-error-state h2,
+.route-error-state p {
+  margin: 0;
+}
+
+.route-error-state p {
+  max-width: 34ch;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .state-block h1,
@@ -2875,6 +2948,13 @@ label {
   gap: 10px;
 }
 
+.payment-upload-status {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .payment-upload-button {
   display: grid;
   place-items: center;
@@ -3567,6 +3647,12 @@ label {
     margin-left: -10px;
   }
 
+  .route-fallback__grid {
+    gap: 8px;
+    margin-right: -10px;
+    margin-left: -10px;
+  }
+
   .cart-item {
     grid-template-columns: 92px minmax(0, 1fr);
     gap: 8px 10px;
@@ -3619,5 +3705,33 @@ label {
   .mini-app-frame,
   .launch-screen {
     min-height: 100vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  :root[data-swipe-back-state='cancel'] #root > .mini-app-frame,
+  :root[data-swipe-back-state='cancel'] #root > .launch-screen,
+  :root[data-swipe-back-state='complete'] #root > .mini-app-frame,
+  :root[data-swipe-back-state='complete'] #root > .launch-screen {
+    transition-duration: 1ms;
+  }
+
+  .skeleton,
+  .spinner {
+    animation: none;
+  }
+
+  .skeleton {
+    background-size: 100% 100%;
+  }
+
+  .accordion-item[open] .accordion-body {
+    animation: none;
   }
 }

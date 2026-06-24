@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
+    "verify:bundle": "node scripts/verify-bundle.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run --environment jsdom"
   },
@@ -14,7 +15,7 @@
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",
-    "vite": "latest"
+    "vite": "^8.1.0"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

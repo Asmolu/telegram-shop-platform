@@ -9,13 +9,16 @@ import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 from starlette.datastructures import Headers
 
 from app.common.deps import get_current_user
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Product, ProductSizeGrid, ProductStatus, User, UserRole
+from app.db.models import Product, ProductImage, ProductSizeGrid, ProductStatus, User, UserRole
 from app.main import create_app
+from app.modules.products.schemas import ProductImageRead
+from app.modules.uploads.derivative_backfill import backfill_product_image_derivatives
 from app.modules.uploads.image_profiles import ImageUploadKind
 from app.modules.uploads.router import get_uploads_service
 from app.modules.uploads.service import MAX_IMAGE_SIZE_BYTES, UploadsService
@@ -75,6 +78,81 @@ async def test_product_image_upload_succeeds_and_links_existing_product(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("image_format", "content_type", "filename"),
+    [
+        ("JPEG", "image/jpeg", "hoodie.jpg"),
+        ("PNG", "image/png", "hoodie.png"),
+        ("WEBP", "image/webp", "hoodie.webp"),
+    ],
+)
+async def test_product_image_upload_creates_derivatives(
+    tmp_path: Path,
+    image_format: str,
+    content_type: str,
+    filename: str,
+) -> None:
+    session = DummySession()
+    service = UploadsService(session, storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+    service.repository.next_product_image_position = AsyncMock(return_value=0)
+    service.repository.clear_primary_product_images = AsyncMock()
+    service.repository.add_product_image = lambda _: None
+    content = _image_bytes(1200, 1500, image_format)
+
+    image = await service.upload_product_image(
+        product_id=1,
+        file=_upload_file(filename, content, content_type),
+    )
+
+    assert image.thumbnail_path and image.thumbnail_path.endswith(".thumbnail.webp")
+    assert image.card_path and image.card_path.endswith(".card.webp")
+    assert image.detail_path and image.detail_path.endswith(".detail.webp")
+    assert image.image_variants["card"] == f"/uploads/{image.card_path}"
+    for path in [image.file_path, image.thumbnail_path, image.card_path, image.detail_path]:
+        assert path is not None
+        assert (tmp_path / path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_product_image_upload_applies_exif_orientation(tmp_path: Path) -> None:
+    session = DummySession()
+    service = UploadsService(session, storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+    service.repository.next_product_image_position = AsyncMock(return_value=0)
+    service.repository.clear_primary_product_images = AsyncMock()
+    service.repository.add_product_image = lambda _: None
+
+    image = await service.upload_product_image(
+        product_id=1,
+        file=_upload_file("rotated.jpg", _rotated_jpeg_bytes(), "image/jpeg"),
+    )
+
+    assert image.detail_path is not None
+    with Image.open(tmp_path / image.detail_path) as detail:
+        assert detail.size == (1200, 1500)
+
+
+@pytest.mark.asyncio
+async def test_product_derivatives_do_not_upscale_small_images(tmp_path: Path) -> None:
+    session = DummySession()
+    service = UploadsService(session, storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+    service.repository.next_product_image_position = AsyncMock(return_value=0)
+    service.repository.clear_primary_product_images = AsyncMock()
+    service.repository.add_product_image = lambda _: None
+
+    image = await service.upload_product_image(
+        product_id=1,
+        file=_upload_file("small.jpg", _image_bytes(600, 750, "JPEG"), "image/jpeg"),
+    )
+
+    assert image.detail_path is not None
+    with Image.open(tmp_path / image.detail_path) as detail:
+        assert detail.size == (600, 750)
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_invalid_extension(tmp_path: Path) -> None:
     service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
 
@@ -120,6 +198,77 @@ async def test_product_upload_rejects_below_minimum_dimensions(tmp_path: Path) -
         )
 
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_product_upload_rejects_oversized_dimensions(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+
+    with pytest.raises(AppError, match="1600x2000") as exc_info:
+        await service.upload_product_image(
+            product_id=1,
+            file=_upload_file("huge-product.jpg", _image_bytes(1800, 2250, "JPEG"), "image/jpeg"),
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_decompression_bomb(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+    previous_max_pixels = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = 10
+    try:
+        with pytest.raises(AppError, match="content"):
+            await service.upload_product_image(
+                product_id=1,
+                file=_upload_file("bomb.jpg", _image_bytes(600, 750, "JPEG"), "image/jpeg"),
+            )
+    finally:
+        Image.MAX_IMAGE_PIXELS = previous_max_pixels
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_corrupted_image(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="content"):
+        await service.upload_banner_image(
+            file=_upload_file("banner.png", b"not-an-image", "image/png")
+        )
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_mime_spoof(tmp_path: Path) -> None:
+    service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))
+
+    with pytest.raises(AppError, match="MIME"):
+        await service.upload_banner_image(
+            file=_upload_file("banner.jpg", _image_bytes(2000, 1035, "PNG"), "image/jpeg")
+        )
+
+
+@pytest.mark.asyncio
+async def test_product_image_db_rollback_removes_generated_files(tmp_path: Path) -> None:
+    class FailingSession(DummySession):
+        async def commit(self) -> None:
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+    service = UploadsService(FailingSession(), storage=LocalStorageService(tmp_path))
+    service.products_repository.get_by_id = AsyncMock(return_value=_product())
+    service.repository.next_product_image_position = AsyncMock(return_value=0)
+    service.repository.clear_primary_product_images = AsyncMock()
+    service.repository.add_product_image = lambda _: None
+
+    with pytest.raises(AppError, match="persist"):
+        await service.upload_product_image(
+            product_id=1,
+            file=_upload_file("hoodie.jpg", _image_bytes(1200, 1500, "JPEG"), "image/jpeg"),
+        )
+
+    assert list((tmp_path / "products").glob("*")) == []
 
 
 @pytest.mark.asyncio
@@ -443,6 +592,114 @@ def test_static_upload_path_serves_files(tmp_path: Path) -> None:
     assert response.text == "ok"
 
 
+def test_static_upload_cache_headers_for_derivatives_and_receipts(tmp_path: Path) -> None:
+    previous_uploads_dir_path = settings.__dict__.get("uploads_dir_path")
+    settings.__dict__["uploads_dir_path"] = tmp_path
+    (tmp_path / "products").mkdir(parents=True)
+    (tmp_path / "payment_receipts").mkdir(parents=True)
+    (tmp_path / "products" / "abc.card.webp").write_bytes(b"card")
+    (tmp_path / "products" / "legacy.jpg").write_bytes(b"legacy")
+    (tmp_path / "payment_receipts" / "receipt.jpg").write_bytes(b"receipt")
+    try:
+        with TestClient(create_app()) as client:
+            derivative_response = client.get("/uploads/products/abc.card.webp")
+            legacy_response = client.get("/uploads/products/legacy.jpg")
+            receipt_response = client.get("/uploads/payment_receipts/receipt.jpg")
+    finally:
+        if previous_uploads_dir_path is None:
+            settings.__dict__.pop("uploads_dir_path", None)
+        else:
+            settings.__dict__["uploads_dir_path"] = previous_uploads_dir_path
+
+    assert derivative_response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert legacy_response.headers["cache-control"] == "no-cache"
+    assert receipt_response.headers["cache-control"] == "private, no-store"
+
+
+def test_legacy_product_image_serializes_without_derivatives() -> None:
+    read = ProductImageRead.model_validate(
+        {
+            "id": 1,
+            "product_id": 1,
+            "file_path": "products/legacy.jpg",
+            "url": "/uploads/products/legacy.jpg",
+            "image_url": "/uploads/products/legacy.jpg",
+            "alt_text": "Legacy",
+            "position": 0,
+            "is_primary": True,
+            "created_at": datetime(2026, 5, 27, tzinfo=UTC),
+        }
+    )
+
+    assert read.url == "/uploads/products/legacy.jpg"
+    assert read.image_variants.card is None
+
+
+@pytest.mark.asyncio
+async def test_backfill_dry_run_changes_nothing(tmp_path: Path) -> None:
+    image = ProductImage(
+        id=1,
+        product_id=1,
+        file_path="products/source.jpg",
+    )
+    (tmp_path / "products").mkdir()
+    (tmp_path / image.file_path).write_bytes(_image_bytes(1200, 1500, "JPEG"))
+    session = FakeBackfillSession([image])
+
+    report = await backfill_product_image_derivatives(
+        session,
+        storage=LocalStorageService(tmp_path),
+        dry_run=True,
+    )
+
+    assert report.processed == 0
+    assert report.would_process == 1
+    assert image.card_path is None
+    assert len(list((tmp_path / "products").glob("*.webp"))) == 0
+
+
+@pytest.mark.asyncio
+async def test_backfill_skips_existing_derivatives(tmp_path: Path) -> None:
+    image = ProductImage(
+        id=1,
+        product_id=1,
+        file_path="products/source.jpg",
+        thumbnail_path="products/source.thumbnail.webp",
+        card_path="products/source.card.webp",
+        detail_path="products/source.detail.webp",
+    )
+    session = FakeBackfillSession([image])
+
+    report = await backfill_product_image_derivatives(
+        session,
+        storage=LocalStorageService(tmp_path),
+        dry_run=False,
+    )
+
+    assert report.skipped == 1
+    assert report.processed == 0
+    assert session.committed is False
+
+
+@pytest.mark.asyncio
+async def test_backfill_continues_after_failed_image(tmp_path: Path) -> None:
+    missing = ProductImage(id=1, product_id=1, file_path="products/missing.jpg")
+    valid = ProductImage(id=2, product_id=1, file_path="products/source.jpg")
+    (tmp_path / "products").mkdir()
+    (tmp_path / valid.file_path).write_bytes(_image_bytes(1200, 1500, "JPEG"))
+    session = FakeBackfillSession([missing, valid])
+
+    report = await backfill_product_image_derivatives(
+        session,
+        storage=LocalStorageService(tmp_path),
+        dry_run=False,
+    )
+
+    assert report.failed == 1
+    assert report.processed == 1
+    assert valid.card_path is not None
+
+
 def _upload_file(filename: str, content: bytes, content_type: str) -> UploadFile:
     return UploadFile(
         file=BytesIO(content),
@@ -455,6 +712,35 @@ def _image_bytes(width: int, height: int, image_format: str) -> bytes:
     output = BytesIO()
     Image.new("RGB", (width, height), color=(124, 58, 237)).save(output, format=image_format)
     return output.getvalue()
+
+
+def _rotated_jpeg_bytes() -> bytes:
+    output = BytesIO()
+    image = Image.new("RGB", (1500, 1200), color=(124, 58, 237))
+    exif = Image.Exif()
+    exif[274] = 6
+    image.save(output, format="JPEG", exif=exif)
+    return output.getvalue()
+
+
+class FakeScalarResult:
+    def __init__(self, images: list[ProductImage]) -> None:
+        self.images = images
+
+    def scalars(self) -> "FakeScalarResult":
+        return self
+
+    def all(self) -> list[ProductImage]:
+        return self.images
+
+
+class FakeBackfillSession(DummySession):
+    def __init__(self, images: list[ProductImage]) -> None:
+        super().__init__()
+        self.images = images
+
+    async def execute(self, _: object) -> FakeScalarResult:
+        return FakeScalarResult(self.images)
 
 
 def _product() -> Product:

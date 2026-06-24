@@ -934,8 +934,12 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             {product.images.map((image) => (
               <img
                 key={image.id}
-                src={resolveMediaUrl(image.url)}
+                src={resolveMediaUrl(image.thumbnail_url ?? image.card_url ?? image.url)}
                 alt={image.alt_text ?? product.name}
+                width={96}
+                height={120}
+                loading="lazy"
+                decoding="async"
               />
             ))}
           </div>

@@ -19,6 +19,11 @@ export function useProductActions({
   const { isAuthenticated } = useAuth();
   const { currentPath, navigate } = useRouter();
   const [notice, setNotice] = React.useState<string | null>(null);
+  const favoriteIdsRef = React.useRef(favoriteIds);
+
+  React.useEffect(() => {
+    favoriteIdsRef.current = favoriteIds;
+  }, [favoriteIds]);
 
   const requireAuth = React.useCallback(() => {
     if (isAuthenticated) {
@@ -35,22 +40,27 @@ export function useProductActions({
       }
 
       try {
-        if (favoriteIds.has(product.id)) {
+        if (favoriteIdsRef.current.has(product.id)) {
           await removeFavorite(product.id);
           setFavoriteIds((current) => {
             const next = new Set(current);
             next.delete(product.id);
+            favoriteIdsRef.current = next;
             return next;
           });
         } else {
           await addFavorite(product.id);
-          setFavoriteIds((current) => new Set(current).add(product.id));
+          setFavoriteIds((current) => {
+            const next = new Set(current).add(product.id);
+            favoriteIdsRef.current = next;
+            return next;
+          });
         }
       } catch (error) {
         setNotice(toApiErrorMessage(error));
       }
     },
-    [favoriteIds, requireAuth, setFavoriteIds],
+    [requireAuth, setFavoriteIds],
   );
 
   const quickCart = useQuickCartPicker({

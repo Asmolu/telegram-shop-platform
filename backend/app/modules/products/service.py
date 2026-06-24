@@ -55,6 +55,7 @@ from app.modules.products.size_grids import (
     normalize_size,
 )
 from app.modules.tags.repository import TagsRepository
+from app.modules.uploads.storage import LocalStorageService
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ class ProductsService:
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
         cache: CacheService | None = None,
+        storage: LocalStorageService | None = None,
     ) -> None:
         self.session = session
         self.repository = ProductsRepository(session)
@@ -102,6 +104,7 @@ class ProductsService:
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
         self.cache = cache
+        self.storage = storage or LocalStorageService()
 
     async def list_public_products(
         self,
@@ -430,8 +433,16 @@ class ProductsService:
             )
             await self._sync_related_products(product, related_product_ids)
 
+        stale_image_paths: list[str] = []
         if "images" in payload.model_fields_set and payload.images is not None:
             self._validate_images(payload.images)
+            next_file_paths = {image.file_path for image in payload.images}
+            stale_image_paths = [
+                path
+                for image in product.images
+                if image.file_path not in next_file_paths
+                for path in self._product_image_paths(image)
+            ]
             product.images = [ProductImage(**image.model_dump()) for image in payload.images]
 
         for field, value in data.items():
@@ -451,6 +462,7 @@ class ProductsService:
         updated_product = await self.repository.get_by_id(product_id)
         if updated_product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+        self._delete_upload_paths(stale_image_paths, stage="product_image_replacement")
         await self._invalidate_product_cache(product_id=updated_product.id)
         return updated_product
 
@@ -481,8 +493,14 @@ class ProductsService:
 
     async def delete_product(self, product_id: int) -> None:
         product = await self.get_product(product_id)
+        image_paths = [
+            path
+            for image in product.images
+            for path in self._product_image_paths(image)
+        ]
         await self.repository.delete(product)
         await self._commit()
+        self._delete_upload_paths(image_paths, stage="product_delete")
         await self._invalidate_product_cache(product_id=product_id)
 
     async def list_public_product_variants(self, product_id: int) -> ProductVariantList:
@@ -820,6 +838,25 @@ class ProductsService:
         if product_id is not None:
             await self.cache.delete(public_product_detail_key(product_id))
         await self.cache.delete_patterns(*product_cache_patterns())
+
+    def _product_image_paths(self, image: ProductImage) -> list[str]:
+        return [
+            path
+            for path in (
+                image.file_path,
+                image.thumbnail_path,
+                image.card_path,
+                image.detail_path,
+            )
+            if path
+        ]
+
+    def _delete_upload_paths(self, paths: list[str], *, stage: str) -> None:
+        for path in paths:
+            try:
+                self.storage.delete(path)
+            except OSError:
+                logger.warning("Failed to delete upload during %s: %s", stage, path)
 
     async def _flush_commit_and_get_id(
         self,
