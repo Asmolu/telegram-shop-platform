@@ -292,6 +292,55 @@ class User(Base):
     )
 
 
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "scope",
+            "key",
+            name="uq_idempotency_records_user_scope_key",
+        ),
+        CheckConstraint(
+            "status IN ('PROCESSING', 'SUCCEEDED')",
+            name="ck_idempotency_records_status",
+        ),
+        Index("ix_idempotency_records_expires_at", "expires_at"),
+        Index("ix_idempotency_records_user_scope", "user_id", "scope"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scope: Mapped[str] = mapped_column(String(100), nullable=False)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="PROCESSING",
+        server_default="PROCESSING",
+    )
+    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class CustomerTelegramSubscription(Base):
     __tablename__ = "customer_telegram_subscriptions"
     __table_args__ = (

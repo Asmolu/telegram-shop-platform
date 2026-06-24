@@ -1,6 +1,8 @@
 import React from 'react';
 import { getBanners, getCart, trackBannerClick, type Banner } from '../api';
 import { useAuth } from '../auth/AuthProvider';
+import { NetworkBanner } from '../network/NetworkBanner';
+import { useNetworkState } from '../network/NetworkProvider';
 import { Link, useRouter } from '../router/RouterProvider';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
@@ -96,11 +98,21 @@ export function TopBar({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated, telegramUser, user } = useAuth();
+  const { state: networkState, retry: retryNetwork } = useNetworkState();
   const [cartCount, setCartCount] = React.useState(0);
   const [aggressiveBanners, setAggressiveBanners] = React.useState<Banner[]>([]);
   const [popupBanners, setPopupBanners] = React.useState<Banner[]>([]);
   const [showAggressivePopup, setShowAggressivePopup] = React.useState(false);
   const [showPopup, setShowPopup] = React.useState(false);
+  const previousNetworkState = React.useRef(networkState);
+
+  React.useEffect(() => {
+    const previous = previousNetworkState.current;
+    previousNetworkState.current = networkState;
+    if ((previous === 'offline' || previous === 'recovering') && networkState === 'online') {
+      window.dispatchEvent(new Event('miniapp:network-restored'));
+    }
+  }, [networkState]);
 
   React.useEffect(() => {
     let startX = 0;
@@ -256,6 +268,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="mini-app-frame">
+      <NetworkBanner state={networkState} onRetry={retryNetwork} />
       <main className="app-content">{children}</main>
       <FloatingOrderHelp currentPath={currentPath} onOpen={() => navigate('/faq?topic=order')} />
       {showAggressivePopup && aggressiveBanners.length > 0 ? (

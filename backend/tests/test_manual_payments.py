@@ -158,6 +158,43 @@ class FakeEventPublisher:
         self.events.append((name, payload))
 
 
+class FakeIdempotencyService:
+    def __init__(self) -> None:
+        self.records: dict[tuple[int, str, str], dict[str, object]] = {}
+
+    async def begin(
+        self,
+        *,
+        user_id: int,
+        scope: str,
+        key: str,
+        request_hash: str,
+    ) -> SimpleNamespace:
+        record_key = (user_id, scope, key)
+        record = self.records.get(record_key)
+        if record is None:
+            record = {"request_hash": request_hash, "response_body": None}
+            self.records[record_key] = record
+            return SimpleNamespace(record=record, replay_response=None)
+        if record["request_hash"] != request_hash:
+            raise AppError(
+                "Idempotency-Key was already used with different request payload",
+                409,
+            )
+        return SimpleNamespace(record=record, replay_response=record["response_body"])
+
+    def complete(
+        self,
+        claim: SimpleNamespace | None,
+        *,
+        response_body: dict[str, object],
+        response_status_code: int,
+    ) -> None:
+        del response_status_code
+        if claim is not None and claim.record is not None:
+            claim.record["response_body"] = response_body
+
+
 class FakeTelegramService:
     def __init__(
         self,
@@ -374,6 +411,32 @@ async def test_submit_is_owner_only_and_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_submit_with_same_idempotency_key_replays_without_second_operation() -> None:
+    idempotency_service = FakeIdempotencyService()
+    service, repository, session, events, _, _ = _service(
+        with_payment=True,
+        idempotency_service=idempotency_service,
+    )
+
+    first = await service.submit(
+        order_id=10,
+        user_id=1,
+        idempotency_key="payment-submit-key",
+    )
+    second = await service.submit(
+        order_id=10,
+        user_id=1,
+        idempotency_key="payment-submit-key",
+    )
+
+    assert first.status == ManualPaymentStatus.SUBMITTED
+    assert second.id == first.id
+    assert repository.payments[1].status == ManualPaymentStatus.SUBMITTED
+    assert session.commit_count == 1
+    assert [event[0] for event in events.events] == [MANUAL_PAYMENT_SUBMITTED]
+
+
+@pytest.mark.asyncio
 async def test_payment_read_and_receipt_upload_are_owner_only() -> None:
     service, _, _, _, _, _ = _service(with_payment=True)
 
@@ -496,6 +559,34 @@ async def test_receipt_upload_replaces_old_file_without_submitting(
     assert "manual_payment.receipt_upload_started" in caplog.messages
     assert "manual_payment.receipt_upload_saved" in caplog.messages
     assert "manual_payment.receipt_upload_persisted" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_receipt_upload_with_same_idempotency_key_replays_saved_receipt() -> None:
+    idempotency_service = FakeIdempotencyService()
+    service, repository, session, _, _, storage = _service(
+        with_payment=True,
+        idempotency_service=idempotency_service,
+    )
+
+    first = await service.upload_receipt(
+        order_id=10,
+        user_id=1,
+        file=object(),
+        idempotency_key="receipt-upload-key",
+    )
+    second = await service.upload_receipt(
+        order_id=10,
+        user_id=1,
+        file=object(),
+        idempotency_key="receipt-upload-key",
+    )
+
+    assert first.receipt_image_path == "payment_receipts/receipt.png"
+    assert second.receipt_image_path == first.receipt_image_path
+    assert repository.receipt_update_calls == [(1, "payment_receipts/receipt.png")]
+    assert storage.saved == ["payment_receipts/receipt.png"]
+    assert session.commit_count == 1
 
 
 def test_order_payment_summary_includes_receipt_url() -> None:
@@ -1086,6 +1177,7 @@ def _service(
     payment_expires_at: datetime | None = None,
     upload_error: AppError | None = None,
     event_failure: bool = False,
+    idempotency_service: FakeIdempotencyService | None = None,
 ) -> tuple[
     ManualPaymentsService,
     FakeRepository,
@@ -1105,6 +1197,7 @@ def _service(
         audit_service=audit,
         uploads_service=uploads,
         storage=storage,
+        idempotency_service=idempotency_service,
         now_factory=lambda: NOW,
     )
     repository = FakeRepository()

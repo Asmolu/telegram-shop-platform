@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import mimetypes
 from collections.abc import Mapping
@@ -31,6 +32,7 @@ from app.events.names import (
 )
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
+from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.phone import normalize_russian_phone
 from app.modules.manual_payments.repository import ManualPaymentsRepository
 from app.modules.manual_payments.schemas import (
@@ -403,6 +405,7 @@ class ManualPaymentsService:
         audit_service: AuditService | NoopAuditService | None = None,
         uploads_service: UploadsService | None = None,
         storage: LocalStorageService | None = None,
+        idempotency_service: IdempotencyService | None = None,
         now_factory=None,
     ) -> None:
         self.session = session
@@ -411,6 +414,7 @@ class ManualPaymentsService:
         self.audit_service = audit_service or NoopAuditService()
         self.uploads_service = uploads_service or UploadsService(session)
         self.storage = storage or self.uploads_service.storage
+        self.idempotency_service = idempotency_service or IdempotencyService(session)
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
 
     async def get_settings(self) -> SellerPaymentSettingsRead:
@@ -512,7 +516,24 @@ class ManualPaymentsService:
             raise AppError("Payment not found", status.HTTP_404_NOT_FOUND)
         return self._payment_response(payment)
 
-    async def submit(self, *, order_id: int, user_id: int) -> ManualPaymentRead:
+    async def submit(
+        self,
+        *,
+        order_id: int,
+        user_id: int,
+        idempotency_key: str | None = None,
+    ) -> ManualPaymentRead:
+        idempotency_claim: IdempotencyClaim | None = None
+        if idempotency_key:
+            idempotency_claim = await self.idempotency_service.begin(
+                user_id=user_id,
+                scope="manual_payments.submit",
+                key=idempotency_key,
+                request_hash=IdempotencyService.hash_payload({"order_id": order_id}),
+            )
+            if idempotency_claim.replay_response is not None:
+                return ManualPaymentRead.model_validate(idempotency_claim.replay_response)
+
         payment = await self.repository.get_for_order_owner(
             order_id=order_id,
             user_id=user_id,
@@ -530,13 +551,27 @@ class ManualPaymentsService:
             await self._emit(MANUAL_PAYMENT_EXPIRED, payment)
             raise AppError("Payment has expired", status.HTTP_409_CONFLICT)
         if payment.status == ManualPaymentStatus.SUBMITTED:
-            return self._payment_response(payment, server_now=now)
+            response = self._payment_response(payment, server_now=now)
+            self.idempotency_service.complete(
+                idempotency_claim,
+                response_body=response.model_dump(mode="json"),
+                response_status_code=status.HTTP_200_OK,
+            )
+            if idempotency_claim is not None:
+                await self._commit("Payment submission idempotency update failed")
+            return response
         if payment.status != ManualPaymentStatus.PENDING:
             raise AppError("Payment can no longer be submitted", status.HTTP_409_CONFLICT)
 
         payment.status = ManualPaymentStatus.SUBMITTED
         payment.submitted_at = payment.submitted_at or now
         payment_id = payment.id
+        response = self._payment_response(payment, server_now=now)
+        self.idempotency_service.complete(
+            idempotency_claim,
+            response_body=response.model_dump(mode="json"),
+            response_status_code=status.HTTP_200_OK,
+        )
         await self._commit("Payment submission failed")
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_SUBMITTED, payment)
@@ -550,7 +585,27 @@ class ManualPaymentsService:
         order_id: int,
         user_id: int,
         file: UploadFile,
+        idempotency_key: str | None = None,
     ) -> ManualPaymentRead:
+        upload = None
+        idempotency_claim: IdempotencyClaim | None = None
+        if idempotency_key:
+            upload = await self.uploads_service.validate_and_read_image(file)
+            idempotency_claim = await self.idempotency_service.begin(
+                user_id=user_id,
+                scope="manual_payments.receipt_upload",
+                key=idempotency_key,
+                request_hash=IdempotencyService.hash_payload(
+                    {
+                        "order_id": order_id,
+                        "content_sha256": hashlib.sha256(upload.content).hexdigest(),
+                        "extension": upload.extension,
+                    }
+                ),
+            )
+            if idempotency_claim.replay_response is not None:
+                return ManualPaymentRead.model_validate(idempotency_claim.replay_response)
+
         payment = await self.repository.get_for_order_owner(
             order_id=order_id,
             user_id=user_id,
@@ -583,7 +638,8 @@ class ManualPaymentsService:
         new_path: str | None = None
         committed = False
         try:
-            upload = await self.uploads_service.validate_and_read_image(file)
+            if upload is None:
+                upload = await self.uploads_service.validate_and_read_image(file)
             new_path = self.storage.save_bytes(
                 upload.content,
                 folder="payment_receipts",
@@ -601,6 +657,14 @@ class ManualPaymentsService:
                 await self.repository.update_receipt_image_path(
                     payment_id=payment_id,
                     receipt_image_path=new_path,
+                )
+                response = self._payment_response(payment, server_now=now)
+                response.receipt_image_path = new_path
+                response.receipt_image_url = settings.public_upload_url_for(new_path)
+                self.idempotency_service.complete(
+                    idempotency_claim,
+                    response_body=response.model_dump(mode="json"),
+                    response_status_code=status.HTTP_200_OK,
                 )
                 await self._commit("Payment receipt update failed")
             except AppError:

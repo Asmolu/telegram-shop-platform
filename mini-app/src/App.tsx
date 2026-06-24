@@ -1,4 +1,5 @@
 import { AuthProvider } from './shared/auth/AuthProvider';
+import { NetworkProvider } from './shared/network/NetworkProvider';
 import { RouterProvider, getRouteId, useRouter } from './shared/router/RouterProvider';
 import { ThemeProvider } from './shared/theme/ThemeProvider';
 import { AppShell, TopBar } from './shared/ui';
@@ -89,9 +90,11 @@ export function App() {
   return (
     <ThemeProvider>
       <RouterProvider>
-        <AuthProvider>
-          <RouteSwitch />
-        </AuthProvider>
+        <NetworkProvider>
+          <AuthProvider>
+            <RouteSwitch />
+          </AuthProvider>
+        </NetworkProvider>
       </RouterProvider>
     </ThemeProvider>
   );

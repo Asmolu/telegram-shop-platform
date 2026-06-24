@@ -1,5 +1,7 @@
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -205,6 +207,55 @@ class FakeManualPaymentsService:
         return payment
 
 
+class FakeIdempotencyService:
+    def __init__(self) -> None:
+        self.records: dict[tuple[int, str, str], dict[str, object]] = {}
+        self.locks: dict[tuple[int, str, str], asyncio.Lock] = {}
+
+    async def begin(
+        self,
+        *,
+        user_id: int,
+        scope: str,
+        key: str,
+        request_hash: str,
+    ) -> SimpleNamespace:
+        record_key = (user_id, scope, key)
+        lock = self.locks.setdefault(record_key, asyncio.Lock())
+        await lock.acquire()
+        record = self.records.get(record_key)
+        if record is None:
+            record = {
+                "request_hash": request_hash,
+                "response_body": None,
+                "lock": lock,
+            }
+            self.records[record_key] = record
+            return SimpleNamespace(record=record, replay_response=None)
+        if record["request_hash"] != request_hash:
+            lock.release()
+            raise AppError(
+                "Idempotency-Key was already used with different request payload",
+                409,
+            )
+        response_body = record["response_body"]
+        lock.release()
+        return SimpleNamespace(record=record, replay_response=response_body)
+
+    def complete(
+        self,
+        claim: SimpleNamespace | None,
+        *,
+        response_body: dict[str, object],
+        response_status_code: int,
+    ) -> None:
+        del response_status_code
+        if claim is None or claim.record is None:
+            return
+        claim.record["response_body"] = response_body
+        claim.record["lock"].release()
+
+
 class FakeOrdersRepository:
     def __init__(self) -> None:
         self.carts: dict[int, Cart] = {}
@@ -362,6 +413,82 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
     assert event_payload["contact"]["delivery_method_label"] == "Маршруткой"
     assert event_payload["seller_panel_url"] == "https://seller.stylexac.ru/orders"
     assert events.commit_states == [True]
+
+
+@pytest.mark.asyncio
+async def test_checkout_with_same_idempotency_key_returns_original_order() -> None:
+    idempotency_service = FakeIdempotencyService()
+    service, repository, _, events = _orders_service(idempotency_service=idempotency_service)
+
+    first = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=_checkout_payload(),
+        idempotency_key="checkout-key-1",
+    )
+    second = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=_checkout_payload(),
+        idempotency_key="checkout-key-1",
+    )
+
+    assert first.id == second.id == 1
+    assert len(repository.orders) == 1
+    assert repository.variants[1].stock_quantity == 3
+    assert [event[0] for event in events.events] == [ORDER_CREATED]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_checkout_with_same_idempotency_key_creates_one_order() -> None:
+    idempotency_service = FakeIdempotencyService()
+    service, repository, _, events = _orders_service(idempotency_service=idempotency_service)
+
+    first, second = await asyncio.gather(
+        service.checkout_current_user_cart(
+            user_id=1,
+            payload=_checkout_payload(),
+            idempotency_key="checkout-key-concurrent",
+        ),
+        service.checkout_current_user_cart(
+            user_id=1,
+            payload=_checkout_payload(),
+            idempotency_key="checkout-key-concurrent",
+        ),
+    )
+
+    assert first.id == second.id == 1
+    assert len(repository.orders) == 1
+    assert repository.variants[1].stock_quantity == 3
+    assert repository.carts[1].items == []
+    assert [event[0] for event in events.events] == [ORDER_CREATED]
+
+
+@pytest.mark.asyncio
+async def test_checkout_same_idempotency_key_with_different_payload_returns_conflict() -> None:
+    idempotency_service = FakeIdempotencyService()
+    service, repository, _, _ = _orders_service(idempotency_service=idempotency_service)
+    payload = _checkout_payload()
+    changed_payload = OrderCheckoutCreate.model_validate(
+        {
+            **_checkout_payload_json(),
+            "contact_phone": "+79990001122",
+        }
+    )
+
+    await service.checkout_current_user_cart(
+        user_id=1,
+        payload=payload,
+        idempotency_key="checkout-key-conflict",
+    )
+    with pytest.raises(AppError, match="different request payload") as exc_info:
+        await service.checkout_current_user_cart(
+            user_id=1,
+            payload=changed_payload,
+            idempotency_key="checkout-key-conflict",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert len(repository.orders) == 1
+    assert repository.variants[1].stock_quantity == 3
 
 
 @pytest.mark.asyncio
@@ -1065,6 +1192,7 @@ def _orders_service(
     analytics_tracker: FakeAnalyticsTracker | None = None,
     audit_service: FakeAuditService | None = None,
     manual_payments_enabled: bool = True,
+    idempotency_service: FakeIdempotencyService | None = None,
 ) -> tuple[OrdersService, FakeOrdersRepository, DummySession, FakeOrderEventPublisher]:
     session = DummySession()
     events = FakeOrderEventPublisher(session)
@@ -1075,6 +1203,7 @@ def _orders_service(
         analytics_tracker=analytics_tracker,
         audit_service=audit_service,
         manual_payments_service=FakeManualPaymentsService(enabled=manual_payments_enabled),
+        idempotency_service=idempotency_service,
     )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(

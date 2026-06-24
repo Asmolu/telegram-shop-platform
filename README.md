@@ -131,6 +131,25 @@ Seller/admin endpoints are available under the canonical API prefix:
 - `GET /api/v1/audit-logs`
 - `GET /api/v1/audit-logs/{log_id}`
 
+## Mini App network resilience
+
+The Mini App uses one shared API request layer. It classifies auth, validation,
+network, timeout, aborted, rate-limit, temporary server, and permanent server
+errors without logging JWTs, Telegram `initData`, or personal payload data.
+Backend `X-Request-ID` is preserved in normalized errors for support.
+
+Automatic retry is limited to safe idempotent GET reads: catalog, categories,
+tags, banners, product details/reviews, favorites, cart, orders, payment status,
+profile, personal data, and customer notification subscription. Retries use up
+to 3 attempts with exponential backoff, jitter, `Retry-After`, and only for
+network errors, timeout, HTTP 408, 429, 502, 503, and 504. Mutations are never
+retried automatically.
+
+Checkout, manual payment submit, and receipt upload accept an optional
+`Idempotency-Key` header. New Mini App clients send a stable key per user action
+and reuse it for manual retry after temporary failures. Old clients without the
+header remain compatible and keep the existing transactional behavior.
+
 ## Product search foundation
 
 Product search uses PostgreSQL `pg_trgm` through Alembic-managed `CREATE EXTENSION IF NOT EXISTS

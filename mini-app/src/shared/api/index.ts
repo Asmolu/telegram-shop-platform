@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, type ApiRequestOptions } from './client';
 import type {
   BannerList,
   Cart,
@@ -48,12 +48,12 @@ export function loginWithTelegram(initData: string) {
   });
 }
 
-export function getCurrentUser() {
-  return apiRequest<User>('/users/me');
+export function getCurrentUser(options: ApiRequestOptions = {}) {
+  return apiRequest<User>('/users/me', options);
 }
 
-export function getPersonalData() {
-  return apiRequest<PersonalData>('/users/me/personal-data');
+export function getPersonalData(options: ApiRequestOptions = {}) {
+  return apiRequest<PersonalData>('/users/me/personal-data', options);
 }
 
 export function updatePersonalData(payload: PersonalDataUpdate) {
@@ -63,42 +63,47 @@ export function updatePersonalData(payload: PersonalDataUpdate) {
   });
 }
 
-export function getProducts(params: ProductListParams = {}) {
-  return apiRequest<ProductList>('/products', { query: params });
+export function getProducts(params: ProductListParams = {}, options: ApiRequestOptions = {}) {
+  return apiRequest<ProductList>('/products', { ...options, query: params });
 }
 
-export function getProductSearchSuggestions(query: string, limit = 8) {
+export function getProductSearchSuggestions(
+  query: string,
+  limit = 8,
+  options: ApiRequestOptions = {},
+) {
   return apiRequest<ProductSearchSuggestionList>('/products/suggestions', {
+    ...options,
     query: { query, limit },
   });
 }
 
-export function getProduct(productId: number) {
-  return apiRequest<Product>(`/products/${productId}`);
+export function getProduct(productId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<Product>(`/products/${productId}`, options);
 }
 
-export function getCategories() {
-  return apiRequest<Category[]>('/categories');
+export function getCategories(options: ApiRequestOptions = {}) {
+  return apiRequest<Category[]>('/categories', options);
 }
 
-export function getCategory(categoryId: number) {
-  return apiRequest<Category>(`/categories/${categoryId}`);
+export function getCategory(categoryId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<Category>(`/categories/${categoryId}`, options);
 }
 
-export function getTags() {
-  return apiRequest<Tag[]>('/tags');
+export function getTags(options: ApiRequestOptions = {}) {
+  return apiRequest<Tag[]>('/tags', options);
 }
 
-export function getBanners() {
-  return apiRequest<BannerList>('/banners', { query: { limit: 20, offset: 0 } });
+export function getBanners(options: ApiRequestOptions = {}) {
+  return apiRequest<BannerList>('/banners', { ...options, query: { limit: 20, offset: 0 } });
 }
 
 export function trackBannerClick(bannerId: number) {
   return apiRequest(`/banners/${bannerId}/click`, { method: 'POST' });
 }
 
-export function getCart() {
-  return apiRequest<Cart>('/cart');
+export function getCart(options: ApiRequestOptions = {}) {
+  return apiRequest<Cart>('/cart', options);
 }
 
 export function addCartItem(productId: number, productVariantId: number, quantity = 1) {
@@ -140,8 +145,8 @@ export function removeCartItem(itemId: number) {
   return apiRequest<Cart>(`/cart/items/${itemId}`, { method: 'DELETE' });
 }
 
-export function getFavorites() {
-  return apiRequest<FavoriteList>('/favorites');
+export function getFavorites(options: ApiRequestOptions = {}) {
+  return apiRequest<FavoriteList>('/favorites', options);
 }
 
 export function addFavorite(productId: number) {
@@ -162,36 +167,39 @@ export function validatePromoCode(code: string) {
   });
 }
 
-export function checkoutCart(payload: CheckoutPayload) {
+export function checkoutCart(payload: CheckoutPayload, idempotencyKey?: string) {
   return apiRequest<Order>('/orders/checkout', {
     method: 'POST',
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
 
-export function getOrders() {
-  return apiRequest<OrderList>('/orders', { query: { limit: 50, offset: 0 } });
+export function getOrders(options: ApiRequestOptions = {}) {
+  return apiRequest<OrderList>('/orders', { ...options, query: { limit: 50, offset: 0 } });
 }
 
-export function getOrder(orderId: number) {
-  return apiRequest<Order>(`/orders/${orderId}`);
+export function getOrder(orderId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<Order>(`/orders/${orderId}`, options);
 }
 
-export function getOrderPayment(orderId: number) {
-  return apiRequest<ManualPayment>(`/orders/${orderId}/payment`);
+export function getOrderPayment(orderId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<ManualPayment>(`/orders/${orderId}/payment`, options);
 }
 
-export function submitOrderPayment(orderId: number) {
+export function submitOrderPayment(orderId: number, idempotencyKey?: string) {
   return apiRequest<ManualPayment>(`/orders/${orderId}/payment/submit`, {
     method: 'POST',
+    idempotencyKey,
   });
 }
 
-export function uploadOrderPaymentReceipt(orderId: number, file: File) {
+export function uploadOrderPaymentReceipt(orderId: number, file: File, idempotencyKey?: string) {
   const body = new FormData();
   body.append('file', file);
   return apiRequest<ManualPayment>(`/orders/${orderId}/payment/receipt`, {
     method: 'POST',
+    idempotencyKey,
     body,
   });
 }
@@ -207,8 +215,11 @@ export function createProductReview(productId: number, rating: number, text: str
   });
 }
 
-export function getCustomerNotificationSubscription() {
-  return apiRequest<CustomerNotificationSubscription>('/customer-notifications/me/subscription');
+export function getCustomerNotificationSubscription(options: ApiRequestOptions = {}) {
+  return apiRequest<CustomerNotificationSubscription>(
+    '/customer-notifications/me/subscription',
+    options,
+  );
 }
 
 export function updateCustomerNotificationSubscription(

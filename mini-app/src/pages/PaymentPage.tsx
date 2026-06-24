@@ -1,6 +1,9 @@
 import React from 'react';
 import {
+  createIdempotencyKey,
   getOrderPayment,
+  isRequestAbortedError,
+  isTemporaryNetworkError,
   submitOrderPayment,
   toApiErrorMessage,
   uploadOrderPaymentReceipt,
@@ -9,8 +12,10 @@ import {
   type OrderDeliveryMethod,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
+import { useNetworkRetry } from '../shared/network/NetworkProvider';
 import { getAuthPath, getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 
@@ -38,29 +43,51 @@ export function PaymentPage() {
   const [busy, setBusy] = React.useState<'submit' | 'upload' | null>(null);
   const [clockOffsetMs, setClockOffsetMs] = React.useState(0);
   const [nowMs, setNowMs] = React.useState(Date.now());
+  const loadControllerRef = React.useRef<AbortController | null>(null);
+  const submitKeyRef = React.useRef<string | null>(null);
+  const uploadActionRef = React.useRef<{ key: string; signature: string } | null>(null);
+  const submitLockRef = React.useRef(false);
+  const uploadLockRef = React.useRef(false);
 
   const loadPayment = React.useCallback(async (showLoader = false) => {
     if (!isAuthenticated || orderId === null) {
       setLoading(false);
       return null;
     }
+    loadControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
     if (showLoader) setLoading(true);
     try {
-      const result = await getOrderPayment(orderId);
+      const result = await getOrderPayment(orderId, {
+        signal: controller.signal,
+        dedupe: false,
+      });
       setPayment(result);
       setClockOffsetMs(new Date(result.server_now).getTime() - Date.now());
       setError(null);
       return result;
     } catch (loadError) {
+      if (isRequestAbortedError(loadError)) {
+        return null;
+      }
       setError(toApiErrorMessage(loadError));
       return null;
     } finally {
+      if (loadControllerRef.current === controller) {
+        loadControllerRef.current = null;
+      }
       setLoading(false);
     }
   }, [isAuthenticated, orderId]);
 
+  useNetworkRetry(() => void loadPayment(true));
+
   React.useEffect(() => {
     void loadPayment(true);
+    return () => {
+      loadControllerRef.current?.abort();
+    };
   }, [loadPayment]);
 
   React.useEffect(() => {
@@ -95,79 +122,106 @@ export function PaymentPage() {
   }
 
   async function submitPayment() {
-    if (!payment || !canAct) return;
-    setBusy('submit');
-    setNotice(null);
-    try {
-      const result = await submitOrderPayment(payment.order_id);
-      const refreshed = await loadPayment();
-      setPayment(refreshed ?? result);
-      setNotice({
-        message: 'Оплата отправлена продавцу на проверку.',
-        tone: 'success',
-      });
-    } catch (submitError) {
-      const errorMessage = toApiErrorMessage(submitError);
-      const refreshed = await loadPayment();
-      setNotice(refreshed?.status === 'SUBMITTED'
-        ? { message: 'Оплата отправлена продавцу на проверку.', tone: 'success' }
-        : { message: errorMessage, tone: 'danger' });
-    } finally {
-      setBusy(null);
-    }
+    await runLockedAction(submitLockRef, async () => {
+      if (!payment || !canAct) return;
+      setBusy('submit');
+      setNotice(null);
+      try {
+        if (!submitKeyRef.current) {
+          submitKeyRef.current = createIdempotencyKey('payment-submit');
+        }
+        const result = await submitOrderPayment(payment.order_id, submitKeyRef.current);
+        const refreshed = await loadPayment();
+        setPayment(refreshed ?? result);
+        submitKeyRef.current = null;
+        setNotice({
+          message: 'Оплата отправлена продавцу на проверку.',
+          tone: 'success',
+        });
+      } catch (submitError) {
+        if (!isTemporaryNetworkError(submitError)) {
+          submitKeyRef.current = null;
+        }
+        const errorMessage = toApiErrorMessage(submitError);
+        const refreshed = await loadPayment();
+        setNotice(refreshed?.status === 'SUBMITTED'
+          ? { message: 'Оплата отправлена продавцу на проверку.', tone: 'success' }
+          : { message: errorMessage, tone: 'danger' });
+      } finally {
+        setBusy(null);
+      }
+    });
   }
 
   async function uploadReceipt(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!payment || !file || !canAct) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setNotice({
-        message: 'Загрузите изображение JPEG, PNG или WebP.',
-        tone: 'warning',
-      });
-      return;
-    }
-    if (file.size > MAX_RECEIPT_SIZE) {
-      setNotice({
-        message: 'Размер скриншота не должен превышать 5 МБ.',
-        tone: 'warning',
-      });
-      return;
-    }
+    await runLockedAction(uploadLockRef, async () => {
+      if (!payment || !file || !canAct) return;
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setNotice({
+          message: 'Загрузите изображение JPEG, PNG или WebP.',
+          tone: 'warning',
+        });
+        return;
+      }
+      if (file.size > MAX_RECEIPT_SIZE) {
+        setNotice({
+          message: 'Размер скриншота не должен превышать 5 МБ.',
+          tone: 'warning',
+        });
+        return;
+      }
 
-    setBusy('upload');
-    setNotice(null);
-    const previousReceiptPath = payment.receipt_image_path;
-    try {
-      const result = await uploadOrderPaymentReceipt(payment.order_id, file);
-      if (!result.receipt_image_path || !result.receipt_image_url) {
-        throw new Error('Сервер не подтвердил сохранение скриншота.');
+      setBusy('upload');
+      setNotice(null);
+      const previousReceiptPath = payment.receipt_image_path;
+      const uploadSignature = getReceiptFileSignature(file);
+      if (uploadActionRef.current?.signature !== uploadSignature) {
+        uploadActionRef.current = {
+          key: createIdempotencyKey('receipt-upload'),
+          signature: uploadSignature,
+        };
       }
-      const refreshed = await loadPayment();
-      if (
-        !refreshed?.receipt_image_path
-        || !refreshed.receipt_image_url
-        || refreshed.receipt_image_path !== result.receipt_image_path
-      ) {
-        throw new Error('Не удалось подтвердить сохранение скриншота.');
+      const uploadAction = uploadActionRef.current!;
+      try {
+        const result = await uploadOrderPaymentReceipt(
+          payment.order_id,
+          file,
+          uploadAction.key,
+        );
+        if (!result.receipt_image_path || !result.receipt_image_url) {
+          throw new Error('Сервер не подтвердил сохранение скриншота.');
+        }
+        const refreshed = await loadPayment();
+        if (
+          !refreshed?.receipt_image_path
+          || !refreshed.receipt_image_url
+          || refreshed.receipt_image_path !== result.receipt_image_path
+        ) {
+          throw new Error('Не удалось подтвердить сохранение скриншота.');
+        }
+        setPayment(refreshed);
+        uploadActionRef.current = null;
+        setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
+      } catch (uploadError) {
+        if (!isTemporaryNetworkError(uploadError)) {
+          uploadActionRef.current = null;
+        }
+        const errorMessage = toApiErrorMessage(uploadError);
+        const refreshed = await loadPayment();
+        const recovered = Boolean(
+          refreshed?.receipt_image_path
+          && refreshed.receipt_image_url
+          && refreshed.receipt_image_path !== previousReceiptPath,
+        );
+        setNotice(recovered
+          ? { message: 'Скриншот сохранен.', tone: 'success' }
+          : { message: errorMessage, tone: 'danger' });
+      } finally {
+        setBusy(null);
       }
-      setPayment(refreshed);
-      setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
-    } catch (uploadError) {
-      const errorMessage = toApiErrorMessage(uploadError);
-      const refreshed = await loadPayment();
-      const recovered = Boolean(
-        refreshed?.receipt_image_path
-        && refreshed.receipt_image_url
-        && refreshed.receipt_image_path !== previousReceiptPath,
-      );
-      setNotice(recovered
-        ? { message: 'Скриншот сохранен.', tone: 'success' }
-        : { message: errorMessage, tone: 'danger' });
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   if (!isAuthenticated) {
@@ -318,6 +372,10 @@ export function PaymentPage() {
       ) : null}
     </div>
   );
+}
+
+function getReceiptFileSignature(file: File) {
+  return `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
 }
 
 function PaymentRow({

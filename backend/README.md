@@ -56,6 +56,22 @@ app/
 - Telegram is not a data source.
 - Local storage must remain replaceable with S3/R2.
 
+## Idempotency
+
+Critical customer mutations can use the `Idempotency-Key` header:
+
+- `POST /api/v1/orders/checkout`
+- `POST /api/v1/orders/{order_id}/payment/submit`
+- `POST /api/v1/orders/{order_id}/payment/receipt`
+
+The backend stores the key with user id, endpoint scope, request payload hash,
+the successful response body, and a 24 hour expiration. A retry with the same
+key and same payload replays the original success response. A retry with the
+same key and different payload returns `409 Conflict`. Concurrent requests with
+the same key are serialized by the database unique constraint and row lock.
+Clients that do not send the header remain compatible, but do not receive
+server-side replay protection beyond the existing transaction and status rules.
+
 ## Local run
 
 ```bash

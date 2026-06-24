@@ -1,8 +1,10 @@
 import React from 'react';
 import {
   checkoutCart,
+  createIdempotencyKey,
   getCart,
   getPersonalData,
+  isTemporaryNetworkError,
   toApiErrorMessage,
   validatePromoCode,
   type Cart,
@@ -13,6 +15,7 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice, getUserDisplayName } from '../shared/utils/format';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 
@@ -34,6 +37,8 @@ export function CheckoutPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const checkoutKeyRef = React.useRef<string | null>(null);
+  const checkoutLockRef = React.useRef(false);
   const initialPromoCode = React.useRef(searchParams.get('promo_code') ?? '');
   const [promoCode, setPromoCode] = React.useState(initialPromoCode.current);
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
@@ -94,12 +99,18 @@ export function CheckoutPage() {
     }
 
     void load();
+    const retryLoad = () => void load();
+    window.addEventListener('miniapp:network-retry', retryLoad);
+    window.addEventListener('miniapp:network-restored', retryLoad);
     return () => {
       cancelled = true;
+      window.removeEventListener('miniapp:network-retry', retryLoad);
+      window.removeEventListener('miniapp:network-restored', retryLoad);
     };
   }, [isAuthenticated]);
 
   function updateField(field: keyof typeof form, value: string) {
+    checkoutKeyRef.current = null;
     editedFields.current.add(field);
     setForm((current) => ({ ...current, [field]: value }));
   }
@@ -149,6 +160,7 @@ export function CheckoutPage() {
   }
 
   function updatePromoCode(value: string) {
+    checkoutKeyRef.current = null;
     setPromoCode(value);
     if (!value.trim() || normalizePromoCode(value) !== promoValidation?.code) {
       setPromoValidation(null);
@@ -157,6 +169,7 @@ export function CheckoutPage() {
   }
 
   function clearPromo() {
+    checkoutKeyRef.current = null;
     setPromoCode('');
     setPromoValidation(null);
     setNotice(null);
@@ -180,53 +193,63 @@ export function CheckoutPage() {
 
   async function submitCheckout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!cart || cart.selected_distinct_item_count === 0) {
-      setNotice('Выберите товары для оформления.');
-      return;
-    }
-    if (!form.contactName.trim() || !form.phone.trim() || !form.city.trim()) {
-      setNotice('Заполните имя, телефон и город.');
-      return;
-    }
-    if (!deliveryMethod) {
-      setDeliveryMethodError('Выберите способ доставки.');
-      setNotice('Выберите способ доставки.');
-      return;
-    }
-
-    setBusy(true);
-    try {
-      let promoCodeForOrder: string | null = null;
-      try {
-        promoCodeForOrder = await getValidatedPromoCodeForCheckout();
-      } catch (promoError) {
-        setPromoValidation(null);
-        setNotice(getPromoErrorMessage(promoError));
+    await runLockedAction(checkoutLockRef, async () => {
+      if (!cart || cart.selected_distinct_item_count === 0) {
+        setNotice('Выберите товары для оформления.');
+        return;
+      }
+      if (!form.contactName.trim() || !form.phone.trim() || !form.city.trim()) {
+        setNotice('Заполните имя, телефон и город.');
+        return;
+      }
+      if (!deliveryMethod) {
+        setDeliveryMethodError('Выберите способ доставки.');
+        setNotice('Выберите способ доставки.');
         return;
       }
 
-      const deliveryComment = [
-        form.height ? `Рост: ${form.height}` : '',
-        form.weight ? `Вес: ${form.weight}` : '',
-        form.username ? `Telegram: @${form.username.replace(/^@/, '')}` : '',
-        form.comment,
-      ].filter(Boolean).join('\n');
+      setBusy(true);
+      try {
+        let promoCodeForOrder: string | null = null;
+        try {
+          promoCodeForOrder = await getValidatedPromoCodeForCheckout();
+        } catch (promoError) {
+          setPromoValidation(null);
+          setNotice(getPromoErrorMessage(promoError));
+          return;
+        }
 
-      const order = await checkoutCart({
-        contact_name: form.contactName.trim(),
-        contact_phone: form.phone.trim(),
-        delivery_method: deliveryMethod,
-        delivery_address: form.city.trim(),
-        delivery_comment: deliveryComment || null,
-        promo_code: promoCodeForOrder,
-      });
-      window.dispatchEvent(new Event('miniapp:cart-updated'));
-      navigate(withReturnTo(`/payment/${order.id}`, returnToParam), { replace: true });
-    } catch (checkoutError) {
-      setNotice(toApiErrorMessage(checkoutError));
-    } finally {
-      setBusy(false);
-    }
+        const deliveryComment = [
+          form.height ? `Рост: ${form.height}` : '',
+          form.weight ? `Вес: ${form.weight}` : '',
+          form.username ? `Telegram: @${form.username.replace(/^@/, '')}` : '',
+          form.comment,
+        ].filter(Boolean).join('\n');
+
+        if (!checkoutKeyRef.current) {
+          checkoutKeyRef.current = createIdempotencyKey('checkout');
+        }
+
+        const order = await checkoutCart({
+          contact_name: form.contactName.trim(),
+          contact_phone: form.phone.trim(),
+          delivery_method: deliveryMethod,
+          delivery_address: form.city.trim(),
+          delivery_comment: deliveryComment || null,
+          promo_code: promoCodeForOrder,
+        }, checkoutKeyRef.current);
+        checkoutKeyRef.current = null;
+        window.dispatchEvent(new Event('miniapp:cart-updated'));
+        navigate(withReturnTo(`/payment/${order.id}`, returnToParam), { replace: true });
+      } catch (checkoutError) {
+        if (!isTemporaryNetworkError(checkoutError)) {
+          checkoutKeyRef.current = null;
+        }
+        setNotice(toApiErrorMessage(checkoutError));
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   const selectedItems = cart?.items.filter((item) => item.is_selected) ?? [];
@@ -301,6 +324,7 @@ export function CheckoutPage() {
                   name="delivery-method"
                   value={deliveryMethod}
                   onChange={(event) => {
+                    checkoutKeyRef.current = null;
                     setDeliveryMethod(event.target.value as OrderDeliveryMethod);
                     setDeliveryMethodError(null);
                     setNotice(null);

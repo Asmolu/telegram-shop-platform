@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
@@ -40,8 +40,13 @@ async def submit_order_payment(
     order_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[ManualPaymentsService, Depends(get_manual_payments_service)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ManualPaymentRead:
-    return await service.submit(order_id=order_id, user_id=current_user.id)
+    return await service.submit(
+        order_id=order_id,
+        user_id=current_user.id,
+        idempotency_key=idempotency_key,
+    )
 
 
 @customer_router.post("/{order_id}/payment/receipt", response_model=ManualPaymentRead)
@@ -50,11 +55,13 @@ async def upload_order_payment_receipt(
     file: Annotated[UploadFile, File()],
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[ManualPaymentsService, Depends(get_manual_payments_service)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ManualPaymentRead:
     return await service.upload_receipt(
         order_id=order_id,
         user_id=current_user.id,
         file=file,
+        idempotency_key=idempotency_key,
     )
 
 

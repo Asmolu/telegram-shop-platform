@@ -7,6 +7,7 @@ import {
   toApiErrorMessage,
   type User,
 } from '../api';
+import { shouldClearStoredTokenAfterAuthError } from './sessionPolicy';
 import {
   applyTelegramTheme,
   getTelegramInitData,
@@ -81,10 +82,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStatus('authenticated');
       setError(null);
     } catch (authError) {
-      clearStoredAccessToken();
+      if (shouldClearStoredTokenAfterAuthError(authError)) {
+        clearStoredAccessToken();
+      }
       setUser(null);
       setStatus('error');
-      setError('Не удалось открыть приложение через Telegram');
+      setError(toApiErrorMessage(authError));
       if (import.meta.env.DEV) {
         console.warn(toApiErrorMessage(authError));
       }
@@ -110,11 +113,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsTelegram(diagnostics.hasWebApp);
       logTelegramDiagnostics();
 
-      if (diagnostics.hasInitData) {
-        await runTelegramAuth();
-        return;
-      }
-
       const savedToken = getStoredAccessToken();
       if (savedToken) {
         try {
@@ -125,9 +123,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setError(null);
           }
           return;
-        } catch {
+        } catch (tokenError) {
+          if (cancelled) {
+            return;
+          }
+          if (!shouldClearStoredTokenAfterAuthError(tokenError)) {
+            setStatus('error');
+            setError(toApiErrorMessage(tokenError));
+            return;
+          }
           clearStoredAccessToken();
         }
+      }
+
+      if (diagnostics.hasInitData) {
+        await runTelegramAuth();
+        return;
       }
 
       if (!cancelled) {

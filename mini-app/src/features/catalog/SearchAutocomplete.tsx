@@ -63,10 +63,11 @@ export function SearchAutocomplete({
       };
     }
 
+    const controller = new AbortController();
     setSuggestions([]);
     setLoading(true);
     const timeoutId = window.setTimeout(() => {
-      getProductSearchSuggestions(trimmedValue)
+      getProductSearchSuggestions(trimmedValue, 8, { signal: controller.signal, dedupe: false })
         .then((result) => {
           if (!cancelled) {
             setSuggestions(result.items);
@@ -86,6 +87,7 @@ export function SearchAutocomplete({
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timeoutId);
     };
   }, [trimmedValue]);

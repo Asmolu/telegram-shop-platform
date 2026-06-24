@@ -29,6 +29,7 @@ from app.events.payloads import (
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
+from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
@@ -99,6 +100,7 @@ class OrdersService:
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
         manual_payments_service: ManualPaymentsService | None = None,
+        idempotency_service: IdempotencyService | None = None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
@@ -107,15 +109,31 @@ class OrdersService:
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
         self.manual_payments_service = manual_payments_service or ManualPaymentsService(session)
+        self.idempotency_service = idempotency_service or IdempotencyService(session)
 
     async def checkout_current_user_cart(
         self,
         user_id: int,
         payload: OrderCheckoutCreate,
+        *,
+        idempotency_key: str | None = None,
     ) -> OrderRead:
         post_commit_events: list[tuple[str, dict[str, object]]] = []
         post_commit_analytics: list[tuple[str, dict[str, object]]] = []
+        idempotency_claim: IdempotencyClaim | None = None
         try:
+            if idempotency_key:
+                idempotency_claim = await self.idempotency_service.begin(
+                    user_id=user_id,
+                    scope="orders.checkout",
+                    key=idempotency_key,
+                    request_hash=IdempotencyService.hash_payload(
+                        payload.model_dump(mode="json", by_alias=True)
+                    ),
+                )
+                if idempotency_claim.replay_response is not None:
+                    return OrderRead.model_validate(idempotency_claim.replay_response)
+
             cart = await self.repository.get_cart_for_checkout(user_id)
             self._validate_cart_not_empty(cart)
             assert cart is not None
@@ -217,6 +235,11 @@ class OrdersService:
                         },
                     )
                 )
+            self.idempotency_service.complete(
+                idempotency_claim,
+                response_body=response.model_dump(mode="json"),
+                response_status_code=status.HTTP_201_CREATED,
+            )
             await self.session.commit()
         except AppError:
             await self.session.rollback()

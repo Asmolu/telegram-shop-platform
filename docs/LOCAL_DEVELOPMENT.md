@@ -183,6 +183,14 @@ Default URL:
 http://localhost:5173
 ```
 
+Mini App unit tests cover the shared API retry/error layer, network state, and
+duplicate-action guard:
+
+```bash
+cd mini-app
+npm test
+```
+
 ## Seller Panel
 
 ```bash

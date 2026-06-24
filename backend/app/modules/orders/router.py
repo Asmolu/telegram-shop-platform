@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_current_user, get_db_session, require_roles
@@ -42,8 +42,13 @@ async def checkout_current_user_cart(
     payload: OrderCheckoutCreate,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[OrdersService, Depends(get_orders_service)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> OrderRead:
-    return await service.checkout_current_user_cart(current_user.id, payload)
+    return await service.checkout_current_user_cart(
+        current_user.id,
+        payload,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.get("", response_model=OrderList)

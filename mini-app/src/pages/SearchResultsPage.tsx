@@ -38,6 +38,7 @@ export function SearchResultsPage() {
 
   React.useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     async function load() {
       setLoading(true);
@@ -54,8 +55,10 @@ export function SearchResultsPage() {
             size_grid: sizeGrid,
             size: size || undefined,
             color: color || undefined,
-          }),
-          isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+          }, { signal: controller.signal, dedupe: false }),
+          isAuthenticated
+            ? getFavorites({ signal: controller.signal, dedupe: false }).catch(() => ({ items: [] }))
+            : Promise.resolve({ items: [] }),
         ]);
 
         if (!cancelled) {
@@ -76,6 +79,7 @@ export function SearchResultsPage() {
     void load();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [categoryId, color, isAuthenticated, query, size, sizeGrid, tagId]);
 

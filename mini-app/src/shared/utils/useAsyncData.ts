@@ -1,5 +1,6 @@
 import React from 'react';
-import { toApiErrorMessage } from '../api';
+import { isRequestAbortedError, toApiErrorMessage } from '../api';
+import { useNetworkRetry } from '../network/NetworkProvider';
 
 export function useAsyncData<T>(
   loader: () => Promise<T>,
@@ -23,6 +24,9 @@ export function useAsyncData<T>(
         }
       })
       .catch((loadError: unknown) => {
+        if (isRequestAbortedError(loadError)) {
+          return;
+        }
         if (!cancelled) {
           setError(toApiErrorMessage(loadError));
         }
@@ -40,6 +44,7 @@ export function useAsyncData<T>(
   }, [...deps, version]);
 
   const reload = React.useCallback(() => setVersion((current) => current + 1), []);
+  useNetworkRetry(reload);
 
   return { data, loading, error, reload, setData };
 }
