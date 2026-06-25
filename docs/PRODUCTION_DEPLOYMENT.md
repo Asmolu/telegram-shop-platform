@@ -52,11 +52,16 @@ Backend:
 - `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60` (or another positive polling interval)
 - cache, rate limit, and customer campaign batch settings from
   `backend/.env.production.example`
+- telemetry settings from `backend/.env.production.example` or defaults:
+  `TELEMETRY_ENABLED`, `TELEMETRY_MAX_EVENTS_PER_BATCH`,
+  `TELEMETRY_MAX_BODY_BYTES`, `TELEMETRY_*_SAMPLE_RATE`,
+  `TELEMETRY_RETENTION_DAYS`, and telemetry rate-limit settings
 
 Frontend:
 
 - `VITE_API_BASE_URL` for both `mini-app` and `seller-panel`
 - `VITE_TELEGRAM_BOT_USERNAME` for Mini App UI links only, not bot tokens
+- `VITE_TELEMETRY_DISABLED=true` can disable Mini App telemetry in an emergency
 
 ## Start
 
@@ -64,6 +69,15 @@ Before deploying this migration, create and verify a PostgreSQL plus uploads
 backup. The release requires rebuilding the backend, Mini App, and Seller Panel,
 then applying Alembic head `20260614_0027`. The persistent uploads volume must
 allow the backend to create and write `/app/uploads/payment_receipts/`.
+
+Privacy-safe telemetry requires a coordinated backend + Mini App release:
+
+- backend migration `20260625_0036` adds nullable telemetry columns to
+  `analytics_events`;
+- Mini App sends bounded batches to `POST /api/v1/analytics/telemetry`;
+- no production telemetry cleanup is run automatically;
+- same-origin API routing, Caddy production routing changes, Frankfurt
+  WebView/VPN validation, and synthetic monitoring are deferred to Prompt 3B2.
 
 Validate the compose file syntax:
 

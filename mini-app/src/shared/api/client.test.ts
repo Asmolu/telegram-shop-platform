@@ -8,6 +8,7 @@ import {
   toApiErrorMessage,
 } from './client';
 import { shouldClearStoredTokenAfterAuthError } from '../auth/sessionPolicy';
+import { flushTelemetry } from '../telemetry';
 
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(payload), {
@@ -168,6 +169,33 @@ describe('apiRequest resilience', () => {
     expect(capturedError).toBeInstanceOf(ApiClientError);
     expect(capturedError).toMatchObject({ requestId: 'req-123' });
     expect(toApiErrorMessage(capturedError)).toContain('req-123');
+  });
+
+  it('captures normalized API failure telemetry without using retry transport', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'temporary' }, 503, { 'x-request-id': 'req-telemetry' }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiRequest('/products/123', { retry: false })).rejects.toMatchObject({
+      requestId: 'req-telemetry',
+      kind: 'temporary_server_failure',
+    });
+    await flushTelemetry();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const telemetryPayload = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    const telemetryEvent = telemetryPayload.events.find(
+      (event: { request_id?: string }) => event.request_id === 'req-telemetry',
+    );
+    expect(telemetryEvent).toMatchObject({
+      name: 'api.request_failed',
+      endpoint_scope: '/products/:id',
+      status: 503,
+      retry_count: 0,
+      request_id: 'req-telemetry',
+      error_category: 'temporary_server_failure',
+    });
   });
 
   it('clears JWT only for confirmed authentication errors', () => {

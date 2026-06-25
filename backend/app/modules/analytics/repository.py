@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import String, and_, cast, exists, func, or_, select
+from sqlalchemy import String, and_, cast, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -49,6 +49,33 @@ class AnalyticsRepository:
 
     def add(self, event: AnalyticsEvent) -> None:
         self.session.add(event)
+
+    async def count_telemetry_before(self, cutoff: datetime) -> int:
+        result = await self.session.execute(
+            select(func.count(AnalyticsEvent.id)).where(
+                AnalyticsEvent.event_version.is_not(None),
+                AnalyticsEvent.telemetry_session_id.is_not(None),
+                AnalyticsEvent.created_at < cutoff,
+            )
+        )
+        return result.scalar_one()
+
+    async def delete_telemetry_before(self, cutoff: datetime, *, limit: int) -> int:
+        ids = (
+            select(AnalyticsEvent.id)
+            .where(
+                AnalyticsEvent.event_version.is_not(None),
+                AnalyticsEvent.telemetry_session_id.is_not(None),
+                AnalyticsEvent.created_at < cutoff,
+            )
+            .order_by(AnalyticsEvent.created_at.asc(), AnalyticsEvent.id.asc())
+            .limit(limit)
+            .subquery()
+        )
+        result = await self.session.execute(
+            delete(AnalyticsEvent).where(AnalyticsEvent.id.in_(select(ids.c.id)))
+        )
+        return int(result.rowcount or 0)
 
     async def list(
         self,

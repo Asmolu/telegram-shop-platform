@@ -149,6 +149,28 @@ Sprint 14 adds Redis-backed caching and rate limiting. Local development can kee
 `backend/.env.example`; if Redis is stopped, public catalog reads still work and rate limiting uses
 the isolated in-memory fallback.
 
+Mini App telemetry can be tested locally without external analytics services.
+It writes privacy-safe events to the existing `analytics_events` table through
+`POST /api/v1/analytics/telemetry`. To disable it during local UI work:
+
+```text
+VITE_TELEMETRY_DISABLED=true
+TELEMETRY_ENABLED=false
+```
+
+Safe local ingestion smoke:
+
+```bash
+curl -i http://localhost:8000/api/v1/analytics/telemetry \
+  -H "Content-Type: application/json" \
+  -d '{"events":[{"name":"mini_app.bootstrap_started","version":1,"session_id":"550e8400-e29b-41d4-a716-446655440000","client_event_id":"event-0001","route":"/main"}]}'
+```
+
+Invalid payloads with unknown fields such as `initData`, `Authorization`,
+`user_id`, or raw endpoint IDs should return `422`. See
+`docs/ANALYTICS_TELEMETRY.md` for the full allowlist, sampling, and retention
+policy.
+
 Image upload validation checks decoded dimensions in addition to extension, MIME, and byte size:
 product images use 4:5 at 1200x1500 recommended, native banners use 400:207 at 2000x1035 recommended,
 category and tag cards use 4:3 at 1200x900 recommended, and aggressive popup banners use 9:16 at

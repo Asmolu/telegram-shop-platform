@@ -42,6 +42,7 @@ export type TelegramWebApp = {
   themeParams?: TelegramThemeParams;
   colorScheme?: TelegramColorScheme;
   platform?: string;
+  version?: string;
   isFullscreen?: boolean;
   safeAreaInset?: TelegramSafeAreaInset;
   contentSafeAreaInset?: TelegramSafeAreaInset;

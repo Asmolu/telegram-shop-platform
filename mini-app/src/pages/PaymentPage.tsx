@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   createIdempotencyKey,
+  getApiErrorTelemetryCategory,
   getOrderPayment,
   isRequestAbortedError,
   isTemporaryNetworkError,
@@ -14,6 +15,7 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { useNetworkRetry } from '../shared/network/NetworkProvider';
 import { getAuthPath, getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
+import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice } from '../shared/utils/format';
@@ -138,15 +140,39 @@ export function PaymentPage() {
         if (!submitKeyRef.current) {
           submitKeyRef.current = createIdempotencyKey('payment-submit');
         }
-        const result = await submitOrderPayment(payment.order_id, submitKeyRef.current);
+        const submitKey = submitKeyRef.current;
+        trackTelemetry('payment.submit_started', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/submit',
+          method: 'POST',
+        }, { priority: 'critical' });
+        const result = await submitOrderPayment(payment.order_id, submitKey);
         const refreshed = await loadPayment();
         setPayment(refreshed ?? result);
         submitKeyRef.current = null;
+        trackTelemetry('payment.submit_completed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/submit',
+          method: 'POST',
+          success: true,
+          idempotency_key_hash: await hashCorrelationKey(submitKey),
+        }, { priority: 'critical' });
         setNotice({
           message: 'Оплата отправлена продавцу на проверку.',
           tone: 'success',
         });
       } catch (submitError) {
+        const submitHash = submitKeyRef.current
+          ? await hashCorrelationKey(submitKeyRef.current)
+          : undefined;
+        trackTelemetry('payment.submit_failed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/submit',
+          method: 'POST',
+          error_category: getApiErrorTelemetryCategory(submitError),
+          success: false,
+          idempotency_key_hash: submitHash,
+        }, { priority: 'critical' });
         if (!isTemporaryNetworkError(submitError)) {
           submitKeyRef.current = null;
         }
@@ -184,7 +210,14 @@ export function PaymentPage() {
         };
       }
       const uploadAction = uploadActionRef.current!;
+      const prepareStartedAt = Date.now();
       const prepared = await prepareReceiptImage(file);
+      trackTelemetry('receipt.prepare_completed', {
+        route: '/payment/:id',
+        duration_ms: Date.now() - prepareStartedAt,
+        payload_size_bucket: byteBucket(prepared.file.size),
+        success: true,
+      });
       if (prepared.file.size > MAX_RECEIPT_SIZE) {
         uploadActionRef.current = null;
         setBusy(null);
@@ -198,6 +231,7 @@ export function PaymentPage() {
       setBusy('upload');
       const previousReceiptPath = payment.receipt_image_path;
       try {
+        const uploadStartedAt = Date.now();
         const result = await uploadOrderPaymentReceipt(
           payment.order_id,
           prepared.file,
@@ -217,8 +251,26 @@ export function PaymentPage() {
         setPayment(refreshed);
         uploadActionRef.current = null;
         setReceiptRetry(null);
+        trackTelemetry('receipt.upload_completed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/receipt',
+          method: 'POST',
+          duration_ms: Date.now() - uploadStartedAt,
+          payload_size_bucket: byteBucket(prepared.file.size),
+          success: true,
+          idempotency_key_hash: await hashCorrelationKey(uploadAction.key),
+        }, { priority: 'critical' });
         setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
       } catch (uploadError) {
+        trackTelemetry('receipt.upload_failed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/receipt',
+          method: 'POST',
+          payload_size_bucket: byteBucket(prepared.file.size),
+          error_category: getApiErrorTelemetryCategory(uploadError),
+          success: false,
+          idempotency_key_hash: await hashCorrelationKey(uploadAction.key),
+        }, { priority: 'critical' });
         if (isTemporaryNetworkError(uploadError)) {
           setReceiptRetry({
             file: prepared.file,
@@ -253,6 +305,7 @@ export function PaymentPage() {
       setNotice(null);
       const previousReceiptPath = payment.receipt_image_path;
       try {
+        const uploadStartedAt = Date.now();
         const result = await uploadOrderPaymentReceipt(
           payment.order_id,
           receiptRetry.file,
@@ -272,8 +325,26 @@ export function PaymentPage() {
         setPayment(refreshed);
         uploadActionRef.current = null;
         setReceiptRetry(null);
+        trackTelemetry('receipt.upload_completed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/receipt',
+          method: 'POST',
+          duration_ms: Date.now() - uploadStartedAt,
+          payload_size_bucket: byteBucket(receiptRetry.file.size),
+          success: true,
+          idempotency_key_hash: await hashCorrelationKey(receiptRetry.idempotencyKey),
+        }, { priority: 'critical' });
         setNotice({ message: 'Скриншот сохранен.', tone: 'success' });
       } catch (uploadError) {
+        trackTelemetry('receipt.upload_failed', {
+          route: '/payment/:id',
+          endpoint_scope: '/orders/:id/payment/receipt',
+          method: 'POST',
+          payload_size_bucket: byteBucket(receiptRetry.file.size),
+          error_category: getApiErrorTelemetryCategory(uploadError),
+          success: false,
+          idempotency_key_hash: await hashCorrelationKey(receiptRetry.idempotencyKey),
+        }, { priority: 'critical' });
         if (!isTemporaryNetworkError(uploadError)) {
           uploadActionRef.current = null;
           setReceiptRetry(null);
@@ -483,6 +554,25 @@ function formatCountdown(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function byteBucket(bytes: number): '0' | '1kb' | '10kb' | '100kb' | '1mb' | 'large' {
+  if (bytes <= 0) {
+    return '0';
+  }
+  if (bytes <= 1024) {
+    return '1kb';
+  }
+  if (bytes <= 10 * 1024) {
+    return '10kb';
+  }
+  if (bytes <= 100 * 1024) {
+    return '100kb';
+  }
+  if (bytes <= 1024 * 1024) {
+    return '1mb';
+  }
+  return 'large';
 }
 
 function deliveryMethodLabel(method: OrderDeliveryMethod): string {

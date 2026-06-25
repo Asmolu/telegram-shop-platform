@@ -119,6 +119,17 @@ http://localhost:8000/api/v1/openapi.json
 
 ## Backend observability API
 
+Mini App privacy-safe telemetry is ingested through
+`POST /api/v1/analytics/telemetry` and stored in the existing
+`analytics_events` table with schema-versioned, allowlisted fields only. It is
+used for startup timing, API latency/retry/error correlation, Web Vitals, chunk
+load recovery, and ambiguous checkout/payment/receipt outcomes. Telemetry does
+not accept Telegram `initData`, JWTs, search text, checkout personal data,
+receipt paths/content, full URLs, raw stack traces, raw user agents, or
+frontend-supplied user identifiers. See
+`docs/ANALYTICS_TELEMETRY.md` for the event schema, sampling defaults,
+retention policy, and local disable flags.
+
 Sprint 11 adds backend-only observability modules:
 
 - `backend/app/modules/analytics/` records user behavior events and exposes seller/admin reporting.

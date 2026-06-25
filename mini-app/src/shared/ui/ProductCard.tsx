@@ -1,10 +1,13 @@
 import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
+import { trackTelemetry } from '../telemetry';
 import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge, getProductBadgeColor, getProductBadgePosition } from '../utils/images';
 import { CartIcon, HeartIcon } from './Icons';
 import { ProductImageCarousel } from './ProductImageCarousel';
+
+let firstProductCardReported = false;
 
 function toFiniteNumber(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') {
@@ -91,6 +94,16 @@ function ProductCardComponent({
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
   const brand = product.brand?.trim() || 'Без бренда';
   const reviewLine = getReviewLine(product);
+
+  React.useEffect(() => {
+    if (firstProductCardReported) {
+      return;
+    }
+    firstProductCardReported = true;
+    trackTelemetry('first_product_card.rendered', {
+      route: window.location.pathname,
+    });
+  }, []);
 
   async function runAction(action: 'favorite' | 'cart', callback?: (product: Product) => void | Promise<void>) {
     if (!callback) {

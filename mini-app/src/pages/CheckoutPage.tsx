@@ -2,6 +2,7 @@ import React from 'react';
 import {
   checkoutCart,
   createIdempotencyKey,
+  getApiErrorTelemetryCategory,
   getCart,
   getPersonalData,
   isTemporaryNetworkError,
@@ -15,6 +16,7 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice, getUserDisplayName } from '../shared/utils/format';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
@@ -229,7 +231,13 @@ export function CheckoutPage() {
         if (!checkoutKeyRef.current) {
           checkoutKeyRef.current = createIdempotencyKey('checkout');
         }
+        const currentCheckoutKey = checkoutKeyRef.current;
 
+        trackTelemetry('checkout.started', {
+          route: '/checkout',
+          endpoint_scope: '/orders/checkout',
+          method: 'POST',
+        }, { priority: 'critical' });
         const order = await checkoutCart({
           contact_name: form.contactName.trim(),
           contact_phone: form.phone.trim(),
@@ -237,11 +245,30 @@ export function CheckoutPage() {
           delivery_address: form.city.trim(),
           delivery_comment: deliveryComment || null,
           promo_code: promoCodeForOrder,
-        }, checkoutKeyRef.current);
+        }, currentCheckoutKey);
+        trackTelemetry('checkout.completed', {
+          route: '/checkout',
+          endpoint_scope: '/orders/checkout',
+          method: 'POST',
+          success: true,
+          idempotency_key_hash: await hashCorrelationKey(currentCheckoutKey),
+        }, { priority: 'critical' });
         checkoutKeyRef.current = null;
         window.dispatchEvent(new Event('miniapp:cart-updated'));
         navigate(withReturnTo(`/payment/${order.id}`, returnToParam), { replace: true });
       } catch (checkoutError) {
+        const idempotencyHash = checkoutKeyRef.current
+          ? await hashCorrelationKey(checkoutKeyRef.current)
+          : undefined;
+        const temporary = isTemporaryNetworkError(checkoutError);
+        trackTelemetry(temporary ? 'checkout.ambiguous_outcome' : 'checkout.failed', {
+          route: '/checkout',
+          endpoint_scope: '/orders/checkout',
+          method: 'POST',
+          error_category: getApiErrorTelemetryCategory(checkoutError),
+          success: false,
+          idempotency_key_hash: idempotencyHash,
+        }, { priority: 'critical' });
         if (!isTemporaryNetworkError(checkoutError)) {
           checkoutKeyRef.current = null;
         }

@@ -1,5 +1,6 @@
 import {
   clearStoredAccessToken,
+  getApiErrorTelemetryCategory,
   getCurrentUser,
   getStoredAccessToken,
   loginWithTelegram,
@@ -12,13 +13,16 @@ import {
   applyTelegramTheme,
   getTelegramInitData,
   getTelegramRuntimeDiagnostics,
+  getTelegramThemeMode,
   getTelegramUser,
+  getTelegramWebApp,
   initTelegramApp,
   isTelegramWebView,
   subscribeTelegramThemeChanges,
   waitForTelegramWebApp,
   type TelegramUser,
 } from '../telegram/webApp';
+import { getConnectionTelemetry, getViewportTelemetry, trackTelemetry } from '../telemetry';
 import React from 'react';
 
 type AuthStatus = 'booting' | 'authenticated' | 'development' | 'error';
@@ -51,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [telegramUser, setTelegramUser] = React.useState<TelegramUser | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isTelegram, setIsTelegram] = React.useState(false);
+  const bootstrapCompletedRef = React.useRef(false);
 
   const authenticateWithToken = React.useCallback(async (token: string) => {
     storeAccessToken(token);
@@ -75,12 +80,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      trackTelemetry('auth.started', {
+        route: window.location.pathname,
+        ...getConnectionTelemetry(),
+      });
       setStatus('booting');
       const result = await loginWithTelegram(initData);
       storeAccessToken(result.access_token);
       setUser(result.user);
       setStatus('authenticated');
       setError(null);
+      trackTelemetry('auth.completed', {
+        route: window.location.pathname,
+        ...getConnectionTelemetry(),
+      });
     } catch (authError) {
       if (shouldClearStoredTokenAfterAuthError(authError)) {
         clearStoredAccessToken();
@@ -88,6 +101,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setStatus('error');
       setError(toApiErrorMessage(authError));
+      trackTelemetry('auth.failed', {
+        route: window.location.pathname,
+        error_category: getApiErrorTelemetryCategory(authError),
+        ...getConnectionTelemetry(),
+      }, { priority: 'critical' });
       if (import.meta.env.DEV) {
         console.warn(toApiErrorMessage(authError));
       }
@@ -111,16 +129,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTelegramUser(getTelegramUser());
       const diagnostics = getTelegramRuntimeDiagnostics();
       setIsTelegram(diagnostics.hasWebApp);
+      trackTelegramInitialized();
       logTelegramDiagnostics();
 
       const savedToken = getStoredAccessToken();
       if (savedToken) {
         try {
+          trackTelemetry('auth.started', {
+            route: window.location.pathname,
+            ...getConnectionTelemetry(),
+          });
           const currentUser = await getCurrentUser();
           if (!cancelled) {
             setUser(currentUser);
             setStatus('authenticated');
             setError(null);
+            trackTelemetry('auth.completed', {
+              route: window.location.pathname,
+              ...getConnectionTelemetry(),
+            });
           }
           return;
         } catch (tokenError) {
@@ -130,6 +157,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!shouldClearStoredTokenAfterAuthError(tokenError)) {
             setStatus('error');
             setError(toApiErrorMessage(tokenError));
+            trackTelemetry('auth.failed', {
+              route: window.location.pathname,
+              error_category: getApiErrorTelemetryCategory(tokenError),
+              ...getConnectionTelemetry(),
+            }, { priority: 'critical' });
             return;
           }
           clearStoredAccessToken();
@@ -154,6 +186,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unsubscribeViewport?.();
     };
   }, [runTelegramAuth]);
+
+  React.useEffect(() => {
+    if (bootstrapCompletedRef.current || status === 'booting') {
+      return;
+    }
+    bootstrapCompletedRef.current = true;
+    trackTelemetry('mini_app.bootstrap_completed', {
+      route: window.location.pathname,
+      success: status !== 'error',
+      ...getConnectionTelemetry(),
+      ...getViewportTelemetry(),
+    });
+  }, [status]);
 
   const clearToken = React.useCallback(() => {
     clearStoredAccessToken();
@@ -189,6 +234,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function trackTelegramInitialized() {
+  const webApp = getTelegramWebApp();
+  const platform = normalizeTelegramPlatform(webApp?.platform);
+  trackTelemetry('telegram.initialized', {
+    route: window.location.pathname,
+    platform,
+    telegram_webapp_version: webApp?.version,
+    theme_mode: getTelegramThemeMode() ?? 'unknown',
+    ...getConnectionTelemetry(),
+    ...getViewportTelemetry(),
+  });
+}
+
+function normalizeTelegramPlatform(value?: string) {
+  const platform = String(value ?? '').toLowerCase();
+  if (platform === 'ios' || platform === 'android' || platform === 'web' || platform === 'tdesktop') {
+    return platform;
+  }
+  return 'unknown';
 }
 
 export function useAuth() {

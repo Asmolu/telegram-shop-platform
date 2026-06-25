@@ -1,12 +1,19 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.deps import get_db_session, require_roles
+from app.common.deps import get_db_session, get_optional_current_user, require_roles
+from app.core.config import settings
 from app.db.models import User, UserRole
-from app.modules.analytics.schemas import AnalyticsEventList, AnalyticsSummary, DashboardSummary
+from app.modules.analytics.schemas import (
+    AnalyticsEventList,
+    AnalyticsSummary,
+    DashboardSummary,
+    TelemetryBatchIn,
+    TelemetryIngestResult,
+)
 from app.modules.analytics.service import AnalyticsService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -17,6 +24,43 @@ def get_analytics_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AnalyticsService:
     return AnalyticsService(session)
+
+
+def enforce_telemetry_body_size(request: Request) -> None:
+    content_length = request.headers.get("content-length")
+    if content_length is None:
+        return
+    try:
+        size = int(content_length)
+    except ValueError:
+        return
+    if size > settings.telemetry_max_body_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="Telemetry payload too large",
+        )
+
+
+@router.post(
+    "/telemetry",
+    response_model=TelemetryIngestResult,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(enforce_telemetry_body_size)],
+)
+async def ingest_telemetry(
+    batch: TelemetryBatchIn,
+    request: Request,
+    response: Response,
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
+) -> TelemetryIngestResult:
+    response.headers["Cache-Control"] = "private, no-store"
+    request_id = getattr(request.state, "request_id", None)
+    return await service.ingest_telemetry(
+        batch,
+        user_id=current_user.id if current_user else None,
+        request_id=request_id,
+    )
 
 
 @router.get("/events", response_model=AnalyticsEventList)

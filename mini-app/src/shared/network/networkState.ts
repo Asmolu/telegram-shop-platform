@@ -37,6 +37,13 @@ export function setNetworkState(state: NetworkState) {
   }
   currentState = state;
   listeners.forEach((listener) => listener(currentState));
+  void import('../telemetry').then(({ getConnectionTelemetry, trackTelemetry }) => {
+    trackTelemetry('network.state_changed', {
+      network_state: currentState,
+      success: currentState === 'online',
+      ...getConnectionTelemetry(),
+    });
+  });
 }
 
 export function markNetworkRequestStarted() {

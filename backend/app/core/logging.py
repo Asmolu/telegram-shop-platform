@@ -26,6 +26,11 @@ class JsonLogFormatter(logging.Formatter):
             "status_code",
             "duration_ms",
             "client",
+            "retry_after",
+            "validation_error_count",
+            "matched",
+            "deleted",
+            "dry_run",
         ):
             value = getattr(record, field, None)
             if value is not None:

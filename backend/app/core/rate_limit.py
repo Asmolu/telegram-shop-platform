@@ -40,6 +40,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if allowed:
             return await call_next(request)
 
+        if rule.name == "telemetry":
+            logger.info(
+                "telemetry rate limited",
+                extra={
+                    "request_id": getattr(request.state, "request_id", None),
+                    "path": request.url.path,
+                    "retry_after": retry_after,
+                },
+            )
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={"detail": "Rate limit exceeded"},
@@ -72,6 +81,12 @@ def _match_rule(request: Request) -> RateLimitRule | None:
             "auth",
             settings.rate_limit_auth_requests,
             settings.rate_limit_auth_window_seconds,
+        )
+    if method == "POST" and path == f"{api_prefix}/analytics/telemetry":
+        return RateLimitRule(
+            "telemetry",
+            settings.rate_limit_telemetry_requests,
+            settings.rate_limit_telemetry_window_seconds,
         )
     if method == "POST" and path.startswith(f"{api_prefix}/uploads/"):
         return RateLimitRule(

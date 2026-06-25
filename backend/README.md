@@ -150,6 +150,28 @@ The compact list contract is a coordinated backend + Mini App rollout. Older
 Mini App builds that require full `images`, `tags`, and `categories` on product
 lists should not be served against the compact-only backend.
 
+## Privacy-safe telemetry
+
+Mini App telemetry is handled by the existing analytics module:
+
+- `POST /api/v1/analytics/telemetry` accepts strict schema-versioned batches and
+  returns only compact accepted/sampled counts.
+- The endpoint is optional-auth: authenticated requests get server-resolved
+  `user_id`, while anonymous bootstrap events are accepted without user data.
+- Unknown fields and forbidden identifiers are rejected by Pydantic
+  `extra="forbid"` schemas.
+- Frontend-supplied `user_id`, Telegram ID, JWT, `initData`, full URLs, search
+  text, checkout personal data, payment details, receipt paths/content, raw
+  stack traces, and request/response bodies are not accepted.
+- Migration `20260625_0036_add_privacy_safe_telemetry` adds nullable typed
+  telemetry columns to `analytics_events`; existing analytics rows remain
+  compatible.
+- Raw telemetry retention defaults to 60 days and cleanup is batch-wise through
+  `AnalyticsService.cleanup_telemetry(..., dry_run=True)` by default.
+
+See `../docs/ANALYTICS_TELEMETRY.md` for event names, allowlisted fields,
+sampling defaults, ingestion limits, and local disable flags.
+
 ## Authentication settings
 
 Telegram login validates Mini App `initData` with `TELEGRAM_WEBAPP_BOT_TOKEN` or

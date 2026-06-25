@@ -3,6 +3,11 @@ import {
   markNetworkRequestStarted,
   markNetworkRequestSuccess,
 } from '../network/networkState';
+import {
+  getConnectionTelemetry,
+  normalizeEndpointScope,
+  trackTelemetry,
+} from '../telemetry';
 
 export type ApiErrorKind =
   | 'authentication'
@@ -222,12 +227,31 @@ async function requestWithRetry<T>({
         rest,
         timeoutMs,
         url,
+        retryCount: attempt - 1,
       });
     } catch (error) {
       lastError = error;
       if (!canRetry || attempt >= attempts || !shouldRetryError(error)) {
+        if (canRetry && attempt >= attempts && shouldRetryError(error)) {
+          trackTelemetry('api.retry_exhausted', {
+            method,
+            endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+            retry_count: attempt - 1,
+            error_category: getApiErrorTelemetryCategory(error),
+            request_id: error instanceof ApiClientError ? error.requestId : undefined,
+            ...getConnectionTelemetry(),
+          }, { priority: 'critical' });
+        }
         throw error;
       }
+      trackTelemetry('api.retry_scheduled', {
+        method,
+        endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+        retry_count: attempt,
+        error_category: getApiErrorTelemetryCategory(error),
+        request_id: error instanceof ApiClientError ? error.requestId : undefined,
+        ...getConnectionTelemetry(),
+      });
       await waitForRetryDelay(error, attempt, rest.signal);
       markNetworkRequestStarted();
     }
@@ -244,6 +268,7 @@ async function executeRequest<T>({
   rest,
   timeoutMs,
   url,
+  retryCount,
 }: {
   body?: BodyInit | null;
   headers?: HeadersInit;
@@ -252,6 +277,7 @@ async function executeRequest<T>({
   rest: Omit<RequestInit, 'body' | 'headers'>;
   timeoutMs?: number;
   url: string;
+  retryCount: number;
 }) {
   const token = getStoredAccessToken();
   const requestHeaders = new Headers(headers);
@@ -280,14 +306,26 @@ async function executeRequest<T>({
       signal: abort.signal,
     });
     const durationMs = Date.now() - startedAt;
+    const requestId = response.headers.get('x-request-id') ?? undefined;
+    const responseSizeBucket = byteBucket(response.headers.get('content-length'));
 
     if (response.status === 204) {
       markNetworkRequestSuccess(durationMs);
+      trackTelemetry('api.request_completed', {
+        method,
+        endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+        status: response.status,
+        duration_ms: durationMs,
+        retry_count: retryCount,
+        request_id: requestId,
+        response_size_bucket: responseSizeBucket,
+        success: true,
+        ...getConnectionTelemetry(),
+      });
       return undefined as T;
     }
 
     const contentType = response.headers.get('content-type') ?? '';
-    const requestId = response.headers.get('x-request-id') ?? undefined;
     const payload = contentType.includes('application/json')
       ? await response.json()
       : await response.text();
@@ -295,10 +333,33 @@ async function executeRequest<T>({
     if (!response.ok) {
       const apiError = createHttpError(response, payload, requestId);
       markNetworkRequestFailure(apiError);
+      trackTelemetry('api.request_failed', {
+        method,
+        endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+        status: response.status,
+        duration_ms: durationMs,
+        retry_count: retryCount,
+        request_id: requestId,
+        response_size_bucket: responseSizeBucket,
+        error_category: apiError.kind,
+        success: false,
+        ...getConnectionTelemetry(),
+      }, { priority: 'critical' });
       throw apiError;
     }
 
     markNetworkRequestSuccess(durationMs);
+    trackTelemetry('api.request_completed', {
+      method,
+      endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+      status: response.status,
+      duration_ms: durationMs,
+      retry_count: retryCount,
+      request_id: requestId,
+      response_size_bucket: responseSizeBucket,
+      success: true,
+      ...getConnectionTelemetry(),
+    });
     return payload as T;
   } catch (error) {
     if (error instanceof ApiClientError) {
@@ -306,6 +367,15 @@ async function executeRequest<T>({
     }
     const normalizedError = createFetchError(error, abort.timedOut);
     markNetworkRequestFailure(normalizedError);
+    trackTelemetry('api.request_failed', {
+      method,
+      endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
+      duration_ms: Date.now() - startedAt,
+      retry_count: retryCount,
+      error_category: normalizedError.kind,
+      success: false,
+      ...getConnectionTelemetry(),
+    }, normalizedError.kind === 'request_aborted' ? undefined : { priority: 'critical' });
     throw normalizedError;
   } finally {
     abort.cleanup();
@@ -489,12 +559,42 @@ function parseRetryAfter(value: string | null) {
   return undefined;
 }
 
+function byteBucket(value: string | null): 'unknown' | '0' | '1kb' | '10kb' | '100kb' | '1mb' | 'large' {
+  if (!value) {
+    return 'unknown';
+  }
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return 'unknown';
+  }
+  if (bytes === 0) {
+    return '0';
+  }
+  if (bytes <= 1024) {
+    return '1kb';
+  }
+  if (bytes <= 10 * 1024) {
+    return '10kb';
+  }
+  if (bytes <= 100 * 1024) {
+    return '100kb';
+  }
+  if (bytes <= 1024 * 1024) {
+    return '1mb';
+  }
+  return 'large';
+}
+
 export function isUnauthorizedError(error: unknown) {
   return error instanceof ApiClientError && error.kind === 'authentication';
 }
 
 export function isRequestAbortedError(error: unknown) {
   return error instanceof ApiClientError && error.kind === 'request_aborted';
+}
+
+export function getApiErrorTelemetryCategory(error: unknown) {
+  return error instanceof ApiClientError ? error.kind : 'unknown';
 }
 
 export function isTemporaryNetworkError(error: unknown) {

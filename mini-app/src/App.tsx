@@ -5,6 +5,8 @@ import { RouterProvider, getRouteId, useRouter } from './shared/router/RouterPro
 import { ChunkLoadRecovery } from './shared/router/ChunkLoadRecovery';
 import { registerRoutePrefetchers } from './shared/router/routePrefetch';
 import { ThemeProvider } from './shared/theme/ThemeProvider';
+import { getConnectionTelemetry, getViewportTelemetry, normalizeRoute, trackTelemetry } from './shared/telemetry';
+import { AppErrorBoundary } from './shared/ui/AppErrorBoundary';
 import { AppShell, TopBar } from './shared/ui/AppShell';
 
 const routeLoaders = {
@@ -108,6 +110,15 @@ function RouteSwitch() {
   const { currentPath, pathname } = useRouter();
   const routeId = getLazyRouteId(pathname);
   const Page = lazyRouteComponents[routeId];
+
+  React.useEffect(() => {
+    trackTelemetry('route.rendered', {
+      route: normalizeRoute(pathname),
+      ...getConnectionTelemetry(),
+      ...getViewportTelemetry(),
+    });
+  }, [pathname]);
+
   const route = (
     <ChunkLoadRecovery resetKey={currentPath}>
       <React.Suspense fallback={<RouteFallback routeId={routeId} />}>
@@ -125,14 +136,16 @@ function RouteSwitch() {
 
 export function App() {
   return (
-    <ThemeProvider>
-      <RouterProvider>
-        <NetworkProvider>
-          <AuthProvider>
-            <RouteSwitch />
-          </AuthProvider>
-        </NetworkProvider>
-      </RouterProvider>
-    </ThemeProvider>
+    <AppErrorBoundary>
+      <ThemeProvider>
+        <RouterProvider>
+          <NetworkProvider>
+            <AuthProvider>
+              <RouteSwitch />
+            </AuthProvider>
+          </NetworkProvider>
+        </RouterProvider>
+      </ThemeProvider>
+    </AppErrorBoundary>
   );
 }

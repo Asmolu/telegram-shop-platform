@@ -8,9 +8,11 @@ import {
   type ProductImageItem,
 } from '../utils/images';
 import { getMotionAwareScrollBehavior } from '../utils/motion';
+import { trackTelemetry } from '../telemetry';
 
 type ProductImageCarouselVariant = 'card' | 'detail';
 type CarouselSlide = Omit<ProductImageItem, 'url'> & { url: string | null };
+let firstKeyImageReported = false;
 
 export function ProductImageCarousel({
   product,
@@ -99,6 +101,15 @@ export function ProductImageCarousel({
                 loading={loading ?? (variant === 'detail' && index === 0 ? 'eager' : 'lazy')}
                 fetchPriority={index === 0 ? fetchPriority : undefined}
                 decoding="async"
+                onLoad={() => {
+                  if (!firstKeyImageReported && index === 0) {
+                    firstKeyImageReported = true;
+                    trackTelemetry('first_key_image.loaded', {
+                      route: window.location.pathname,
+                      success: true,
+                    });
+                  }
+                }}
                 onError={() => {
                   setBrokenImageIds((current) => {
                     const next = new Set(current);

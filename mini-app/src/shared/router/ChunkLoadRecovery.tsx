@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackTelemetry } from '../telemetry';
 
 const CHUNK_RELOAD_STORAGE_PREFIX = 'telegram_shop_chunk_reload';
 
@@ -54,10 +55,21 @@ export function maybeReloadAfterChunkLoadError({
 
   const storageKey = chunkReloadStorageKey(appVersion);
   if (storage.getItem(storageKey) === '1') {
+    trackTelemetry('chunk.recovery_failed', {
+      route: window.location.pathname,
+      error_category: 'chunk_load_failed',
+      app_version: appVersion,
+      success: false,
+    }, { priority: 'critical' });
     return false;
   }
 
   storage.setItem(storageKey, '1');
+  trackTelemetry('chunk.reload_attempted', {
+    route: window.location.pathname,
+    error_category: 'chunk_load_failed',
+    app_version: appVersion,
+  }, { priority: 'critical' });
   reloadWindow();
   return true;
 }
@@ -79,6 +91,14 @@ export class ChunkLoadRecovery extends React.Component<
   }
 
   componentDidCatch(error: Error) {
+    if (isChunkLoadError(error)) {
+      trackTelemetry('chunk.load_failed', {
+        route: window.location.pathname,
+        error_category: 'chunk_load_failed',
+        app_version: this.props.appVersion ?? __APP_VERSION__,
+        success: false,
+      }, { priority: 'critical' });
+    }
     maybeReloadAfterChunkLoadError({
       appVersion: this.props.appVersion ?? __APP_VERSION__,
       error,

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1856,9 +1857,34 @@ class BroadcastDelivery(Base):
 
 class AnalyticsEvent(Base):
     __tablename__ = "analytics_events"
+    __table_args__ = (
+        Index("ix_analytics_events_telemetry_session", "telemetry_session_id"),
+        Index("ix_analytics_events_request_id", "request_id"),
+        Index("ix_analytics_events_created_event", "created_at", "event_name"),
+        UniqueConstraint(
+            "telemetry_session_id",
+            "client_event_id",
+            name="uq_analytics_events_telemetry_client_event",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    event_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telemetry_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    route: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    endpoint_scope: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    http_method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metric_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    app_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    network_state: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    connection_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

@@ -108,8 +108,20 @@ class Settings(BaseSettings):
     rate_limit_promo_window_seconds: int = 60
     rate_limit_review_requests: int = 10
     rate_limit_review_window_seconds: int = 60
+    rate_limit_telemetry_requests: int = 60
+    rate_limit_telemetry_window_seconds: int = 60
     rate_limit_customer_campaign_requests: int = 30
     rate_limit_customer_campaign_window_seconds: int = 60
+
+    telemetry_enabled: bool = True
+    telemetry_max_events_per_batch: int = 25
+    telemetry_max_body_bytes: int = 65_536
+    telemetry_success_sample_rate: float = 0.2
+    telemetry_web_vital_sample_rate: float = 0.5
+    telemetry_route_sample_rate: float = 0.25
+    telemetry_network_sample_rate: float = 0.25
+    telemetry_retention_days: int = 60
+    telemetry_cleanup_batch_size: int = 500
 
     customer_campaign_batch_size: int = 20
     customer_campaign_max_attempts: int = 3

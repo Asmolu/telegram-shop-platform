@@ -28,7 +28,18 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+    async def validation_error_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        if request.url.path.endswith("/analytics/telemetry"):
+            logger.info(
+                "telemetry validation rejected",
+                extra={
+                    **_request_log_extra(request),
+                    "validation_error_count": len(exc.errors()),
+                },
+            )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": [_serialize_validation_error(error) for error in exc.errors()]},
