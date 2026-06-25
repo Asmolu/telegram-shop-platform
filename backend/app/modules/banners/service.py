@@ -64,12 +64,14 @@ class BannersService:
         limit: int,
         offset: int,
         user_id: int | None = None,
+        track_views: bool = True,
     ) -> PublicBannerList:
         cache_key = public_banners_list_key(limit=limit, offset=offset)
         if self.cache is not None:
             cached = await self.cache.get_model(cache_key, PublicBannerList)
             if cached is not None:
-                await self._track_banner_views(cached.items, user_id=user_id)
+                if track_views:
+                    await self._track_banner_views(cached.items, user_id=user_id)
                 return cached
 
         items, total = await self.repository.list(
@@ -88,10 +90,19 @@ class BannersService:
             items=[self._to_public_banner(item, promo_codes, now=now) for item in items],
             meta=PageMeta(limit=limit, offset=offset, total=total),
         )
-        await self._track_banner_views(result.items, user_id=user_id)
+        if track_views:
+            await self._track_banner_views(result.items, user_id=user_id)
         if self.cache is not None:
             await self.cache.set_model(cache_key, result, settings.cache_banners_ttl_seconds)
         return result
+
+    async def track_public_banner_views(
+        self,
+        banners: list[PublicBannerRead],
+        *,
+        user_id: int | None,
+    ) -> None:
+        await self._track_banner_views(banners, user_id=user_id)
 
     async def list_banners(self, *, limit: int, offset: int) -> BannerList:
         items, total = await self.repository.list(limit=limit, offset=offset)

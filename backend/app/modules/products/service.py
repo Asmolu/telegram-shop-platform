@@ -32,12 +32,13 @@ from app.modules.categories.repository import CategoriesRepository
 from app.modules.products.inventory import InventoryValidationError, validate_inventory_quantities
 from app.modules.products.repository import ProductsRepository, ProductVariantsRepository
 from app.modules.products.schemas import (
+    ProductCardList,
+    ProductCardRead,
     ProductCategoryInput,
     ProductCreate,
-    ProductDetailRead,
     ProductImageCreate,
     ProductList,
-    ProductRead,
+    ProductPublicDetailRead,
     ProductSearchSuggestion,
     ProductSearchSuggestionList,
     ProductStatusUpdate,
@@ -119,10 +120,12 @@ class ProductsService:
         size: str | None = None,
         color: str | None = None,
         user_id: int | None = None,
-    ) -> ProductList:
+        track_search: bool = True,
+    ) -> ProductCardList:
         if status is not None and status != ProductStatus.ACTIVE:
-            result = ProductList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
-            await self._track_search_event(search, user_id=user_id, result_count=0)
+            result = ProductCardList(items=[], meta=PageMeta(limit=limit, offset=offset, total=0))
+            if track_search:
+                await self._track_search_event(search, user_id=user_id, result_count=0)
             return result
 
         normalized_size = self._normalize_size_filter(size_grid=size_grid, size=size)
@@ -139,16 +142,17 @@ class ProductsService:
             color=color,
         )
         if self.cache is not None:
-            cached = await self.cache.get_model(cache_key, ProductList)
+            cached = await self.cache.get_model(cache_key, ProductCardList)
             if cached is not None:
-                await self._track_search_event(
-                    search,
-                    user_id=user_id,
-                    result_count=cached.meta.total,
-                )
+                if track_search:
+                    await self._track_search_event(
+                        search,
+                        user_id=user_id,
+                        result_count=cached.meta.total,
+                    )
                 return cached
 
-        items, total = await self.repository.list(
+        items, total = await self.repository.list_public_cards(
             limit=limit,
             offset=offset,
             category_id=category_id,
@@ -158,10 +162,13 @@ class ProductsService:
             size_grid=size_grid,
             size=normalized_size,
             color=color,
-            active_variants_only=True,
         )
-        result = ProductList(items=items, meta=PageMeta(limit=limit, offset=offset, total=total))
-        await self._track_search_event(search, user_id=user_id, result_count=total)
+        result = ProductCardList(
+            items=[ProductCardRead.model_validate(item) for item in items],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+        if track_search:
+            await self._track_search_event(search, user_id=user_id, result_count=total)
         if self.cache is not None:
             await self.cache.set_model(
                 cache_key,
@@ -226,15 +233,21 @@ class ProductsService:
         self,
         product_id: int,
         user_id: int | None = None,
-    ) -> ProductDetailRead:
+        track_view: bool = True,
+    ) -> ProductPublicDetailRead:
         cache_key = public_product_detail_key(product_id)
         if self.cache is not None:
-            cached = await self.cache.get_model(cache_key, ProductDetailRead)
+            cached = await self.cache.get_model(cache_key, ProductPublicDetailRead)
             if cached is not None:
-                await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
+                if track_view:
+                    await self._track_event(
+                        "product.viewed",
+                        user_id=user_id,
+                        product_id=product_id,
+                    )
                 return cached
 
-        product = await self.repository.get_active_by_id(product_id)
+        product = await self.repository.get_public_detail_by_id(product_id)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
         active_related_products = [
@@ -242,11 +255,11 @@ class ProductsService:
             for related_product in product.related_products
             if related_product.status == ProductStatus.ACTIVE
         ]
-        result = ProductDetailRead.model_validate(product).model_copy(
+        result = ProductPublicDetailRead.model_validate(product).model_copy(
             update={
                 "related_product_ids": [item.id for item in active_related_products],
                 "related_products": [
-                    ProductRead.model_validate(item) for item in active_related_products
+                    ProductCardRead.model_validate(item) for item in active_related_products
                 ],
             }
         )
@@ -256,8 +269,26 @@ class ProductsService:
                 result,
                 settings.cache_public_product_detail_ttl_seconds,
             )
-        await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
+        if track_view:
+            await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
         return result
+
+    async def track_public_product_list_search(
+        self,
+        *,
+        search: str | None,
+        user_id: int | None,
+        result_count: int | None,
+    ) -> None:
+        await self._track_search_event(search, user_id=user_id, result_count=result_count)
+
+    async def track_public_product_view(
+        self,
+        *,
+        product_id: int,
+        user_id: int | None,
+    ) -> None:
+        await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
 
     async def get_product(self, product_id: int) -> Product:
         product = await self.repository.get_by_id(product_id)

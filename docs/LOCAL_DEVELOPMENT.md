@@ -158,6 +158,13 @@ Product search uses PostgreSQL `pg_trgm` for typo-tolerant catalog matching. The
 migration enables the extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then adds product
 search indexes for name, slug, description, and seller-managed search aliases.
 
+Public product list endpoints now return compact card DTOs for Mini App feed,
+category, search, favorites, and related-product cards. Use the product detail
+endpoint when a screen needs description, full gallery variants, SKU display, or
+taxonomy summaries. Public products, product detail, banners, categories, and
+tags support `ETag`/`If-None-Match`; favorites and cart are personalized and
+use `Cache-Control: private, no-store`.
+
 Useful local toggles:
 
 ```text

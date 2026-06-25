@@ -2,7 +2,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Cart, CartItem, Product, ProductVariant
+from app.db.models import Cart, CartItem, Product, ProductImage, ProductVariant
 
 
 class CartRepository:
@@ -14,6 +14,18 @@ class CartRepository:
             select(Cart)
             .options(
                 selectinload(Cart.items).selectinload(CartItem.product),
+                selectinload(Cart.items)
+                .selectinload(CartItem.product)
+                .selectinload(Product.images)
+                .load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
                 selectinload(Cart.items).selectinload(CartItem.product_variant),
             )
             .where(Cart.user_id == user_id)
@@ -26,6 +38,17 @@ class CartRepository:
             .join(Cart)
             .options(
                 selectinload(CartItem.product),
+                selectinload(CartItem.product)
+                .selectinload(Product.images)
+                .load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
                 selectinload(CartItem.product_variant),
             )
             .where(Cart.user_id == user_id, CartItem.id == item_id)
@@ -42,6 +65,17 @@ class CartRepository:
             select(CartItem)
             .options(
                 selectinload(CartItem.product),
+                selectinload(CartItem.product)
+                .selectinload(Product.images)
+                .load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
                 selectinload(CartItem.product_variant),
             )
             .where(

@@ -59,7 +59,12 @@ export function getProductImageItems(
   product: Product,
   variant: ProductImageVariant = 'card',
 ): ProductImageItem[] {
-  return [...product.images]
+  const galleryImages = product.images ?? [];
+  if (galleryImages.length === 0) {
+    return getCompactProductImageItem(product, variant);
+  }
+
+  return [...galleryImages]
     .sort((left, right) => {
       if (left.is_primary !== right.is_primary) {
         return left.is_primary ? -1 : 1;
@@ -158,6 +163,43 @@ function getVariantPath(image: ProductImage, variant: ProductImageVariant) {
   return image.url ?? image.image_url ?? uploadPathToUrl(image.file_path);
 }
 
+function getCompactProductImageItem(
+  product: Product,
+  variant: ProductImageVariant,
+): ProductImageItem[] {
+  const preferredUrl = variant === 'thumbnail'
+    ? product.thumbnail_image_url ?? product.image_url
+    : product.image_url ?? product.thumbnail_image_url;
+  const url = normalizeAssetUrl(preferredUrl);
+
+  if (!url) {
+    return [];
+  }
+
+  const thumbnailUrl = normalizeAssetUrl(product.thumbnail_image_url);
+  const cardUrl = normalizeAssetUrl(product.image_url);
+  const srcSet = compactSrcSet(thumbnailUrl, cardUrl);
+
+  return [{
+    id: `product-${product.id}`,
+    url,
+    alt: product.name,
+    srcSet,
+    sizes: getProductImageSizes(variant),
+  }];
+}
+
+function compactSrcSet(thumbnailUrl: string | null, cardUrl: string | null) {
+  const entries: string[] = [];
+  if (thumbnailUrl) {
+    entries.push(`${thumbnailUrl} 240w`);
+  }
+  if (cardUrl && cardUrl !== thumbnailUrl) {
+    entries.push(`${cardUrl} 480w`);
+  }
+  return entries.length > 1 ? entries.join(', ') : undefined;
+}
+
 function uploadPathToUrl(path?: string | null) {
   if (!path) {
     return null;
@@ -174,7 +216,7 @@ export function getProductBadge(product: Product) {
     return configuredBadge;
   }
 
-  const tags = product.tags.map((tag) => `${tag.slug} ${tag.name}`.toLowerCase());
+  const tags = (product.tags ?? []).map((tag) => `${tag.slug} ${tag.name}`.toLowerCase());
 
   if (tags.some((tag) => tag.includes('sale') || tag.includes('скид'))) {
     return 'SALE';

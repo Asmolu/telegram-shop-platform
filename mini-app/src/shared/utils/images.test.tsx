@@ -26,7 +26,7 @@ describe('product image variants', () => {
   it('falls back to the legacy image url when variants are missing', () => {
     const product = productFixture({
       images: [{
-        ...productFixture().images[0],
+        ...productFixture().images![0],
         thumbnail_url: null,
         card_url: null,
         detail_url: null,
@@ -38,6 +38,23 @@ describe('product image variants', () => {
     });
 
     expect(getProductImageUrl(product, 'card')).toBe(`${getApiOrigin()}/uploads/products/original.jpg`);
+  });
+
+  it('selects compact card DTO image fields without a gallery payload', () => {
+    const product = productFixture({
+      images: undefined,
+      image_url: '/uploads/products/card.webp',
+      thumbnail_image_url: '/uploads/products/thumb.webp',
+    });
+
+    const item = getProductImageItems(product, 'card')[0];
+
+    expect(item.url).toBe(`${getApiOrigin()}/uploads/products/card.webp`);
+    expect(item.srcSet).toContain('/uploads/products/thumb.webp 240w');
+    expect(item.srcSet).toContain('/uploads/products/card.webp 480w');
+    expect(getProductImageUrl(product, 'thumbnail')).toBe(
+      `${getApiOrigin()}/uploads/products/thumb.webp`,
+    );
   });
 
   it('renders detail derivatives with dimensions and lazy slide loading', () => {

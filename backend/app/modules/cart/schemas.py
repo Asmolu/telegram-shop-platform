@@ -31,9 +31,13 @@ class CartProductRead(BaseModel):
     id: int
     name: str
     slug: str
+    brand: str | None = None
     base_price: Decimal
+    old_price: Decimal | None = None
     size_grid: ProductSizeGrid
     status: ProductStatus
+    image_url: str | None = None
+    thumbnail_image_url: str | None = None
 
 
 class CartProductVariantRead(BaseModel):

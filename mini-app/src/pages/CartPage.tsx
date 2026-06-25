@@ -3,7 +3,6 @@ import {
   getCart,
   getFavorites,
   getOrders,
-  getProduct,
   removeCartItem,
   removeFavorite,
   updateCartItem,
@@ -22,7 +21,7 @@ import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
-import { getProductImageItems, getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
+import { normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
 
@@ -43,7 +42,6 @@ export function CartPage() {
   const [cart, setCart] = React.useState<Cart | null>(null);
   const [favorites, setFavorites] = React.useState<Favorite[]>([]);
   const [favoriteProducts, setFavoriteProducts] = React.useState<Product[]>([]);
-  const [cartProducts, setCartProducts] = React.useState<Map<number, Product>>(new Map());
   const [orders, setOrders] = React.useState<Order[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -73,27 +71,14 @@ export function CartPage() {
     setError(null);
     try {
       const [cartResult, favoriteResult, orderResult] = await Promise.all([getCart(), getFavorites(), getOrders()]);
-      const favoriteProductResults = await Promise.allSettled(
-        favoriteResult.items.map((favorite) => getProduct(favorite.product_id)),
-      );
-      const cartProductResults = await Promise.allSettled(
-        cartResult.items.map((item) => getProduct(item.product.id)),
-      );
-      const nextCartProducts = new Map<number, Product>();
-      cartProductResults.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          nextCartProducts.set(result.value.id, result.value);
-        }
-      });
 
       setCart(cartResult);
       setFavorites(favoriteResult.items);
       setFavoriteProducts(
-        favoriteProductResults
-          .filter((result): result is PromiseFulfilledResult<Product> => result.status === 'fulfilled')
-          .map((result) => result.value),
+        favoriteResult.items
+          .map((favorite) => favorite.product)
+          .filter((product): product is Product => Boolean(product)),
       );
-      setCartProducts(nextCartProducts);
       setOrders(orderResult.items);
     } catch (loadError) {
       setError(toApiErrorMessage(loadError));
@@ -282,7 +267,6 @@ export function CartPage() {
       {!loading && !error && activeTab === 'cart' ? (
         <CartItemsTab
           cart={cart}
-          productMap={cartProducts}
           promoCode={promoCode}
           promoValidation={promoValidation}
           onApplyPromo={applyPromo}
@@ -353,9 +337,23 @@ function FavoritesTab({
   );
 }
 
+function cartProductImageSrcSet(thumbnailUrl?: string | null, imageUrl?: string | null) {
+  const normalizedThumbnail = normalizeAssetUrl(thumbnailUrl);
+  const normalizedImage = normalizeAssetUrl(imageUrl);
+  const entries: string[] = [];
+
+  if (normalizedThumbnail) {
+    entries.push(`${normalizedThumbnail} 240w`);
+  }
+  if (normalizedImage && normalizedImage !== normalizedThumbnail) {
+    entries.push(`${normalizedImage} 480w`);
+  }
+
+  return entries.length > 1 ? entries.join(', ') : undefined;
+}
+
 function CartItemsTab({
   cart,
-  productMap,
   promoCode,
   promoValidation,
   onApplyPromo,
@@ -369,7 +367,6 @@ function CartItemsTab({
   onSelectAll,
 }: {
   cart: Cart | null;
-  productMap: Map<number, Product>;
   promoCode: string;
   promoValidation: PromoValidation | null;
   onApplyPromo: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -408,11 +405,9 @@ function CartItemsTab({
 
       <div className="cart-list">
         {items.map((item) => {
-          const product = productMap.get(item.product.id);
-          const productImage = product ? getProductImageItems(product, 'thumbnail')[0] : null;
-          const imageUrl = product ? getProductImageUrl(product, 'thumbnail') : null;
+          const imageUrl = normalizeAssetUrl(item.product.thumbnail_image_url ?? item.product.image_url);
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
-          const brand = product?.brand?.trim() || 'MENS STYLE';
+          const brand = item.product.brand?.trim() || 'MENS STYLE';
           const sizeLabel = displaySize(item.product.size_grid, item.product_variant.size, true);
           const variantInfo = [
             sizeLabel,
@@ -438,8 +433,8 @@ function CartItemsTab({
                 {imageUrl ? (
                   <img
                     src={imageUrl}
-                    srcSet={productImage?.srcSet}
-                    sizes={productImage?.sizes}
+                    srcSet={cartProductImageSrcSet(item.product.thumbnail_image_url, item.product.image_url)}
+                    sizes="96px"
                     alt=""
                     width={96}
                     height={120}

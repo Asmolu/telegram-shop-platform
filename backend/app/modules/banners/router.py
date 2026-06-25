@@ -1,10 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.cache import CacheService
 from app.common.deps import get_db_session, get_optional_current_user, require_roles
+from app.common.http_cache import (
+    PUBLIC_REVALIDATE_CACHE,
+    is_not_modified,
+    not_modified_response,
+    set_cache_headers,
+    stable_etag,
+)
 from app.db.models import User, UserRole
 from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.audit.service import AuditService
@@ -34,16 +41,29 @@ def get_banners_service(
 
 @router.get("", response_model=PublicBannerList)
 async def list_public_banners(
+    request: Request,
+    response: Response,
     service: Annotated[BannersService, Depends(get_banners_service)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> PublicBannerList:
-    return await service.list_public_banners(
+) -> PublicBannerList | Response:
+    raw_result = await service.list_public_banners(
         limit=limit,
         offset=offset,
         user_id=current_user.id if current_user is not None else None,
+        track_views=False,
     )
+    result = PublicBannerList.model_validate(raw_result)
+    etag = stable_etag(result)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    await service.track_public_banner_views(
+        result.items,
+        user_id=current_user.id if current_user is not None else None,
+    )
+    return result
 
 
 @router.post("/{banner_id}/click", response_model=BannerClickRead)

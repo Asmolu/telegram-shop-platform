@@ -4,12 +4,13 @@ from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.db.models import (
     Category,
     Product,
     ProductCategory,
+    ProductImage,
     ProductRelatedProduct,
     ProductSizeGrid,
     ProductStatus,
@@ -69,6 +70,78 @@ class ProductsRepository:
                 selectinload(Product.tags),
                 selectinload(Product.images),
                 variants_loader,
+            )
+            .where(*conditions)
+            .order_by(*order_by)
+            .limit(limit)
+            .offset(offset)
+        )
+        count_query = select(func.count(Product.id)).where(*conditions)
+
+        products_result = await self.session.execute(products_query)
+        count_result = await self.session.execute(count_query)
+        return list(products_result.scalars().all()), count_result.scalar_one()
+
+    async def list_public_cards(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        category_id: int | None = None,
+        tag_id: int | None = None,
+        status: ProductStatus | None = None,
+        search: str | None = None,
+        size_grid: ProductSizeGrid | None = None,
+        size: str | None = None,
+        color: str | None = None,
+    ) -> tuple[list[Product], int]:
+        conditions = self._build_filters(
+            category_id=category_id,
+            tag_id=tag_id,
+            status=status,
+            search=search,
+            size_grid=size_grid,
+            size=size,
+            color=color,
+        )
+        order_by = self._list_ordering(search=search, category_id=category_id)
+        products_query = (
+            select(Product)
+            .options(
+                load_only(
+                    Product.id,
+                    Product.name,
+                    Product.slug,
+                    Product.brand,
+                    Product.base_price,
+                    Product.old_price,
+                    Product.size_grid,
+                    Product.image_badge_type,
+                    Product.image_badge_text,
+                    Product.image_badge_color,
+                    Product.image_badge_position,
+                    Product.created_at,
+                ),
+                selectinload(Product.images).load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.detail_path,
+                    ProductImage.alt_text,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
+                selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))).load_only(
+                    ProductVariant.id,
+                    ProductVariant.product_id,
+                    ProductVariant.size,
+                    ProductVariant.color,
+                    ProductVariant.stock_quantity,
+                    ProductVariant.reserved_quantity,
+                    ProductVariant.is_active,
+                ),
             )
             .where(*conditions)
             .order_by(*order_by)
@@ -278,6 +351,61 @@ class ProductsRepository:
                 .selectinload(ProductRelatedProduct.related_product)
                 .selectinload(
                     Product.variants.and_(ProductVariant.is_active.is_(True))
+                ),
+            )
+            .where(Product.id == product_id, Product.status == ProductStatus.ACTIVE)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_public_detail_by_id(self, product_id: int) -> Product | None:
+        related_product_loader = selectinload(
+            Product.related_product_links
+        ).selectinload(ProductRelatedProduct.related_product)
+
+        result = await self.session.execute(
+            select(Product)
+            .options(
+                selectinload(Product.category),
+                selectinload(Product.product_categories).selectinload(ProductCategory.category),
+                selectinload(Product.tags),
+                selectinload(Product.images),
+                selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))),
+                related_product_loader.load_only(
+                    Product.id,
+                    Product.name,
+                    Product.slug,
+                    Product.brand,
+                    Product.base_price,
+                    Product.old_price,
+                    Product.size_grid,
+                    Product.image_badge_type,
+                    Product.image_badge_text,
+                    Product.image_badge_color,
+                    Product.image_badge_position,
+                    Product.status,
+                    Product.created_at,
+                ),
+                related_product_loader.selectinload(Product.images).load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.detail_path,
+                    ProductImage.alt_text,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
+                related_product_loader.selectinload(
+                    Product.variants.and_(ProductVariant.is_active.is_(True))
+                ).load_only(
+                    ProductVariant.id,
+                    ProductVariant.product_id,
+                    ProductVariant.size,
+                    ProductVariant.color,
+                    ProductVariant.stock_quantity,
+                    ProductVariant.reserved_quantity,
+                    ProductVariant.is_active,
                 ),
             )
             .where(Product.id == product_id, Product.status == ProductStatus.ACTIVE)

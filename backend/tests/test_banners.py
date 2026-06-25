@@ -352,6 +352,9 @@ def test_public_active_banner_list_is_anonymous() -> None:
                 "meta": {"limit": 20, "offset": 0, "total": 1},
             }
 
+        async def track_public_banner_views(self, *_: object, **__: object) -> None:
+            return None
+
     app.dependency_overrides[get_banners_service] = lambda: FakeBannersService()
     try:
         with TestClient(app) as client:
@@ -360,6 +363,8 @@ def test_public_active_banner_list_is_anonymous() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["etag"]
     assert response.json()["items"][0]["target_type"] == "product"
     assert "title" not in response.json()["items"][0]
     assert "subtitle" not in response.json()["items"][0]

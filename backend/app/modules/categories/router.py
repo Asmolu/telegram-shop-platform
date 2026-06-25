@@ -1,10 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.cache import CacheService
 from app.common.deps import get_db_session, require_roles
+from app.common.http_cache import (
+    PUBLIC_STABLE_CACHE,
+    is_not_modified,
+    not_modified_response,
+    set_cache_headers,
+    stable_etag,
+)
 from app.db.models import User, UserRole
 from app.modules.categories.schemas import CategoryCreate, CategoryRead, CategoryUpdate
 from app.modules.categories.service import CategoriesService
@@ -20,17 +27,33 @@ def get_categories_service(
 
 @router.get("", response_model=list[CategoryRead])
 async def list_categories(
+    request: Request,
+    response: Response,
     service: Annotated[CategoriesService, Depends(get_categories_service)],
-) -> list:
-    return await service.list_categories()
+) -> list[CategoryRead] | Response:
+    categories = [
+        CategoryRead.model_validate(category) for category in await service.list_categories()
+    ]
+    etag = stable_etag(categories)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    return categories
 
 
 @router.get("/{category_id}", response_model=CategoryRead)
 async def get_category(
     category_id: int,
+    request: Request,
+    response: Response,
     service: Annotated[CategoriesService, Depends(get_categories_service)],
-) -> object:
-    return await service.get_category(category_id)
+) -> CategoryRead | Response:
+    category = CategoryRead.model_validate(await service.get_category(category_id))
+    etag = stable_etag(category)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    return category
 
 
 @router.post("", response_model=CategoryRead, status_code=status.HTTP_201_CREATED)

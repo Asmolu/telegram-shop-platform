@@ -28,9 +28,11 @@ from app.modules.categories.service import CategoriesService
 from app.modules.products.inventory import calculate_available_quantity
 from app.modules.products.repository import ProductsRepository
 from app.modules.products.schemas import (
+    ProductCardList,
+    ProductCardRead,
     ProductCreate,
     ProductImageCreate,
-    ProductList,
+    ProductPublicDetailRead,
     ProductRead,
     ProductUpdate,
     ProductVariantCreate,
@@ -393,7 +395,7 @@ async def test_product_service_creates_updates_and_reads_brand() -> None:
 @pytest.mark.asyncio
 async def test_public_product_list_never_exposes_non_active_statuses() -> None:
     service = ProductsService(DummySession())
-    service.repository.list = AsyncMock(
+    service.repository.list_public_cards = AsyncMock(
         return_value=([_product(status=ProductStatus.DRAFT)], 1)
     )
 
@@ -403,19 +405,21 @@ async def test_public_product_list_never_exposes_non_active_statuses() -> None:
         status=ProductStatus.DRAFT,
     )
 
-    assert result == ProductList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
-    service.repository.list.assert_not_awaited()
+    assert result == ProductCardList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
+    service.repository.list_public_cards.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_public_product_list_loads_only_active_variants() -> None:
     service = ProductsService(DummySession())
-    service.repository.list = AsyncMock(return_value=([_product(status=ProductStatus.ACTIVE)], 1))
+    service.repository.list_public_cards = AsyncMock(
+        return_value=([_product(status=ProductStatus.ACTIVE, variants=[_variant()])], 1)
+    )
 
     result = await service.list_public_products(limit=20, offset=0)
 
     assert result.meta.total == 1
-    service.repository.list.assert_awaited_once_with(
+    service.repository.list_public_cards.assert_awaited_once_with(
         limit=20,
         offset=0,
         category_id=None,
@@ -425,15 +429,72 @@ async def test_public_product_list_loads_only_active_variants() -> None:
         size_grid=None,
         size=None,
         color=None,
-        active_variants_only=True,
     )
+    assert isinstance(result.items[0], ProductCardRead)
+    assert result.items[0].variants[0].available_quantity == 5
+
+
+def test_product_card_dto_uses_card_image_and_omits_detail_fields() -> None:
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant()])
+    product.images = [
+        ProductImage(
+            id=1,
+            product_id=product.id,
+            file_path="products/source.jpg",
+            thumbnail_path="products/source.thumbnail.webp",
+            card_path="products/source.card.webp",
+            detail_path="products/source.detail.webp",
+            alt_text="Hoodie",
+            position=0,
+            is_primary=True,
+            created_at=datetime(2026, 5, 27, tzinfo=UTC),
+        )
+    ]
+
+    card = ProductCardRead.model_validate(product)
+    payload = card.model_dump(mode="json")
+
+    assert payload["image_url"] == "/uploads/products/source.card.webp"
+    assert payload["thumbnail_image_url"] == "/uploads/products/source.thumbnail.webp"
+    assert "description" not in payload
+    assert "images" not in payload
+    assert "detail_url" not in payload
+    assert "sku" not in payload["variants"][0]
+
+
+def test_public_detail_dto_keeps_variants_without_filesystem_paths() -> None:
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant()])
+    product.images = [
+        ProductImage(
+            id=1,
+            product_id=product.id,
+            file_path="products/source.jpg",
+            thumbnail_path="products/source.thumbnail.webp",
+            card_path="products/source.card.webp",
+            detail_path="products/source.detail.webp",
+            alt_text="Hoodie",
+            position=0,
+            is_primary=True,
+            created_at=datetime(2026, 5, 27, tzinfo=UTC),
+        )
+    ]
+
+    detail = ProductPublicDetailRead.model_validate(product)
+    payload = detail.model_dump(mode="json")
+
+    assert payload["images"][0]["detail_url"] == "/uploads/products/source.detail.webp"
+    assert payload["images"][0]["image_variants"]["card"] == "/uploads/products/source.card.webp"
+    assert "file_path" not in payload["images"][0]
+    assert "thumbnail_path" not in payload["images"][0]
+    assert payload["variants"][0]["sku"] == "HOODIE-M-BLK"
+    assert "stock_quantity" not in payload["variants"][0]
 
 
 @pytest.mark.asyncio
 async def test_public_product_search_tracks_sanitized_query() -> None:
     tracker = FakeAnalyticsTracker()
     service = ProductsService(DummySession(), analytics_tracker=tracker)
-    service.repository.list = AsyncMock(return_value=([], 0))
+    service.repository.list_public_cards = AsyncMock(return_value=([], 0))
 
     await service.list_public_products(limit=20, offset=0, search=" \n футболка \t ")
 
@@ -482,13 +543,14 @@ async def test_product_search_suggestions_ignore_tiny_queries() -> None:
 async def test_public_product_detail_tracks_product_view() -> None:
     tracker = FakeAnalyticsTracker()
     service = ProductsService(DummySession(), analytics_tracker=tracker)
-    service.repository.get_active_by_id = AsyncMock(
+    service.repository.get_public_detail_by_id = AsyncMock(
         return_value=_product(status=ProductStatus.ACTIVE)
     )
 
     product = await service.get_public_product(1, user_id=None)
 
     assert product.id == 1
+    assert isinstance(product, ProductPublicDetailRead)
     assert tracker.events == [
         (
             "product.viewed",
@@ -517,7 +579,7 @@ async def test_public_product_detail_returns_only_active_related_products() -> N
         ),
     ]
     service = ProductsService(DummySession())
-    service.repository.get_active_by_id = AsyncMock(return_value=product)
+    service.repository.get_public_detail_by_id = AsyncMock(return_value=product)
 
     result = await service.get_public_product(product.id)
 

@@ -77,6 +77,49 @@ class ProductImageRead(ProductImageBase):
         return next_value
 
 
+class PublicTaxonomyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    description: str | None = None
+    image_url: str | None = None
+
+
+class ProductPublicImageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    url: str
+    image_url: str | None = None
+    thumbnail_url: str | None = None
+    card_url: str | None = None
+    detail_url: str | None = None
+    image_variants: ProductImageVariants = Field(default_factory=ProductImageVariants)
+    alt_text: str | None = None
+    position: int
+    is_primary: bool
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_compatible_image_fields(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+
+        next_value = dict(value)
+        next_value.setdefault("image_url", next_value.get("url"))
+        next_value.setdefault(
+            "image_variants",
+            {
+                "thumbnail": next_value.get("thumbnail_url"),
+                "card": next_value.get("card_url"),
+                "detail": next_value.get("detail_url"),
+            },
+        )
+        return next_value
+
+
 class ProductVariantBase(BaseModel):
     size: str = Field(min_length=1, max_length=64)
     color: str | None = Field(default=None, min_length=1, max_length=64)
@@ -137,6 +180,20 @@ class ProductVariantRead(ProductVariantBase):
     updated_at: datetime
 
 
+class ProductCardVariantRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    size: str
+    color: str | None = None
+    available_quantity: int
+    is_active: bool
+
+
+class ProductPublicVariantRead(ProductCardVariantRead):
+    sku: str
+
+
 class ProductCategoryInput(BaseModel):
     category_id: int = Field(gt=0)
     priority: int = Field(ge=1, le=3)
@@ -148,6 +205,14 @@ class ProductCategoryRead(BaseModel):
     category_id: int
     priority: int
     category: CategoryRead | None = None
+
+
+class ProductPublicCategoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    category_id: int
+    priority: int
+    category: PublicTaxonomyRead | None = None
 
 
 def _validate_category_assignments(
@@ -369,7 +434,7 @@ class ProductRead(ProductBase):
 
     id: int
     category: CategoryRead | None
-    categories: list[ProductCategoryRead] = Field(default_factory=list)
+    categories: list[ProductPublicCategoryRead] = Field(default_factory=list)
     tags: list[TagRead]
     images: list[ProductImageRead]
     variants: list[ProductVariantRead] = Field(default_factory=list)
@@ -386,6 +451,60 @@ class ProductDetailRead(ProductRead):
 class ProductList(BaseModel):
     items: list[ProductRead]
     meta: PageMeta
+
+
+class ProductCardRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    brand: str | None = None
+    base_price: Decimal
+    old_price: Decimal | None = None
+    size_grid: ProductSizeGrid
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = None
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
+    image_url: str | None = None
+    thumbnail_image_url: str | None = None
+    image_width: int | None = 480
+    image_height: int | None = 600
+    variants: list[ProductCardVariantRead] = Field(default_factory=list)
+    is_available: bool = False
+    created_at: datetime
+
+
+class ProductCardList(BaseModel):
+    items: list[ProductCardRead]
+    meta: PageMeta
+
+
+class ProductPublicDetailRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    brand: str | None = None
+    description: str | None = None
+    base_price: Decimal
+    old_price: Decimal | None = None
+    size_grid: ProductSizeGrid
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = None
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
+    category: PublicTaxonomyRead | None = None
+    categories: list[ProductCategoryRead] = Field(default_factory=list)
+    tags: list[PublicTaxonomyRead] = Field(default_factory=list)
+    images: list[ProductPublicImageRead] = Field(default_factory=list)
+    variants: list[ProductPublicVariantRead] = Field(default_factory=list)
+    related_product_ids: list[int] = Field(default_factory=list)
+    related_products: list[ProductCardRead] = Field(default_factory=list)
+    is_available: bool = False
+    created_at: datetime
 
 
 class ProductVariantList(BaseModel):

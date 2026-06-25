@@ -9,7 +9,7 @@ from app.main import create_app
 from app.modules.categories.router import get_categories_service
 from app.modules.products.router import get_products_service
 from app.modules.products.schemas import (
-    ProductList,
+    ProductCardList,
     ProductSearchSuggestion,
     ProductSearchSuggestionList,
 )
@@ -20,8 +20,11 @@ def test_public_product_list_allows_anonymous_access() -> None:
     app = create_app()
 
     class FakeProductsService:
-        async def list_public_products(self, **_: object) -> ProductList:
-            return ProductList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
+        async def list_public_products(self, **_: object) -> ProductCardList:
+            return ProductCardList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
+
+        async def track_public_product_list_search(self, **_: object) -> None:
+            return None
 
     app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
     try:
@@ -32,6 +35,64 @@ def test_public_product_list_allows_anonymous_access() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "meta": {"limit": 20, "offset": 0, "total": 0}}
+    assert response.headers["etag"]
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_public_product_list_etag_returns_304_without_search_tracking() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        def __init__(self) -> None:
+            self.tracked = 0
+
+        async def list_public_products(self, **_: object) -> ProductCardList:
+            return ProductCardList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
+
+        async def track_public_product_list_search(self, **_: object) -> None:
+            self.tracked += 1
+
+    service = FakeProductsService()
+    app.dependency_overrides[get_products_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            first_response = client.get("/api/v1/products?search=hoodie")
+            second_response = client.get(
+                "/api/v1/products?search=hoodie",
+                headers={"If-None-Match": first_response.headers["etag"]},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 304
+    assert second_response.content == b""
+    assert service.tracked == 1
+
+
+def test_public_product_list_accepts_unquoted_if_none_match() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def list_public_products(self, **_: object) -> ProductCardList:
+            return ProductCardList(items=[], meta=PageMeta(limit=20, offset=0, total=0))
+
+        async def track_public_product_list_search(self, **_: object) -> None:
+            return None
+
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            first_response = client.get("/api/v1/products")
+            second_response = client.get(
+                "/api/v1/products",
+                headers={"If-None-Match": first_response.headers["etag"].strip('"')},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert second_response.status_code == 304
+    assert second_response.content == b""
 
 
 def test_public_product_suggestions_allow_anonymous_access() -> None:
@@ -322,8 +383,8 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
     app = create_app()
 
     class FakeProductsService:
-        async def list_public_products(self, **_: object) -> ProductList:
-            return ProductList.model_validate(
+        async def list_public_products(self, **_: object) -> ProductCardList:
+            return ProductCardList.model_validate(
                 {
                     "items": [
                         {
@@ -339,6 +400,9 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
                 }
             )
 
+        async def track_public_product_list_search(self, **_: object) -> None:
+            return None
+
     app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
     try:
         with TestClient(app) as client:
@@ -353,6 +417,10 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
     assert response.json()["items"][0]["image_badge_color"] == "green"
     assert response.json()["items"][0]["image_badge_position"] == "bottom-right"
     assert response.json()["items"][0]["variants"][0]["available_quantity"] == 3
+    assert "description" not in response.json()["items"][0]
+    assert "images" not in response.json()["items"][0]
+    assert "tags" not in response.json()["items"][0]
+    assert "sku" not in response.json()["items"][0]["variants"][0]
 
 
 def test_public_product_variants_returns_active_variants() -> None:

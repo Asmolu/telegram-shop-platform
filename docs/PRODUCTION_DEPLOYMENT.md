@@ -229,6 +229,9 @@ curl -i https://seller.stylexac.ru
 - Vite hashed files under `/assets/`, including logo and fonts emitted by Vite, may use `Cache-Control: public, max-age=31536000, immutable`.
 - Product image derivatives with UUID-based paths ending in `.thumbnail.webp`, `.card.webp`, or `.detail.webp` may use immutable public cache.
 - Legacy upload originals and payment receipts must not be marked public immutable. Payment receipts should use private/no-store caching.
+- Public catalog API responses use conditional requests: products, product detail, and banners return `ETag` with `Cache-Control: no-cache`; categories and tags return `ETag` with `Cache-Control: public, max-age=60, stale-while-revalidate=300`.
+- Personalized API responses such as auth, profile, cart, favorites, checkout, orders, payments, receipts, and seller/admin routes must not be cached publicly. Cart and favorites explicitly return `Cache-Control: private, no-store`.
+- Deploy the compact public product DTO as a coordinated backend and Mini App release. Seller Panel remains on `/api/v1/products/admin`; do not point it at compact public list responses.
 
 ## Migrations
 

@@ -1,22 +1,19 @@
 import React from 'react';
 import {
   getCategories,
-  getProducts,
   getTags,
   toApiErrorMessage,
   type Category,
-  type Product,
   type Tag,
 } from '../shared/api';
 import { useRouter } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, PageLoader, TopBar } from '../shared/ui';
-import { getProductImageUrl, normalizeAssetUrl } from '../shared/utils/images';
+import { normalizeAssetUrl } from '../shared/utils/images';
 
 export function CategoriesPage() {
   const { navigate } = useRouter();
   const [categories, setCategories] = React.useState<Category[]>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
-  const [products, setProducts] = React.useState<Product[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -26,15 +23,13 @@ export function CategoriesPage() {
       setLoading(true);
       setError(null);
       try {
-        const [categoryResult, tagResult, productResult] = await Promise.all([
+        const [categoryResult, tagResult] = await Promise.all([
           getCategories(),
           getTags(),
-          getProducts({ limit: 100, offset: 0, status: 'ACTIVE' }),
         ]);
         if (!cancelled) {
           setCategories(categoryResult);
           setTags(tagResult);
-          setProducts(productResult.items);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -66,13 +61,10 @@ export function CategoriesPage() {
       {!loading && !error && categories.length > 0 ? (
         <div className="category-grid">
           {categories.map((category) => {
-            const categoryProducts = products.filter((product) => isProductInCategory(product, category.id));
-            const categoryImageUrl = normalizeAssetUrl(
+            const imageUrl = normalizeAssetUrl(
               category.image_url
                 ?? (category.image_path ? `/uploads/${category.image_path}` : null),
             );
-            const imageUrl = categoryImageUrl
-              ?? (categoryProducts[0] ? getProductImageUrl(categoryProducts[0], 'card') : null);
 
             return (
               <button
@@ -94,9 +86,6 @@ export function CategoriesPage() {
                   ) : <span>{category.name.slice(0, 1).toUpperCase()}</span>}
                 </span>
                 <strong>{category.name}</strong>
-                {categoryProducts.some((product) => product.tags.some((tag) => tag.slug.includes('sale'))) ? (
-                  <em>sale</em>
-                ) : null}
               </button>
             );
           })}
@@ -147,12 +136,4 @@ export function CategoriesPage() {
       ) : null}
     </div>
   );
-}
-
-function isProductInCategory(product: Product, categoryId: number) {
-  if (product.category_id === categoryId) {
-    return true;
-  }
-
-  return Boolean(product.categories?.some((assignment) => assignment.category_id === categoryId));
 }

@@ -56,9 +56,9 @@ export type Tag = {
 
 export type ProductImage = {
   id: number;
-  product_id: number;
-  file_path: string;
-  url: string;
+  product_id?: number;
+  file_path?: string | null;
+  url?: string | null;
   image_url?: string | null;
   thumbnail_path?: string | null;
   card_path?: string | null;
@@ -82,16 +82,16 @@ export type ProductImage = {
 
 export type ProductVariant = {
   id: number;
-  product_id: number;
+  product_id?: number;
   size: string;
   color?: string | null;
-  sku: string;
-  stock_quantity: number;
-  reserved_quantity: number;
+  sku?: string;
+  stock_quantity?: number;
+  reserved_quantity?: number;
   available_quantity: number;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type ProductCategoryAssignment = {
@@ -114,12 +114,16 @@ export type Product = {
   image_badge_text?: string | null;
   image_badge_color?: ProductImageBadgeColor | null;
   image_badge_position?: ProductImageBadgePosition | null;
-  status: ProductStatus;
+  image_url?: string | null;
+  thumbnail_image_url?: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
+  status?: ProductStatus;
   category_id?: number | null;
   category?: Category | null;
   categories?: ProductCategoryAssignment[];
-  tags: Tag[];
-  images: ProductImage[];
+  tags?: Tag[];
+  images?: ProductImage[];
   variants: ProductVariant[];
   related_product_ids?: number[];
   related_products?: Product[];
@@ -130,7 +134,7 @@ export type Product = {
   reviews_count?: number | string | null;
   rating_count?: number | string | null;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 };
 
 export type ProductList = {
@@ -200,11 +204,14 @@ export type CartProduct = {
   id: number;
   name: string;
   slug: string;
+  brand?: string | null;
   base_price: string;
   old_price?: string | null;
   compare_at_price?: string | null;
   size_grid: ProductSizeGrid;
   status: ProductStatus;
+  image_url?: string | null;
+  thumbnail_image_url?: string | null;
 };
 
 export type CartProductVariant = {
@@ -247,6 +254,7 @@ export type Favorite = {
   id: number;
   user_id: number;
   product_id: number;
+  product?: Product | null;
   created_at: string;
 };
 

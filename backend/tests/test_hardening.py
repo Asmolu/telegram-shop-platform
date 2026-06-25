@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from app.core.config import DEFAULT_JWT_SECRET_KEY, Settings, join_public_url, settings
 from app.core.rate_limit import reset_in_memory_rate_limiter
-from app.db.models import Category, Product, ProductSizeGrid, ProductStatus
+from app.db.models import Category, Product, ProductImageBadgeType, ProductSizeGrid, ProductStatus
 from app.main import create_app
-from app.modules.products.schemas import ProductList, ProductUpdate
+from app.modules.products.schemas import ProductCardList, ProductUpdate
 from app.modules.products.service import ProductsService
 
 
@@ -50,14 +50,14 @@ class FakeCache:
 async def test_public_product_list_uses_cache_after_miss() -> None:
     cache = FakeCache()
     service = ProductsService(DummySession(), cache=cache)
-    service.repository.list = AsyncMock(return_value=([_product()], 1))
+    service.repository.list_public_cards = AsyncMock(return_value=([_product()], 1))
 
     first = await service.list_public_products(limit=20, offset=0)
     second = await service.list_public_products(limit=20, offset=0)
 
-    assert isinstance(first, ProductList)
+    assert isinstance(first, ProductCardList)
     assert second.meta.total == 1
-    service.repository.list.assert_awaited_once()
+    service.repository.list_public_cards.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -142,6 +142,10 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         description="Warm",
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        image_badge_type=ProductImageBadgeType.NONE,
+        image_badge_text=None,
+        image_badge_color=None,
+        image_badge_position=None,
         status=status,
         category_id=1,
         category=Category(

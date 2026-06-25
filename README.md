@@ -153,9 +153,11 @@ header remain compatible and keep the existing transactional behavior.
 ## Product search foundation
 
 Product search uses PostgreSQL `pg_trgm` through Alembic-managed `CREATE EXTENSION IF NOT EXISTS
-pg_trgm`. Public product responses include `old_price`, `search_priority`, and `search_aliases` so
-the Mini App can show crossed-out prices and the Seller Panel can tune search matching. Lower
-numeric `search_priority` values rank first in matching search results; the default is `2`.
+pg_trgm`. Public product list responses use a compact card DTO with display prices, badge fields,
+card image URLs, availability, and compact active variants. Search tuning fields such as
+`search_priority` and `search_aliases` stay in seller/admin workflows and are not sent to Mini App
+card lists. Lower numeric `search_priority` values rank first in matching search results; the
+default is `2`.
 
 Catalog products own a `size_grid`: active grids are `clothing_alpha` and `shoes_eu`.
 The legacy `shoes_ru` value remains only for historical products/order snapshots and must not be
@@ -165,6 +167,10 @@ RU/EU/US/UK and half sizes are rejected. Public product listing supports server-
 `size`, and `color` filters against active variants. General search matches exact numeric variant
 sizes and expands common Russian color words and conservative typos to the Latin color values stored
 on variants.
+
+Public catalog endpoints support safe conditional requests. Products, product detail, and banners
+return `ETag` with revalidation; categories and tags use short public caching. Personalized state
+such as cart and favorites is private/no-store.
 
 ## Seller Portal auth and bot management
 

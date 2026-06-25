@@ -473,6 +473,7 @@ def test_favorite_routes_scope_to_current_user() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def _reviews_service(

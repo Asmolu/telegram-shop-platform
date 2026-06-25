@@ -119,6 +119,37 @@ http://localhost:8000/api/v1/openapi.json
 http://localhost:8000/docs
 ```
 
+## Public catalog API contract
+
+Public product list contexts use a compact card DTO:
+
+- `GET /api/v1/products` returns `ProductCardList`.
+- Card items include identity, display price, badge fields, availability,
+  `image_url` for the card-sized image, `thumbnail_image_url`, fixed 4:5 image
+  dimensions, and compact active variants.
+- Card variants include only `id`, `size`, `color`, `available_quantity`, and
+  `is_active`. SKU, raw stock, reserved stock, timestamps, descriptions, full
+  category/tag objects, full galleries, and related products are intentionally
+  omitted.
+- `GET /api/v1/products/{id}` returns the public detail DTO with description,
+  public gallery URLs and variants, active variants including visible SKU,
+  taxonomy summaries, and related products as compact card DTOs.
+- Seller Panel keeps using `/api/v1/products/admin` and
+  `/api/v1/products/admin/{id}` for the full admin DTO.
+
+Public catalog responses can use conditional requests:
+
+- Products, product detail, and banners return `ETag` with
+  `Cache-Control: no-cache`.
+- Categories and tags return `ETag` with
+  `Cache-Control: public, max-age=60, stale-while-revalidate=300`.
+- Personalized endpoints such as cart and favorites return
+  `Cache-Control: private, no-store`.
+
+The compact list contract is a coordinated backend + Mini App rollout. Older
+Mini App builds that require full `images`, `tags`, and `categories` on product
+lists should not be served against the compact-only backend.
+
 ## Authentication settings
 
 Telegram login validates Mini App `initData` with `TELEGRAM_WEBAPP_BOT_TOKEN` or

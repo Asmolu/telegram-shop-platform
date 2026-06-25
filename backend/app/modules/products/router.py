@@ -1,18 +1,27 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.cache import CacheService
 from app.common.deps import get_db_session, get_optional_current_user, require_roles
+from app.common.http_cache import (
+    PUBLIC_REVALIDATE_CACHE,
+    is_not_modified,
+    not_modified_response,
+    set_cache_headers,
+    stable_etag,
+)
 from app.common.pagination import PaginationParams
 from app.db.models import ProductSizeGrid, ProductStatus, User, UserRole
 from app.modules.analytics.service import IsolatedAnalyticsTracker
 from app.modules.audit.service import AuditService
 from app.modules.products.schemas import (
+    ProductCardList,
     ProductCreate,
     ProductDetailRead,
     ProductList,
+    ProductPublicDetailRead,
     ProductSearchSuggestionList,
     ProductStatusUpdate,
     ProductUpdate,
@@ -37,8 +46,10 @@ def get_products_service(
     )
 
 
-@router.get("", response_model=ProductList)
+@router.get("", response_model=ProductCardList)
 async def list_public_products(
+    request: Request,
+    response: Response,
     pagination: Annotated[PaginationParams, Depends()],
     service: Annotated[ProductsService, Depends(get_products_service)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
@@ -49,8 +60,8 @@ async def list_public_products(
     size_grid: ProductSizeGrid | None = None,
     size: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     color: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
-) -> ProductList:
-    return await service.list_public_products(
+) -> ProductCardList | Response:
+    result = await service.list_public_products(
         limit=pagination.limit,
         offset=pagination.offset,
         category_id=category_id,
@@ -61,7 +72,18 @@ async def list_public_products(
         size=size,
         color=color,
         user_id=current_user.id if current_user is not None else None,
+        track_search=False,
     )
+    etag = stable_etag(result)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    await service.track_public_product_list_search(
+        search=search,
+        user_id=current_user.id if current_user is not None else None,
+        result_count=result.meta.total,
+    )
+    return result
 
 
 @router.get("/suggestions", response_model=ProductSearchSuggestionList)
@@ -191,16 +213,28 @@ async def archive_product(
     return await service.archive_product(product_id, actor_user_id=current_user.id)
 
 
-@router.get("/{product_id}", response_model=ProductDetailRead)
+@router.get("/{product_id}", response_model=ProductPublicDetailRead)
 async def get_public_product(
     product_id: int,
+    request: Request,
+    response: Response,
     service: Annotated[ProductsService, Depends(get_products_service)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
-) -> object:
-    return await service.get_public_product(
+) -> ProductPublicDetailRead | Response:
+    result = await service.get_public_product(
         product_id,
         user_id=current_user.id if current_user is not None else None,
+        track_view=False,
     )
+    etag = stable_etag(result)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    await service.track_public_product_view(
+        product_id=result.id,
+        user_id=current_user.id if current_user is not None else None,
+    )
+    return result
 
 
 @router.post("", response_model=ProductDetailRead, status_code=status.HTTP_201_CREATED)

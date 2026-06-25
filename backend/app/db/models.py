@@ -823,6 +823,25 @@ class Product(Base):
         )
 
     @property
+    def primary_image(self) -> "ProductImage | None":
+        primary = next((image for image in self.images if image.is_primary), None)
+        return primary or (self.images[0] if self.images else None)
+
+    @property
+    def image_url(self) -> str | None:
+        image = self.primary_image
+        if image is None:
+            return None
+        return image.card_url or image.thumbnail_url or image.url
+
+    @property
+    def thumbnail_image_url(self) -> str | None:
+        image = self.primary_image
+        if image is None:
+            return None
+        return image.thumbnail_url or image.card_url or image.url
+
+    @property
     def categories(self) -> list[ProductCategory]:
         return self.product_categories
 
