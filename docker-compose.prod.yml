@@ -41,7 +41,7 @@ services:
       context: ./seller-panel
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_BASE_URL: ${SELLER_PANEL_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        VITE_API_BASE_URL: ${SELLER_PANEL_VITE_API_BASE_URL:-/api/v1}
     ports:
       - "127.0.0.1:8080:80"
     depends_on:
@@ -54,7 +54,7 @@ services:
       context: ./mini-app
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_BASE_URL: ${MINI_APP_VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        VITE_API_BASE_URL: ${MINI_APP_VITE_API_BASE_URL:-/api/v1}
         VITE_TELEGRAM_BOT_USERNAME: ${VITE_TELEGRAM_BOT_USERNAME:-}
     ports:
       - "127.0.0.1:8081:80"

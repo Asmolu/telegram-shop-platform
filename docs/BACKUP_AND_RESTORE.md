@@ -1,10 +1,11 @@
 # Backup and Restore
 
 Production backups are automated for the single-node VDS deployment under
-`stylexac.ru`. PostgreSQL is the source of truth for business data. Uploaded
-files live on disk in the `uploads_data` Docker volume and are backed up
-separately. Redis is cache and rate-limit state only and is not backed up as
-durable data.
+`stylexac.ru`. The Frankfurt rollout uses the same backup model, with a fresh
+database migrated through current Alembic head before traffic. PostgreSQL is the
+source of truth for business data. Uploaded files live on disk in the
+`uploads_data` Docker volume and are backed up separately. Redis is cache and
+rate-limit state only and is not backed up as durable data.
 
 The normal production target is Yandex Disk:
 
@@ -40,6 +41,12 @@ telegram-shop-prod-YYYYMMDD-HHMMSS.tar.gz
 backend service with relative paths preserved. `backup_metadata.json` stores
 only non-secret operational metadata, restore verification status, and the
 Yandex Disk path. `.env.production` is not included.
+
+The dump includes idempotency records, telemetry rows, image derivative path
+columns, and all current migrations. The uploads archive must include product
+derivatives, legacy originals, category/tag/banner images, and payment receipt
+files. Receipt files remain private application data even though they are part
+of the backup archive.
 
 ## Required Environment
 
@@ -83,6 +90,12 @@ Validate full VDS production configuration:
 ```bash
 python backend/scripts/backup_production.py validate-config --strict-yandex
 ```
+
+Before enabling the systemd timer on Frankfurt, run the provider and Docker
+egress checks in `docs/FRANKFURT_DEPLOYMENT_READINESS.md`, then run one manual
+backup and one restore drill. Telegram backup notifications should be enabled
+only after Bot 2 connectivity is proven; backup failure visibility must not rely
+exclusively on Telegram notification delivery.
 
 Run a full production backup, restore verification, Yandex upload, and
 retention cleanup:

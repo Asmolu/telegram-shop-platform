@@ -318,8 +318,15 @@ Sprint 14 adds MVP production readiness:
 Production/staging docs:
 
 - `docs/PRODUCTION_DEPLOYMENT.md`
+- `docs/FRANKFURT_DEPLOYMENT_READINESS.md`
 - `docs/BACKUP_AND_RESTORE.md`
 - `docs/SECURITY_REVIEW.md`
+
+Frankfurt deployment readiness includes the same-origin Caddy routing template
+in `deploy/caddy/Caddyfile.frankfurt.example`, synthetic connectivity checks,
+Telegram egress preflight, webhook cutover order, ADMIN bootstrap steps, and
+backup readiness. It is documentation only; production deployment, DNS,
+webhooks, BotFather changes, and secret rotation remain manual operations.
 
 ## Local backend without Docker
 

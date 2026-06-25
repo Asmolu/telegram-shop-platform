@@ -8,6 +8,7 @@ import {
   normalizeEndpointScope,
   trackTelemetry,
 } from '../telemetry';
+import { buildApiUrl, getApiOriginFromBase, normalizeApiBaseUrl } from '../utils/urls';
 
 export type ApiErrorKind =
   | 'authentication'
@@ -51,7 +52,7 @@ export class ApiClientError extends Error {
   }
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const TOKEN_STORAGE_KEY = 'telegram_shop_mini_app_access_token';
 
 export const API_TIMEOUT_MS = {
@@ -85,13 +86,7 @@ export function getApiBaseUrl() {
 }
 
 export function getApiOrigin() {
-  try {
-    return getApiBaseUrl()
-      ? new URL(getApiBaseUrl()).origin
-      : window.location.origin;
-  } catch {
-    return '';
-  }
+  return getApiOriginFromBase(getApiBaseUrl());
 }
 
 export function getStoredAccessToken() {
@@ -114,19 +109,7 @@ export function createIdempotencyKey(prefix = 'miniapp') {
 }
 
 function buildUrl(path: string, query?: Record<string, QueryValue>) {
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const baseUrl = getApiBaseUrl();
-  const url = baseUrl
-    ? new URL(`${baseUrl}${cleanPath}`)
-    : new URL(cleanPath, window.location.origin);
-
-  Object.entries(query ?? {}).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      url.searchParams.set(key, String(value));
-    }
-  });
-
-  return url.toString();
+  return buildApiUrl(getApiBaseUrl(), path, query);
 }
 
 function getErrorMessage(payload: unknown, fallback: string) {

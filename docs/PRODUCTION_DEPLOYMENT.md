@@ -32,7 +32,8 @@ Backend:
 - `JWT_SECRET_KEY`
 - `CORS_ORIGINS`
 - `PUBLIC_API_BASE_URL=https://api.stylexac.ru`
-- `PUBLIC_UPLOADS_URL=https://api.stylexac.ru/uploads`
+- `PUBLIC_UPLOADS_URL=/uploads` for same-origin Frankfurt routing, or
+  `https://api.stylexac.ru/uploads` when absolute upload URLs are required
 - `PUBLIC_MINI_APP_BASE_URL=https://mini.stylexac.ru`
 - `PUBLIC_SELLER_PANEL_BASE_URL=https://seller.stylexac.ru`
 - `TELEGRAM_WEBAPP_BOT_TOKEN`
@@ -59,7 +60,8 @@ Backend:
 
 Frontend:
 
-- `VITE_API_BASE_URL` for both `mini-app` and `seller-panel`
+- `VITE_API_BASE_URL=/api/v1` for same-origin Mini App and Seller Panel builds,
+  or `https://api.stylexac.ru/api/v1` for the legacy separate API domain mode
 - `VITE_TELEGRAM_BOT_USERNAME` for Mini App UI links only, not bot tokens
 - `VITE_TELEMETRY_DISABLED=true` can disable Mini App telemetry in an emergency
 
@@ -76,8 +78,9 @@ Privacy-safe telemetry requires a coordinated backend + Mini App release:
   `analytics_events`;
 - Mini App sends bounded batches to `POST /api/v1/analytics/telemetry`;
 - no production telemetry cleanup is run automatically;
-- same-origin API routing, Caddy production routing changes, Frankfurt
-  WebView/VPN validation, and synthetic monitoring are deferred to Prompt 3B2.
+- same-origin API routing is documented in
+  `docs/FRANKFURT_DEPLOYMENT_READINESS.md` and
+  `deploy/caddy/Caddyfile.frankfurt.example`.
 
 Validate the compose file syntax:
 
@@ -226,6 +229,33 @@ curl -i https://www.stylexac.ru
 curl -i https://mini.stylexac.ru
 curl -i https://seller.stylexac.ru
 ```
+
+Same-origin reverse-proxy smoke checks:
+
+```bash
+curl -i https://mini.stylexac.ru/api/v1/products
+curl -i https://mini.stylexac.ru/api/v1/unknown
+curl -i https://mini.stylexac.ru/uploads/missing.webp
+curl -i https://seller.stylexac.ru/api/v1/products
+```
+
+`/api/*` and `/uploads/*` responses must come from the backend, not SPA
+`index.html`.
+
+Synthetic readiness checker:
+
+```bash
+cd backend
+python scripts/check_production_connectivity.py \
+  --api-base-url https://api.stylexac.ru/api/v1 \
+  --mini-app-url https://mini.stylexac.ru \
+  --seller-panel-url https://seller.stylexac.ru \
+  --telegram-public
+```
+
+For the full Frankfurt checklist, provider preflight, webhook cutover, ADMIN
+bootstrap, and backup readiness, see
+`docs/FRANKFURT_DEPLOYMENT_READINESS.md`.
 
 ## Services
 

@@ -31,6 +31,7 @@ vi.mock('../features/catalog/useQuickCartPicker', () => ({
 }));
 
 vi.mock('../shared/api', () => ({
+  getApiBaseUrl: () => 'https://api.example.test/api/v1',
   getApiOrigin: () => 'https://api.example.test',
   getCart: vi.fn().mockResolvedValue({
     id: 1,

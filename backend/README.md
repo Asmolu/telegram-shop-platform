@@ -169,6 +169,10 @@ Mini App telemetry is handled by the existing analytics module:
 - Raw telemetry retention defaults to 60 days and cleanup is batch-wise through
   `AnalyticsService.cleanup_telemetry(..., dry_run=True)` by default.
 
+Frankfurt readiness adds `scripts/check_production_connectivity.py` for
+read-only DNS/TCP/TLS/HTTP/cache/telemetry/Telegram checks. It accepts tokens
+only through environment-variable names and redacts them from output.
+
 See `../docs/ANALYTICS_TELEMETRY.md` for event names, allowlisted fields,
 sampling defaults, ingestion limits, and local disable flags.
 

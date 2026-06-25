@@ -20,6 +20,7 @@ describe('telemetry client', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('flushes a bounded batch through fetch keepalive', async () => {
@@ -38,13 +39,31 @@ describe('telemetry client', () => {
   });
 
   it('uses sendBeacon for page-hide flush when available', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/api/v1/');
     const { flushTelemetry, trackTelemetry } = await loadTelemetry();
 
     trackTelemetry('chunk.recovery_failed', { error_category: 'chunk_load_failed' });
     await flushTelemetry({ preferBeacon: true });
 
     expect(navigator.sendBeacon).toHaveBeenCalledTimes(1);
+    expect(navigator.sendBeacon).toHaveBeenCalledWith(
+      '/api/v1/analytics/telemetry',
+      expect.any(Blob),
+    );
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses absolute telemetry URL when configured', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.stylexac.ru/api/v1/');
+    const { flushTelemetry, trackTelemetry } = await loadTelemetry();
+
+    trackTelemetry('chunk.recovery_failed', { error_category: 'chunk_load_failed' });
+    await flushTelemetry({ preferBeacon: true });
+
+    expect(navigator.sendBeacon).toHaveBeenCalledWith(
+      'https://api.stylexac.ru/api/v1/analytics/telemetry',
+      expect.any(Blob),
+    );
   });
 
   it('drops telemetry failures without changing network state', async () => {

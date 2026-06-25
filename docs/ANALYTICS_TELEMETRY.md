@@ -160,8 +160,9 @@ python scripts/cleanup_telemetry.py --days 60 --batch-size 500 --execute
 Critical operational errors can be retained longer later through aggregated
 reporting, but raw telemetry should stay short-lived.
 
-## Deferred
+## Frankfurt readiness
 
-Frankfurt deployment, same-origin API routing, Caddy production headers,
-Telegram WebView validation on real devices, real VPN measurement, RUM
-dashboards, and synthetic monitoring are deferred to Prompt 3B2.
+Prompt 3B2 adds same-origin telemetry URL support, the Frankfurt Caddy routing
+template, and `backend/scripts/check_production_connectivity.py` for synthetic
+checks. Real Frankfurt deployment, Telegram WebView validation on real devices,
+real VPN measurement, and dashboards remain manual/post-deploy validation work.

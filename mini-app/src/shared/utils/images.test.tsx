@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { RouterProvider } from '../router/RouterProvider';
 import { ProductCard } from '../ui/ProductCard';
 import { ProductImageCarousel } from '../ui/ProductImageCarousel';
-import { getApiOrigin, type Product } from '../api';
+import type { Product } from '../api';
 import { getProductImageItems, getProductImageUrl } from './images';
 
 describe('product image variants', () => {
@@ -16,7 +16,7 @@ describe('product image variants', () => {
 
     const item = getProductImageItems(product, 'card')[0];
 
-    expect(getProductImageUrl(product, 'card')).toBe(`${getApiOrigin()}/uploads/products/card.webp`);
+    expect(getProductImageUrl(product, 'card')).toBe('http://localhost:8000/uploads/products/card.webp');
     expect(item.srcSet).toContain('/uploads/products/thumb.webp 240w');
     expect(item.srcSet).toContain('/uploads/products/card.webp 480w');
     expect(item.srcSet).not.toContain('original.jpg');
@@ -37,7 +37,9 @@ describe('product image variants', () => {
       }],
     });
 
-    expect(getProductImageUrl(product, 'card')).toBe(`${getApiOrigin()}/uploads/products/original.jpg`);
+    expect(getProductImageUrl(product, 'card')).toBe(
+      'http://localhost:8000/uploads/products/original.jpg',
+    );
   });
 
   it('selects compact card DTO image fields without a gallery payload', () => {
@@ -49,11 +51,11 @@ describe('product image variants', () => {
 
     const item = getProductImageItems(product, 'card')[0];
 
-    expect(item.url).toBe(`${getApiOrigin()}/uploads/products/card.webp`);
+    expect(item.url).toBe('http://localhost:8000/uploads/products/card.webp');
     expect(item.srcSet).toContain('/uploads/products/thumb.webp 240w');
     expect(item.srcSet).toContain('/uploads/products/card.webp 480w');
     expect(getProductImageUrl(product, 'thumbnail')).toBe(
-      `${getApiOrigin()}/uploads/products/thumb.webp`,
+      'http://localhost:8000/uploads/products/thumb.webp',
     );
   });
 
@@ -61,7 +63,7 @@ describe('product image variants', () => {
     render(<ProductImageCarousel product={productFixture()} variant="detail" />);
 
     const image = screen.getByAltText('Hoodie');
-    expect(image.getAttribute('src')).toBe(`${getApiOrigin()}/uploads/products/detail.webp`);
+    expect(image.getAttribute('src')).toBe('http://localhost:8000/uploads/products/detail.webp');
     expect(image.getAttribute('width')).toBe('1200');
     expect(image.getAttribute('height')).toBe('1500');
     expect(image.getAttribute('loading')).toBe('eager');
@@ -94,7 +96,7 @@ describe('product image variants', () => {
 
     expect(highPriorityImages).toHaveLength(1);
     expect(screen.getAllByAltText('Hoodie')[0].getAttribute('src')).toBe(
-      `${getApiOrigin()}/uploads/products/card.webp`,
+      'http://localhost:8000/uploads/products/card.webp',
     );
     expect(screen.getAllByAltText('Hoodie')[1].getAttribute('loading')).toBe('lazy');
   });

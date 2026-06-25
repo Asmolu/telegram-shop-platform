@@ -1,4 +1,5 @@
 import { getStoredToken } from '../auth/tokenStorage';
+import { buildApiUrl, normalizeApiBaseUrl, resolvePublicMediaUrl } from '../utils/urls';
 import type {
   AnalyticsEvent,
   AnalyticsSummary,
@@ -53,20 +54,15 @@ import type {
 } from './types';
 
 export const API_BASE_URL = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1'
-).replace(/\/+$/, '');
+  normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL as string | undefined)
+);
 
 export function resolveMediaUrl(url: string | null | undefined): string {
   if (!url) {
     return '';
   }
 
-  if (/^(https?:)?\/\//.test(url) || url.startsWith('data:')) {
-    return url;
-  }
-
-  const origin = new URL(API_BASE_URL || '/', window.location.origin).origin;
-  return `${origin}${url.startsWith('/') ? url : `/${url}`}`;
+  return resolvePublicMediaUrl(url, API_BASE_URL);
 }
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -92,20 +88,7 @@ export class ApiError extends Error {
 }
 
 function buildUrl(path: string, query?: QueryParams): string {
-  const url = new URL(
-    `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`,
-    window.location.origin,
-  );
-
-  Object.entries(query ?? {}).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') {
-      return;
-    }
-
-    url.searchParams.set(key, String(value));
-  });
-
-  return url.toString();
+  return buildApiUrl(API_BASE_URL, path, query);
 }
 
 function clampQueryLimit(query: QueryParams, maxLimit: number): QueryParams {

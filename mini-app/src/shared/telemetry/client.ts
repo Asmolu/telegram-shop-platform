@@ -80,7 +80,7 @@ type TrackOptions = {
   priority?: 'normal' | 'critical';
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const TELEMETRY_SESSION_STORAGE_KEY = 'telegram_shop_telemetry_session';
 const TELEMETRY_SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_QUEUE_EVENTS = 80;
@@ -306,8 +306,7 @@ function deterministicSample(...args: [string, string, number]) {
 }
 
 function telemetryUrl() {
-  const path = '/analytics/telemetry';
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : `/api/v1${path}`;
+  return buildTelemetryUrl(API_BASE_URL);
 }
 
 function getTelemetrySessionId() {
@@ -407,3 +406,4 @@ function simpleHash(value: string) {
 function isTelemetryEnabled() {
   return import.meta.env.VITE_TELEMETRY_DISABLED !== 'true';
 }
+import { buildTelemetryUrl, normalizeApiBaseUrl } from '../utils/urls';

@@ -1,4 +1,4 @@
-import { getApiOrigin } from '../api';
+import { getApiBaseUrl } from '../api';
 import type {
   Product,
   ProductImage,
@@ -6,6 +6,7 @@ import type {
   ProductImageBadgePosition,
   ProductImageBadgeType,
 } from '../api';
+import { resolvePublicMediaUrl } from './urls';
 
 export type ProductImageVariant = 'thumbnail' | 'card' | 'detail' | 'original';
 
@@ -43,12 +44,7 @@ export function normalizeAssetUrl(url?: string | null) {
     return url;
   }
 
-  const origin = getApiOrigin();
-  if (!origin) {
-    return url;
-  }
-
-  return `${origin}${url.startsWith('/') ? url : `/${url}`}`;
+  return resolvePublicMediaUrl(url, getApiBaseUrl());
 }
 
 export function getProductImageUrl(product: Product, variant: ProductImageVariant = 'card') {

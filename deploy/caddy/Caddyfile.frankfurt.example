@@ -1,0 +1,39 @@
+{
+	email ops@example.invalid
+}
+
+(api_and_uploads) {
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	@uploads path /uploads/*
+	handle @uploads {
+		reverse_proxy backend:8000
+	}
+}
+
+(frontend_common) {
+	encode zstd gzip
+	header {
+		-Server
+	}
+}
+
+api.stylexac.ru {
+	import frontend_common
+	reverse_proxy backend:8000
+}
+
+stylexac.ru, www.stylexac.ru, mini.stylexac.ru {
+	import frontend_common
+	import api_and_uploads
+	reverse_proxy mini-app:80
+}
+
+seller.stylexac.ru {
+	import frontend_common
+	import api_and_uploads
+	reverse_proxy seller-panel:80
+}
