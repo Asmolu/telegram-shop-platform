@@ -301,7 +301,11 @@ class ProductsService:
         payload: ProductCreate,
         actor_user_id: int | None = None,
     ) -> Product:
-        product = await self.stage_product_with_variants(payload, [])
+        try:
+            product = await self.stage_product_with_variants(payload, [])
+        except AppError:
+            await self.session.rollback()
+            raise
         product_id = await self._flush_commit_and_get_id(
             product,
             audit_callback=lambda created_product: self._record_audit(
@@ -351,6 +355,7 @@ class ProductsService:
                 for assignment in category_assignments
             ],
             images=[ProductImage(**image.model_dump()) for image in payload.images],
+            related_product_links=[],
         )
         self.repository.add(product)
         try:

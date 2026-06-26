@@ -63,12 +63,14 @@ class DummySession:
         self.committed = False
         self.deleted = False
         self.flush_count = 0
+        self.rollback_count = 0
 
     async def commit(self) -> None:
         self.committed = True
 
     async def rollback(self) -> None:
         self.committed = False
+        self.rollback_count += 1
 
     async def refresh(self, _: object) -> None:
         return None
@@ -83,6 +85,21 @@ class DummySession:
 class FailingCommitSession(DummySession):
     async def commit(self) -> None:
         raise RuntimeError("commit failed")
+
+
+class InspectingFirstFlushSession(DummySession):
+    def __init__(self, product_ref: dict[str, Product], *, assigned_id: int = 10) -> None:
+        super().__init__()
+        self.product_ref = product_ref
+        self.assigned_id = assigned_id
+
+    async def flush(self) -> None:
+        self.flush_count += 1
+        if self.flush_count == 1:
+            product = self.product_ref["product"]
+            assert "related_product_links" in product.__dict__
+            assert list(product.related_product_links) == []
+            product.id = self.assigned_id
 
 
 class FakeAnalyticsTracker:
@@ -921,9 +938,12 @@ async def test_product_update_rejects_unknown_related_product_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_product_create_rejects_unknown_related_product_ids() -> None:
-    service = ProductsService(DummySession())
+    session = DummySession()
+    added_products: list[Product] = []
+    service = ProductsService(session)
     service.tags_repository.list_by_ids = AsyncMock(return_value=[])
     service.repository.list_existing_ids = AsyncMock(return_value=set())
+    service.repository.add = added_products.append
 
     with pytest.raises(AppError, match="Unknown related product IDs: 999") as error:
         await service.create_product(
@@ -936,17 +956,97 @@ async def test_product_create_rejects_unknown_related_product_ids() -> None:
         )
 
     assert error.value.status_code == 400
+    assert added_products == []
+    assert session.flush_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_product_create_rejects_self_related_product_after_id_assignment() -> None:
+    captured: dict[str, Product] = {}
+    session = InspectingFirstFlushSession(captured, assigned_id=2)
+    service = ProductsService(session)
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_existing_ids = AsyncMock(return_value={2})
+    service.repository.add = lambda product: captured.setdefault("product", product)
+
+    with pytest.raises(AppError, match="cannot be related to itself") as error:
+        await service.create_product(
+            ProductCreate(
+                name="Hoodie",
+                slug="hoodie-related",
+                base_price=Decimal("59.90"),
+                related_product_ids=[2],
+            )
+        )
+
+    assert error.value.status_code == 400
+    assert session.flush_count == 1
+    assert session.committed is False
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_product_create_with_empty_related_products_initializes_links_before_flush() -> None:
+    captured: dict[str, Product] = {}
+    session = InspectingFirstFlushSession(captured)
+    service = ProductsService(session)
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_existing_ids = AsyncMock(return_value=set())
+    service.repository.add = lambda product: captured.setdefault("product", product)
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie-empty-related",
+            base_price=Decimal("59.90"),
+            related_product_ids=[],
+        )
+    )
+
+    assert created.id == 10
+    assert created.related_product_ids == []
+    assert created.related_product_links == []
+    assert session.flush_count == 2
+    service.repository.list_existing_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_product_create_persists_single_related_product_position() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(InspectingFirstFlushSession(captured))
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_existing_ids = AsyncMock(return_value={2})
+    service.repository.add = lambda product: captured.setdefault("product", product)
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(
+            name="Hoodie",
+            slug="hoodie-related-single",
+            base_price=Decimal("59.90"),
+            related_product_ids=[2],
+        )
+    )
+
+    assert created.related_product_ids == [2]
+    assert [
+        (link.related_product_id, link.position)
+        for link in created.related_product_links
+    ] == [(2, 0)]
+    service.repository.list_existing_ids.assert_awaited_once_with([2])
 
 
 @pytest.mark.asyncio
 async def test_product_create_persists_related_product_order() -> None:
     captured: dict[str, Product] = {}
-    service = ProductsService(DummySession())
+    session = InspectingFirstFlushSession(captured)
+    service = ProductsService(session)
     service.tags_repository.list_by_ids = AsyncMock(return_value=[])
     service.repository.list_existing_ids = AsyncMock(return_value={2, 3})
 
     def capture_product(product: Product) -> None:
-        product.id = 10
         captured["product"] = product
 
     service.repository.add = capture_product
@@ -962,6 +1062,66 @@ async def test_product_create_persists_related_product_order() -> None:
     )
 
     assert created.related_product_ids == [3, 2]
+    assert [
+        (link.related_product_id, link.position)
+        for link in created.related_product_links
+    ] == [(3, 0), (2, 1)]
+    assert session.flush_count == 2
+
+
+@pytest.mark.asyncio
+async def test_product_create_accepts_full_seller_panel_payload() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(InspectingFirstFlushSession(captured))
+    service.categories_repository.get_by_id = AsyncMock(return_value=_category())
+    service.tags_repository.list_by_ids = AsyncMock(
+        return_value=[_tag(), _tag(tag_id=2, name="Winter", slug="winter")]
+    )
+    service.repository.list_existing_ids = AsyncMock(return_value=set())
+    service.repository.add = lambda product: captured.setdefault("product", product)
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    product = await service.create_product(
+        ProductCreate(
+            name="Seller Panel Coat",
+            slug="seller-panel-coat",
+            brand="Gadji",
+            description="Warm dashboard-created item",
+            base_price=Decimal("129.90"),
+            old_price=Decimal("159.90"),
+            search_priority=1,
+            search_aliases="winter coat, coat",
+            image_badge_type=ProductImageBadgeType.CUSTOM,
+            image_badge_text=" New ",
+            image_badge_color=ProductImageBadgeColor.PINK,
+            image_badge_position=ProductImageBadgePosition.TOP_RIGHT,
+            status=ProductStatus.ACTIVE,
+            categories=[
+                {"category_id": 1, "priority": 1},
+                {"category_id": 2, "priority": 2},
+            ],
+            tag_ids=[1, 2],
+            images=[],
+            related_product_ids=[],
+        )
+    )
+
+    assert product.category_id == 1
+    assert [
+        (assignment.category_id, assignment.priority)
+        for assignment in product.product_categories
+    ] == [(1, 1), (2, 2)]
+    assert [tag.id for tag in product.tags] == [1, 2]
+    assert product.image_badge_type == ProductImageBadgeType.CUSTOM
+    assert product.image_badge_text == "New"
+    assert product.image_badge_color == ProductImageBadgeColor.PINK
+    assert product.image_badge_position == ProductImageBadgePosition.TOP_RIGHT
+    assert product.search_priority == 1
+    assert product.search_aliases == "winter coat\ncoat"
+    assert product.images == []
+    assert product.related_product_links == []
+    assert product.status == ProductStatus.ACTIVE
+    service.repository.list_existing_ids.assert_not_awaited()
 
 
 @pytest.mark.asyncio

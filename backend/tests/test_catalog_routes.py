@@ -260,6 +260,8 @@ def test_product_create_allows_seller() -> None:
                 "category": None,
                 "tags": [],
                 "images": [],
+                "related_product_ids": [],
+                "related_products": [],
                 "created_at": now,
                 "updated_at": now,
             }
@@ -274,6 +276,38 @@ def test_product_create_allows_seller() -> None:
 
     assert response.status_code == 201
     assert response.json()["slug"] == "hoodie"
+    assert response.json()["related_product_ids"] == []
+    assert response.json()["related_products"] == []
+
+
+def test_product_create_returns_related_products_for_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def create_product(self, _: object, **__: object) -> dict[str, object]:
+            related = _product_response()
+            related["id"] = 2
+            related["slug"] = "related-hoodie"
+            product = _product_response()
+            product["related_product_ids"] = [2]
+            product["related_products"] = [related]
+            return product
+
+    payload = _product_payload()
+    payload["slug"] = "hoodie-with-related"
+    payload["related_product_ids"] = [2]
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/products", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["related_product_ids"] == [2]
+    assert response.json()["related_products"][0]["id"] == 2
 
 
 def test_product_variant_create_allows_seller() -> None:
@@ -451,6 +485,7 @@ def _product_payload() -> dict[str, object]:
         "category_id": None,
         "tag_ids": [],
         "images": [],
+        "related_product_ids": [],
     }
 
 
