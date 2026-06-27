@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     telegram_customer_bot_token: str | None = None
     telegram_customer_bot_username: str | None = None
     telegram_customer_webhook_secret: str | None = None
+    telegram_mini_app_short_name: str = ""
+    telegram_channel_entry_start_param: str = "channel_pin"
 
     jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_algorithm: str = "HS256"

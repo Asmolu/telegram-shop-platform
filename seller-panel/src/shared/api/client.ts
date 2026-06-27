@@ -16,6 +16,11 @@ import type {
   BroadcastDeliverySummary,
   Category,
   CategoryPayload,
+  ChannelEntryConfig,
+  ChannelEntryPreview,
+  ChannelEntryPreviewPayload,
+  ChannelEntryPublishPayload,
+  ChannelEntryPublishResponse,
   CustomerNotificationSubscription,
   CustomerOrderMessageResponse,
   DashboardSummary,
@@ -45,6 +50,10 @@ import type {
   SellerRegistrationStartResponse,
   Tag,
   TagPayload,
+  TelegramChannel,
+  TelegramChannelCheckResponse,
+  TelegramChannelEntryMessage,
+  TelegramChannelPayload,
   TokenResponse,
   UploadedBannerImage,
   UploadedCategoryImage,
@@ -488,5 +497,36 @@ export const api = {
         `/customer-notifications/campaigns/${campaignId}/deliveries`,
         { query },
       ),
+  },
+  channelEntry: {
+    config: () => apiRequest<ChannelEntryConfig>('/channel-entry/config'),
+    channels: () => apiRequest<TelegramChannel[]>('/channel-entry/channels'),
+    createChannel: (body: TelegramChannelPayload) =>
+      apiRequest<TelegramChannel>('/channel-entry/channels', { method: 'POST', body }),
+    updateChannel: (channelId: number, body: Partial<TelegramChannelPayload & { is_active: boolean }>) =>
+      apiRequest<TelegramChannel>(`/channel-entry/channels/${channelId}`, {
+        method: 'PATCH',
+        body,
+      }),
+    disableChannel: (channelId: number) =>
+      apiRequest<void>(`/channel-entry/channels/${channelId}`, { method: 'DELETE' }),
+    checkChannel: (chatId: string) =>
+      apiRequest<TelegramChannelCheckResponse>('/channel-entry/channels/check', {
+        method: 'POST',
+        body: { chat_id: chatId },
+      }),
+    preview: (body: ChannelEntryPreviewPayload) =>
+      apiRequest<ChannelEntryPreview>('/channel-entry/preview', { method: 'POST', body }),
+    publish: (body: ChannelEntryPublishPayload) =>
+      apiRequest<ChannelEntryPublishResponse>('/channel-entry/publish', {
+        method: 'POST',
+        body,
+      }),
+    history: (query: QueryParams = {}) =>
+      apiRequest<PageList<TelegramChannelEntryMessage>>('/channel-entry/history', { query }),
+    pinMessage: (messageId: number) =>
+      apiRequest<TelegramChannelEntryMessage>(`/channel-entry/messages/${messageId}/pin`, {
+        method: 'POST',
+      }),
   },
 };

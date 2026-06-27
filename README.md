@@ -297,6 +297,30 @@ send; it is not a read receipt. Staging tests should start with one internal
 account that has opened Bot 1 with `/start`, then enable a tiny campaign before
 production use.
 
+Seller Panel also exposes `/channel-entry` for publishing a pinned channel entry
+message through Bot 1. A seller/admin can save a public channel by `@username`
+or a private channel by `-100...` chat id, preview the message, publish it, and
+pin it automatically. Bot 1 must be an admin in the channel with publish and
+pin/edit rights. The current manual test channel example is `@checktsplatform`.
+
+The channel button is always generated server-side as a Telegram Mini App direct
+link. With the current production values:
+
+```text
+TELEGRAM_CUSTOMER_BOT_USERNAME=CheckYouStyleBot
+TELEGRAM_MINI_APP_SHORT_NAME=
+TELEGRAM_CHANNEL_ENTRY_START_PARAM=channel_pin
+```
+
+the button URL is:
+
+```text
+https://t.me/CheckYouStyleBot?startapp=channel_pin
+```
+
+Do not use `https://mini.stylexac.ru/` as the channel button URL; Telegram must
+open the Mini App through Bot 1 so it provides `initData` for auth.
+
 ## Manual SBP payments
 
 Checkout uses a manual 100% SBP transfer workflow. A seller or administrator

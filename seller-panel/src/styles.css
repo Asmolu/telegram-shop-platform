@@ -1950,6 +1950,91 @@ textarea:focus {
   width: auto;
 }
 
+.channel-entry-header,
+.channel-entry-setup {
+  display: grid;
+  gap: 14px;
+}
+
+.channel-entry-settings div {
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+
+.channel-entry-channel-form,
+.channel-entry-publish-form {
+  margin-bottom: 16px;
+}
+
+.channel-entry-table {
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.channel-check-result,
+.channel-entry-preview {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 14px;
+}
+
+.channel-check-result strong,
+.channel-check-result span,
+.channel-check-result small {
+  display: block;
+}
+
+.channel-check-result-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.channel-check-result-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.channel-entry-checkboxes {
+  align-content: start;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 12px;
+}
+
+.channel-entry-preview {
+  margin: 4px 0 0;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.channel-entry-preview h3,
+.channel-entry-preview p {
+  margin: 0;
+}
+
+.channel-entry-preview p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.telegram-button-preview {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #2481cc;
+  color: #ffffff;
+  padding: 8px 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1180px) {
   .kpi-grid {
     grid-template-columns: repeat(3, minmax(150px, 1fr));

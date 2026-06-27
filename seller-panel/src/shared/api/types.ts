@@ -694,3 +694,87 @@ export interface BroadcastDelivery {
   created_at: string;
   updated_at: string;
 }
+
+export interface ChannelEntryConfig {
+  bot_username: string;
+  mini_app_direct_url: string;
+  mini_app_url: string;
+  start_param: string;
+  short_name: string;
+  has_customer_bot_token: boolean;
+  setup_hint: string;
+}
+
+export interface TelegramChannel {
+  id: number;
+  title: string;
+  chat_id: string;
+  is_active: boolean;
+  last_checked_at: string | null;
+  last_check_status: string | null;
+  last_check_error: string | null;
+  created_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TelegramChannelPayload {
+  title: string;
+  chat_id: string;
+}
+
+export interface TelegramChannelCheckResponse {
+  ok: boolean;
+  chat_id: string;
+  title: string | null;
+  type: string | null;
+  username: string | null;
+  can_post_estimate: boolean | null;
+  can_pin_estimate: boolean | null;
+  message: string;
+}
+
+export interface ChannelEntryPreviewPayload {
+  channel_id?: number | null;
+  chat_id?: string | null;
+  text: string;
+  button_text?: string;
+}
+
+export interface ChannelEntryPreview {
+  text: string;
+  button_text: string;
+  button_url: string;
+  selected_chat_id: string;
+  warnings: string[];
+}
+
+export interface ChannelEntryPublishPayload extends ChannelEntryPreviewPayload {
+  pin: boolean;
+  disable_notification: boolean;
+}
+
+export interface TelegramChannelEntryMessage {
+  id: number;
+  channel_id: number | null;
+  channel: TelegramChannel | null;
+  chat_id: string;
+  text: string;
+  button_text: string;
+  button_url: string;
+  telegram_message_id: number | null;
+  is_pinned: boolean;
+  published_at: string | null;
+  pinned_at: string | null;
+  last_error: string | null;
+  created_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelEntryPublishResponse {
+  ok: boolean;
+  status: string;
+  message: string;
+  item: TelegramChannelEntryMessage;
+}

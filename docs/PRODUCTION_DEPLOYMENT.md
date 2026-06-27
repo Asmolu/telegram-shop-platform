@@ -46,9 +46,13 @@ Backend:
 - `TELEGRAM_CUSTOMER_BOT_TOKEN` for Bot 1 customer notification registry
   webhook setup, service notification delivery, and customer campaigns
 - `TELEGRAM_CUSTOMER_BOT_USERNAME` for Mini App customer notification start
-  links
+  links and Seller Panel channel-entry direct links
 - `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for the protected Bot 1 webhook
   `X-Telegram-Bot-Api-Secret-Token` header
+- `TELEGRAM_MINI_APP_SHORT_NAME=` empty when BotFather does not offer a Mini App
+  short name
+- `TELEGRAM_CHANNEL_ENTRY_START_PARAM=channel_pin` for Seller Panel channel
+  pinned entry messages
 - `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED=true`
 - `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60` (or another positive polling interval)
 - cache, rate limit, and customer campaign batch settings from
@@ -152,6 +156,27 @@ The Bot 1 webhook URL should be:
 
 ```text
 https://api.stylexac.ru/api/v1/telegram/customer-bot/webhook
+```
+
+Seller Panel can publish a pinned Telegram channel entry message through Bot 1:
+
+- Open `https://seller.stylexac.ru/channel-entry`.
+- Bot 1 must be an administrator in the target channel with rights to publish
+  messages and pin/edit messages.
+- Public channels can use `@username`; the current manual test channel example
+  is `@checktsplatform`.
+- Private channels must use a numeric `-100...` chat id.
+- The inline button must use the Telegram Mini App direct link, not the web URL:
+  `https://t.me/CheckYouStyleBot?startapp=channel_pin`.
+- Do not use `https://mini.stylexac.ru/` as the channel button URL. It opens the
+  website directly and Telegram will not provide Mini App `initData`.
+
+Required production values:
+
+```text
+TELEGRAM_CUSTOMER_BOT_USERNAME=CheckYouStyleBot
+TELEGRAM_MINI_APP_SHORT_NAME=
+TELEGRAM_CHANNEL_ENTRY_START_PARAM=channel_pin
 ```
 
 Customer campaign staging flow before production enablement:

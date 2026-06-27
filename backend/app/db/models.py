@@ -430,6 +430,111 @@ class CustomerTelegramSubscription(Base):
     user: Mapped[User | None] = relationship(back_populates="customer_telegram_subscription")
 
 
+class TelegramChannel(Base):
+    __tablename__ = "telegram_channels"
+    __table_args__ = (
+        UniqueConstraint("chat_id", name="uq_telegram_channels_chat_id"),
+        Index("ix_telegram_channels_active_created", "is_active", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_check_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_check_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    entry_messages: Mapped[list["TelegramChannelEntryMessage"]] = relationship(
+        back_populates="channel",
+        order_by="TelegramChannelEntryMessage.created_at",
+    )
+
+
+class TelegramChannelEntryMessage(Base):
+    __tablename__ = "telegram_channel_entry_messages"
+    __table_args__ = (
+        Index(
+            "ix_telegram_channel_entry_messages_created",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_telegram_channel_entry_messages_channel_created",
+            "channel_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel_id: Mapped[int | None] = mapped_column(
+        ForeignKey("telegram_channels.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    chat_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    button_text: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="Открыть",
+        server_default="Открыть",
+    )
+    button_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    channel: Mapped[TelegramChannel | None] = relationship(back_populates="entry_messages")
+
+
 class SellerCredential(Base):
     __tablename__ = "seller_credentials"
 
