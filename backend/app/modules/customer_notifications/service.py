@@ -888,7 +888,9 @@ class CustomerNotificationsService:
         subscription.has_chat = True
         subscription.service_opt_in = True
         subscription.service_opted_out_at = None
-        subscription.marketing_opt_in = False
+        subscription.marketing_opt_in = True
+        subscription.marketing_opted_in_at = now
+        subscription.marketing_opted_out_at = None
         subscription.blocked_at = None
         subscription.last_delivery_error = None
         subscription.last_start_at = now
@@ -998,14 +1000,22 @@ class CustomerNotificationsService:
         if subscription is not None:
             return subscription
 
-        subscription = await self.repository.get_by_telegram_user_id(user.telegram_id)
+        subscription = await self.repository.link_unlinked_subscription_to_user(
+            user_id=user.id,
+            telegram_user_id=user.telegram_id,
+        )
         if subscription is None:
             return None
-        if subscription.user_id is None:
-            subscription.user_id = user.id
-            if commit_link:
+        if subscription.user_id == user.id and commit_link:
+            try:
                 await self._commit("Customer notification subscription link failed")
                 await self._refresh(subscription)
+            except AppError:
+                logger.warning(
+                    "customer notification subscription auto-link conflict",
+                    extra={"user_id": user.id, "telegram_user_id": user.telegram_id},
+                )
+                return await self.repository.get_by_user_id(user.id)
         return subscription
 
     async def _get_or_create_subscription_for_user(

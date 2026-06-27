@@ -100,7 +100,7 @@ class NotificationTemplateList(BaseModel):
 
 
 class BroadcastAudienceFilter(BaseModel):
-    scope: Literal["all", "purchasers", "product", "category", "promo_code"] = "all"
+    scope: Literal["all", "connected", "purchasers", "product", "category", "promo_code"] = "all"
     product_id: int | None = Field(default=None, ge=1)
     category_id: int | None = Field(default=None, ge=1)
     promo_code_id: int | None = Field(default=None, ge=1)
@@ -160,6 +160,11 @@ class BroadcastCampaignRead(BaseModel):
     message_title: str | None
     message_body: str
     parse_mode: str | None
+    image_path: str | None
+    image_url: str | None
+    image_original_filename: str | None
+    image_mime_type: str | None
+    image_size_bytes: int | None
     scheduled_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None

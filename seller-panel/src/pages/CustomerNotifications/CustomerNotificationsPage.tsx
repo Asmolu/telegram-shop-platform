@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ApiError, api } from '../../shared/api';
+import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   BroadcastCampaign,
   BroadcastCampaignPreview,
@@ -9,8 +9,6 @@ import type {
   BroadcastDeliveryStatus,
   BroadcastDeliverySummary,
   CustomerNotificationSubscription,
-  NotificationTemplate,
-  NotificationTemplateCategory,
   PageMeta,
 } from '../../shared/api';
 import { labelForEnum, useI18n } from '../../shared/i18n';
@@ -22,11 +20,13 @@ interface PageProps {
 }
 
 type BooleanFilter = 'all' | 'true' | 'false';
-type ViewKey = 'campaigns' | 'templates' | 'reports' | 'recipients';
-type AudienceScope = 'all' | 'purchasers' | 'product' | 'category' | 'promo_code';
+type ViewKey = 'campaigns' | 'reports' | 'recipients';
+type AudienceScope = 'all' | 'connected' | 'purchasers' | 'product' | 'category' | 'promo_code';
 
 const PAGE_LIMIT = 20;
 const DELIVERY_LIMIT = 20;
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const emptySummary: BroadcastDeliverySummary = {
   pending: 0,
@@ -47,8 +47,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
   const [campaignOffset, setCampaignOffset] = useState(0);
   const [campaignStatus, setCampaignStatus] = useState<BroadcastCampaignStatus | 'all'>('all');
   const [campaignTypeFilter, setCampaignTypeFilter] = useState<BroadcastCampaignType | 'all'>('all');
-  const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
-  const [templateMeta, setTemplateMeta] = useState<PageMeta | undefined>();
   const [subscriptions, setSubscriptions] = useState<CustomerNotificationSubscription[]>([]);
   const [subscriptionMeta, setSubscriptionMeta] = useState<PageMeta | undefined>();
   const [subscriptionOffset, setSubscriptionOffset] = useState(0);
@@ -58,17 +56,20 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
   const [selectedCampaign, setSelectedCampaign] = useState<BroadcastCampaign | null>(null);
   const [selectedSummary, setSelectedSummary] = useState<BroadcastDeliverySummary>(emptySummary);
   const [preview, setPreview] = useState<BroadcastCampaignPreview | null>(null);
+  const [testSentCampaignIds, setTestSentCampaignIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
+  const [removeExistingImage, setRemoveExistingImage] = useState(false);
 
   const [campaignForm, setCampaignForm] = useState({
     id: '',
     name: '',
     type: 'marketing' as BroadcastCampaignType,
-    templateId: '',
     audienceScope: 'all' as AudienceScope,
     productId: '',
     categoryId: '',
@@ -76,16 +77,9 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     messageTitle: '',
     messageBody: '',
     scheduledAt: '',
-  });
-  const [templateForm, setTemplateForm] = useState({
-    id: '',
-    key: '',
-    name: '',
-    category: 'marketing' as NotificationTemplateCategory,
-    title: '',
-    bodyTemplate: '',
-    allowedVariables: '',
-    isActive: true,
+    imageUrl: '',
+    imageFilename: '',
+    imageStatus: '' as BroadcastCampaignStatus | '',
   });
   const [recipientFilters, setRecipientFilters] = useState({
     hasChat: 'all' as BooleanFilter,
@@ -129,6 +123,15 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     [deliveryStatus],
   );
 
+  const hasFormImage = Boolean(selectedImage || (campaignForm.imageUrl && !removeExistingImage));
+  const messageLimit = hasFormImage ? 1024 : 4096;
+  const messageLength = campaignForm.messageBody.length;
+  const isMessageTooLong = messageLength > messageLimit;
+  const canModifyImage =
+    !campaignForm.imageStatus ||
+    campaignForm.imageStatus === 'draft' ||
+    campaignForm.imageStatus === 'paused';
+
   useEffect(() => {
     loadInitial();
   }, []);
@@ -151,13 +154,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
 
   useEffect(() => {
     if (
-      view !== 'reports'
-      || !selectedCampaign
-      || !['scheduled', 'sending'].includes(selectedCampaign.status)
+      view !== 'reports' ||
+      !selectedCampaign ||
+      !['scheduled', 'sending'].includes(selectedCampaign.status)
     ) {
       return undefined;
     }
-
     const intervalId = window.setInterval(() => {
       loadDeliveryData(selectedCampaign.id);
       loadCampaigns();
@@ -165,15 +167,24 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     return () => window.clearInterval(intervalId);
   }, [selectedCampaign?.id, selectedCampaign?.status, view]);
 
+  useEffect(() => {
+    if (!selectedImage) {
+      setSelectedImagePreview(null);
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(selectedImage);
+    setSelectedImagePreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedImage]);
+
   function loadInitial() {
     setLoading(true);
     setError(null);
-    Promise.all([api.customerNotifications.campaigns(campaignQuery), api.customerNotifications.templates()])
-      .then(([campaignResponse, templateResponse]) => {
+    api.customerNotifications
+      .campaigns(campaignQuery)
+      .then((campaignResponse) => {
         setCampaigns(campaignResponse.items);
         setCampaignMeta(campaignResponse.meta);
-        setTemplates(templateResponse.items);
-        setTemplateMeta(templateResponse.meta);
       })
       .catch(setError)
       .finally(() => setLoading(false));
@@ -189,16 +200,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           if (!current) return current;
           return response.items.find((campaign) => campaign.id === current.id) ?? current;
         });
-      })
-      .catch(setError);
-  }
-
-  function loadTemplates() {
-    api.customerNotifications
-      .templates()
-      .then((response) => {
-        setTemplates(response.items);
-        setTemplateMeta(response.meta);
       })
       .catch(setError);
   }
@@ -246,60 +247,45 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
 
   function handleCampaignSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isMessageTooLong) {
+      setActionError('Текст превышает лимит Telegram для текущего формата.');
+      return;
+    }
     const body = campaignPayload();
     runAction(async () => {
-      const saved = campaignForm.id
+      let saved = campaignForm.id
         ? await api.customerNotifications.updateCampaign(Number(campaignForm.id), body)
         : await api.customerNotifications.createCampaign(body);
+      if (removeExistingImage && saved.image_path) {
+        saved = await api.customerNotifications.removeCampaignImage(saved.id);
+      }
+      if (selectedImage) {
+        saved = await api.customerNotifications.attachCampaignImage(saved.id, selectedImage);
+      }
       setSelectedCampaign(saved);
       setPreview(null);
-      setActionMessage(
-        campaignForm.id
-          ? t('customerNotifications.campaignUpdated')
-          : t('customerNotifications.campaignCreated'),
-      );
+      setActionMessage(campaignForm.id ? 'Рассылка обновлена.' : 'Черновик рассылки создан.');
       resetCampaignForm();
       loadCampaigns();
     });
   }
 
-  function handleTemplateSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const body = {
-      key: templateForm.key,
-      name: templateForm.name,
-      category: templateForm.category,
-      channel: 'telegram' as const,
-      title: templateForm.title || null,
-      body_template: templateForm.bodyTemplate,
-      parse_mode: null,
-      allowed_variables: templateForm.allowedVariables
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
-      is_active: templateForm.isActive,
-    };
-    runAction(async () => {
-      const saved = templateForm.id
-        ? await api.customerNotifications.updateTemplate(Number(templateForm.id), body)
-        : await api.customerNotifications.createTemplate(body);
-      setActionMessage(
-        templateForm.id
-          ? t('customerNotifications.templateUpdated')
-          : t('customerNotifications.templateCreated'),
-      );
-      setTemplateForm({
-        id: '',
-        key: '',
-        name: '',
-        category: saved.category,
-        title: '',
-        bodyTemplate: '',
-        allowedVariables: '',
-        isActive: true,
-      });
-      loadTemplates();
-    });
+  function handleImageSelected(file: File | null) {
+    setActionError(null);
+    if (!file) {
+      setSelectedImage(null);
+      return;
+    }
+    if (!IMAGE_MIME_TYPES.has(file.type)) {
+      setActionError('Загрузите JPEG, PNG или WebP.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      setActionError('Фото должно быть не больше 5 МБ.');
+      return;
+    }
+    setSelectedImage(file);
+    setRemoveExistingImage(false);
   }
 
   function handleRecipientFiltersSubmit(event: FormEvent<HTMLFormElement>) {
@@ -314,9 +300,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       setPreview(response);
       setSelectedCampaign(campaign);
       setView('reports');
-      setActionMessage(
-        t('customerNotifications.previewCount', { count: response.recipient_count_estimate }),
-      );
+      setActionMessage(`Оценка получателей: ${response.recipient_count_estimate}.`);
       loadCampaigns();
     });
   }
@@ -325,26 +309,36 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const response = await api.customerNotifications.testCampaign(campaign.id);
       setSelectedCampaign(campaign);
-      setActionMessage(
-        t('customerNotifications.testSent', {
-          message: response.telegram_message_id ?? t('customerNotifications.saved'),
-        }),
-      );
+      setTestSentCampaignIds((current) => {
+        const next = new Set(current);
+        next.add(campaign.id);
+        return next;
+      });
+      setActionMessage(`Тест отправлен. Telegram message id: ${response.telegram_message_id ?? '-'}.`);
     });
   }
 
   function startCampaign(campaign: BroadcastCampaign) {
+    if (!testSentCampaignIds.has(campaign.id)) {
+      const confirmed = window.confirm(
+        'Тестовое сообщение ещё не отправлялось. Запустить рассылку без теста?',
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
     runAction(async () => {
       const scheduledAt = campaign.scheduled_at ? new Date(campaign.scheduled_at) : null;
-      const started = scheduledAt && scheduledAt.getTime() > Date.now()
-        ? await api.customerNotifications.scheduleCampaign(campaign.id, scheduledAt.toISOString())
-        : await api.customerNotifications.startCampaign(campaign.id);
+      const started =
+        scheduledAt && scheduledAt.getTime() > Date.now()
+          ? await api.customerNotifications.scheduleCampaign(campaign.id, scheduledAt.toISOString())
+          : await api.customerNotifications.startCampaign(campaign.id);
       setSelectedCampaign(started);
       setView('reports');
       setActionMessage(
         started.status === 'scheduled'
-          ? t('customerNotifications.campaignScheduled')
-          : t('customerNotifications.campaignStarted'),
+          ? 'Рассылка запланирована.'
+          : 'Рассылка запущена. Отправка пойдёт автоматически.',
       );
       loadCampaigns();
       loadDeliveryData(started.id);
@@ -355,7 +349,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const paused = await api.customerNotifications.pauseCampaign(campaign.id);
       setSelectedCampaign(paused);
-      setActionMessage(t('customerNotifications.campaignPaused'));
+      setActionMessage('Рассылка остановлена.');
       loadCampaigns();
     });
   }
@@ -364,32 +358,15 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     runAction(async () => {
       const cancelled = await api.customerNotifications.cancelCampaign(campaign.id);
       setSelectedCampaign(cancelled);
-      setActionMessage(t('customerNotifications.campaignCancelled'));
+      setActionMessage('Рассылка отменена.');
       loadCampaigns();
       loadDeliveryData(cancelled.id);
     });
   }
 
-  function processBatch(campaign: BroadcastCampaign) {
-    runAction(async () => {
-      const response = await api.customerNotifications.processCampaignBatch(campaign.id, 20);
-      setActionMessage(
-        t('customerNotifications.processed', {
-          processed: response.processed,
-          sent: response.sent,
-          failed: response.failed,
-          remaining: response.remaining,
-        }),
-      );
-      loadCampaigns();
-      loadDeliveryData(campaign.id);
-    });
-  }
-
   function campaignPayload() {
-    const templateId = campaignForm.templateId ? Number(campaignForm.templateId) : null;
     return {
-      template_id: templateId,
+      template_id: null,
       name: campaignForm.name,
       type: campaignForm.type,
       audience_filter: buildAudienceFilter(),
@@ -422,7 +399,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       id: String(campaign.id),
       name: campaign.name,
       type: campaign.type,
-      templateId: campaign.template_id ? String(campaign.template_id) : '',
       audienceScope: (audience.scope as AudienceScope) || 'all',
       productId: audience.product_id ? String(audience.product_id) : '',
       categoryId: audience.category_id ? String(audience.category_id) : '',
@@ -430,22 +406,13 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       messageTitle: campaign.message_title ?? '',
       messageBody: campaign.message_body,
       scheduledAt: toDateTimeLocal(campaign.scheduled_at),
+      imageUrl: campaign.image_url ?? '',
+      imageFilename: campaign.image_original_filename ?? '',
+      imageStatus: campaign.status,
     });
+    setSelectedImage(null);
+    setRemoveExistingImage(false);
     setView('campaigns');
-  }
-
-  function editTemplate(template: NotificationTemplate) {
-    setTemplateForm({
-      id: String(template.id),
-      key: template.key,
-      name: template.name,
-      category: template.category,
-      title: template.title ?? '',
-      bodyTemplate: template.body_template,
-      allowedVariables: template.allowed_variables.join(', '),
-      isActive: template.is_active,
-    });
-    setView('templates');
   }
 
   function resetCampaignForm() {
@@ -453,7 +420,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       id: '',
       name: '',
       type: 'marketing',
-      templateId: '',
       audienceScope: 'all',
       productId: '',
       categoryId: '',
@@ -461,7 +427,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       messageTitle: '',
       messageBody: '',
       scheduledAt: '',
+      imageUrl: '',
+      imageFilename: '',
+      imageStatus: '',
     });
+    setSelectedImage(null);
+    setRemoveExistingImage(false);
   }
 
   function selectCampaign(campaign: BroadcastCampaign) {
@@ -470,7 +441,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     loadDeliveryData(campaign.id);
   }
 
-  if (loading) return <LoadingState title={t('customerNotifications.loading')} />;
+  if (loading) return <LoadingState title="Загружаем уведомления клиентов" />;
   if (error) {
     return <ErrorState error={error} onRetry={loadInitial} onAuthExpired={onAuthExpired} />;
   }
@@ -480,20 +451,20 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       <section className="panel customer-notifications-header">
         <div className="section-heading">
           <div>
-            <h2>{t('customerNotifications.title')}</h2>
-            <p>{t('customerNotifications.description')}</p>
+            <h2>Уведомления клиентов</h2>
+            <p>Рассылки Bot 1, отчёты доставки и понятный реестр получателей.</p>
           </div>
-          <span className="status-badge status-info">{t('customerNotifications.badge')}</span>
+          <span className="status-badge status-info">Bot 1</span>
         </div>
         <div className="tabs customer-notification-tabs">
-          {(['campaigns', 'templates', 'reports', 'recipients'] as ViewKey[]).map((item) => (
+          {(['campaigns', 'reports', 'recipients'] as ViewKey[]).map((item) => (
             <button
               key={item}
               className={view === item ? 'tab-active' : ''}
               type="button"
               onClick={() => setView(item)}
             >
-              {viewLabel(item, t)}
+              {viewLabel(item)}
             </button>
           ))}
         </div>
@@ -502,7 +473,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
       </section>
 
       {view === 'campaigns' ? renderCampaignsView() : null}
-      {view === 'templates' ? renderTemplatesView() : null}
       {view === 'reports' ? renderReportsView() : null}
       {view === 'recipients' ? renderRecipientsView() : null}
     </div>
@@ -512,33 +482,31 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
     const total = campaignMeta?.total ?? 0;
     const canGoBack = campaignOffset > 0;
     const canGoNext = total > campaignOffset + PAGE_LIMIT;
+    const formImagePreview =
+      selectedImagePreview ||
+      (campaignForm.imageUrl && !removeExistingImage ? resolveMediaUrl(campaignForm.imageUrl) : '');
 
     return (
       <>
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>
-                {campaignForm.id
-                  ? t('customerNotifications.editCampaign')
-                  : t('customerNotifications.createCampaign')}
-              </h2>
-              <p>{t('customerNotifications.marketingHint')}</p>
+              <h2>{campaignForm.id ? 'Редактировать рассылку' : 'Создать рассылку'}</h2>
+              <p>
+                После запуска рассылка отправляется автоматически. Статус и отчёт обновляются
+                каждые несколько секунд.
+              </p>
             </div>
             {campaignForm.id ? (
               <button className="button button-secondary" type="button" onClick={resetCampaignForm}>
-                {t('customerNotifications.newDraft')}
+                Новый черновик
               </button>
             ) : null}
           </div>
-          <div className="campaign-guidance">
-            <p>{t('customerNotifications.audienceHelp')}</p>
-            <p>{t('customerNotifications.activationHelp')}</p>
-            <p>{t('customerNotifications.groupHelp')}</p>
-          </div>
+
           <form className="form-grid customer-campaign-form" onSubmit={handleCampaignSubmit}>
             <label className="field">
-              <span>{t('common.name')}</span>
+              <span>Название рассылки</span>
               <input
                 required
                 value={campaignForm.name}
@@ -546,7 +514,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field">
-              <span>{t('customerNotifications.type')}</span>
+              <span>Тип</span>
               <select
                 value={campaignForm.type}
                 onChange={(event) =>
@@ -556,37 +524,12 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   })
                 }
               >
-                <option value="marketing">{labelForEnum('marketing', t)}</option>
-                <option value="service">{labelForEnum('service', t)}</option>
+                <option value="marketing">Маркетинговая</option>
+                <option value="service">Сервисная</option>
               </select>
             </label>
             <label className="field">
-              <span>{t('customerNotifications.template')}</span>
-              <select
-                value={campaignForm.templateId}
-                onChange={(event) => {
-                  const template = templates.find((item) => item.id === Number(event.target.value));
-                  setCampaignForm({
-                    ...campaignForm,
-                    templateId: event.target.value,
-                    messageBody: template ? template.body_template : campaignForm.messageBody,
-                    messageTitle: template?.title ?? campaignForm.messageTitle,
-                    type: template ? template.category : campaignForm.type,
-                  });
-                }}
-              >
-                <option value="">{t('customerNotifications.noTemplate')}</option>
-                {templates
-                  .filter((template) => template.is_active)
-                  .map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>{t('customerNotifications.audience')}</span>
+              <span>Аудитория</span>
               <select
                 value={campaignForm.audienceScope}
                 onChange={(event) =>
@@ -596,16 +539,17 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   })
                 }
               >
-                <option value="all">{t('customerNotifications.allEligible')}</option>
-                <option value="purchasers">{t('customerNotifications.purchasers')}</option>
-                <option value="product">{t('customerNotifications.purchasedProduct')}</option>
-                <option value="category">{t('customerNotifications.purchasedCategory')}</option>
-                <option value="promo_code">{t('customerNotifications.usedPromo')}</option>
+                <option value="all">Все</option>
+                <option value="connected">Все подключённые</option>
+                <option value="purchasers">Покупатели</option>
+                <option value="product">Купившие товар</option>
+                <option value="category">Купившие категорию</option>
+                <option value="promo_code">Использовали промокод</option>
               </select>
             </label>
             {campaignForm.audienceScope === 'product' ? (
               <label className="field">
-                <span>{t('customerNotifications.productId')}</span>
+                <span>ID товара</span>
                 <input
                   min="1"
                   required
@@ -619,7 +563,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             ) : null}
             {campaignForm.audienceScope === 'category' ? (
               <label className="field">
-                <span>{t('customerNotifications.categoryId')}</span>
+                <span>ID категории</span>
                 <input
                   min="1"
                   required
@@ -633,7 +577,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
             ) : null}
             {campaignForm.audienceScope === 'promo_code' ? (
               <label className="field">
-                <span>{t('customerNotifications.promoCodeId')}</span>
+                <span>ID промокода</span>
                 <input
                   min="1"
                   required
@@ -646,7 +590,16 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               </label>
             ) : null}
             <label className="field">
-              <span>{t('customerNotifications.schedule')}</span>
+              <span>Заголовок сообщения</span>
+              <input
+                value={campaignForm.messageTitle}
+                onChange={(event) =>
+                  setCampaignForm({ ...campaignForm, messageTitle: event.target.value })
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Запланировать</span>
               <input
                 type="datetime-local"
                 value={campaignForm.scheduledAt}
@@ -656,29 +609,61 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label className="field field-wide">
-              <span>{t('common.title')}</span>
-              <input
-                value={campaignForm.messageTitle}
-                onChange={(event) =>
-                  setCampaignForm({ ...campaignForm, messageTitle: event.target.value })
-                }
-              />
-            </label>
-            <label className="field field-wide">
-              <span>{t('customerNotifications.message')}</span>
+              <span>Текст сообщения</span>
               <textarea
-                required={!campaignForm.templateId}
+                required
+                rows={6}
                 value={campaignForm.messageBody}
                 onChange={(event) =>
                   setCampaignForm({ ...campaignForm, messageBody: event.target.value })
                 }
               />
+              <small className={isMessageTooLong ? 'danger-text' : 'muted-text'}>
+                {messageLength} / {messageLimit}. При фото текст отправляется как подпись.
+              </small>
             </label>
+            <div className="field field-wide campaign-image-field">
+              <span>Фото</span>
+              {formImagePreview ? (
+                <div className="campaign-image-preview">
+                  <img src={formImagePreview} alt="" />
+                  <div>
+                    <strong>{selectedImage?.name || campaignForm.imageFilename || 'Фото выбрано'}</strong>
+                    <small>До 5 МБ, JPEG/PNG/WebP. При фото текст отправляется как подпись.</small>
+                    {canModifyImage ? (
+                      <button
+                        className="text-button danger-text"
+                        type="button"
+                        onClick={() => {
+                          setSelectedImage(null);
+                          setRemoveExistingImage(Boolean(campaignForm.imageUrl));
+                        }}
+                      >
+                        Удалить фото
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <small>До 5 МБ, JPEG/PNG/WebP. При фото текст отправляется как подпись.</small>
+              )}
+              {canModifyImage ? (
+                <input
+                  accept="image/jpeg,image/png,image/webp"
+                  type="file"
+                  onChange={(event) => handleImageSelected(event.target.files?.[0] ?? null)}
+                />
+              ) : (
+                <small>Фото можно менять только в черновике или на паузе.</small>
+              )}
+            </div>
             <div className="form-actions field-wide">
-              <button className="button button-primary" disabled={actionBusy} type="submit">
-                {campaignForm.id
-                  ? t('customerNotifications.saveCampaign')
-                  : t('customerNotifications.createDraft')}
+              <button
+                className="button button-primary"
+                disabled={actionBusy || isMessageTooLong}
+                type="submit"
+              >
+                {campaignForm.id ? 'Сохранить' : 'Создать черновик'}
               </button>
             </div>
           </form>
@@ -687,63 +672,59 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="table-panel">
           <div className="section-heading table-heading">
             <div>
-              <h2>{t('customerNotifications.campaigns')}</h2>
-              <p>{t('customerNotifications.campaignCount', { count: total })}</p>
+              <h2>Рассылки</h2>
+              <p>{total} всего</p>
             </div>
             <div className="inline-actions">
               <select
                 value={campaignTypeFilter}
-                onChange={(event) => setCampaignTypeFilter(event.target.value as BroadcastCampaignType | 'all')}
+                onChange={(event) =>
+                  setCampaignTypeFilter(event.target.value as BroadcastCampaignType | 'all')
+                }
               >
-                <option value="all">{t('common.allTypes')}</option>
-                <option value="marketing">{labelForEnum('marketing', t)}</option>
-                <option value="service">{labelForEnum('service', t)}</option>
+                <option value="all">Все типы</option>
+                <option value="marketing">Маркетинговая</option>
+                <option value="service">Сервисная</option>
               </select>
               <select
                 value={campaignStatus}
-                onChange={(event) => setCampaignStatus(event.target.value as BroadcastCampaignStatus | 'all')}
+                onChange={(event) =>
+                  setCampaignStatus(event.target.value as BroadcastCampaignStatus | 'all')
+                }
               >
-                <option value="all">{t('common.allStatuses')}</option>
+                <option value="all">Все статусы</option>
                 {campaignStatuses().map((status) => (
                   <option key={status} value={status}>
                     {labelForEnum(status, t)}
                   </option>
                 ))}
               </select>
-              <button
-                className="button button-secondary"
-                disabled={!canGoBack}
-                type="button"
-                onClick={() => setCampaignOffset(Math.max(0, campaignOffset - PAGE_LIMIT))}
-              >
-                {t('common.previous')}
+              <button className="button button-secondary" disabled={!canGoBack} type="button" onClick={() => setCampaignOffset(Math.max(0, campaignOffset - PAGE_LIMIT))}>
+                Назад
               </button>
-              <button
-                className="button button-secondary"
-                disabled={!canGoNext}
-                type="button"
-                onClick={() => setCampaignOffset(campaignOffset + PAGE_LIMIT)}
-              >
-                {t('common.next')}
+              <button className="button button-secondary" disabled={!canGoNext} type="button" onClick={() => setCampaignOffset(campaignOffset + PAGE_LIMIT)}>
+                Дальше
               </button>
             </div>
           </div>
           <table>
             <thead>
               <tr>
-                <th>{t('customerNotifications.campaign')}</th>
-                <th>{t('customerNotifications.type')}</th>
-                <th>{t('common.status')}</th>
-                <th>{t('customerNotifications.recipientsColumn')}</th>
-                <th>{t('customerNotifications.schedule')}</th>
-                <th>{t('common.actions')}</th>
+                <th>Рассылка</th>
+                <th>Тип</th>
+                <th>Статус</th>
+                <th>Аудитория</th>
+                <th>Фото</th>
+                <th>Получатели</th>
+                <th>Запуск</th>
+                <th>Действия</th>
               </tr>
             </thead>
             <tbody>
               {campaigns.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
-                    <div className="empty-table">{t('customerNotifications.noCampaigns')}</div>
+                  <td colSpan={8}>
+                    <div className="empty-table">Рассылок пока нет.</div>
                   </td>
                 </tr>
               ) : (
@@ -751,250 +732,55 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                   <tr key={campaign.id}>
                     <td>
                       <strong>{campaign.name}</strong>
-                      <small>
-                        {t('customerNotifications.campaign')} {campaign.id}
-                      </small>
+                      <small>ID {campaign.id}</small>
                     </td>
-                    <td>
-                      <StatusBadge
-                        className={campaign.type === 'marketing' ? 'status-info' : 'status-success'}
-                        label={labelForEnum(campaign.type, t)}
-                      />
-                    </td>
+                    <td>{campaign.type === 'marketing' ? 'Маркетинговая' : 'Сервисная'}</td>
                     <td>
                       <StatusBadge
                         className={campaignStatusClass(campaign.status)}
                         label={labelForEnum(campaign.status, t)}
                       />
                     </td>
+                    <td>{audienceLabel(campaign.audience_filter)}</td>
+                    <td>{campaign.image_path ? 'Фото: есть' : 'Фото: нет'}</td>
                     <td>
-                      <strong>{campaign.recipient_count_final ?? campaign.recipient_count_estimate}</strong>
-                      <small>{t('customerNotifications.eligibleMaterialized')}</small>
+                      <strong>
+                        {campaign.recipient_count_estimate} / {campaign.recipient_count_final ?? '-'}
+                      </strong>
+                      <small>оценка / итог</small>
                     </td>
                     <td>
                       <small>{formatOptionalDate(campaign.scheduled_at, language)}</small>
                     </td>
                     <td>
-                      <div className="table-actions customer-action-grid">
+                      <div className="table-actions">
                         {campaign.status === 'draft' ? (
-                          <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => editCampaign(campaign)}>
-                            {t('common.edit')}
+                          <button className="button button-secondary" type="button" onClick={() => editCampaign(campaign)}>
+                            Редактировать
                           </button>
                         ) : null}
-                        <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => previewCampaign(campaign)}>
-                          {t('customerNotifications.preview')}
+                        <button className="button button-secondary" type="button" onClick={() => previewCampaign(campaign)}>
+                          Превью
                         </button>
-                        <button className="button button-secondary" disabled={actionBusy} type="button" onClick={() => testCampaign(campaign)}>
-                          {t('customerNotifications.test')}
+                        <button className="button button-secondary" type="button" onClick={() => testCampaign(campaign)}>
+                          Тест
                         </button>
-                        <button
-                          className="button button-primary"
-                          disabled={actionBusy || !canStartCampaign(campaign)}
-                          type="button"
-                          onClick={() => startCampaign(campaign)}
-                        >
-                          {t('customerNotifications.start')}
-                        </button>
-                        {campaign.status === 'sending' ? (
-                          <button
-                            className="button button-secondary"
-                            disabled={actionBusy}
-                            title={t('customerNotifications.groupHelp')}
-                            type="button"
-                            onClick={() => processBatch(campaign)}
-                          >
-                            {t('customerNotifications.batch')}
+                        {canStartCampaign(campaign) ? (
+                          <button className="button button-primary" type="button" onClick={() => startCampaign(campaign)}>
+                            Старт
                           </button>
                         ) : null}
-                        <button className="text-button" type="button" onClick={() => selectCampaign(campaign)}>
-                          {t('customerNotifications.report')}
+                        <button className="button button-secondary" type="button" onClick={() => selectCampaign(campaign)}>
+                          Отчёт
                         </button>
-                        {campaign.status === 'sending' || campaign.status === 'scheduled' ? (
-                          <button className="text-button" disabled={actionBusy} type="button" onClick={() => pauseCampaign(campaign)}>
-                            {t('customerNotifications.pause')}
+                        {['scheduled', 'sending'].includes(campaign.status) ? (
+                          <button className="button button-secondary" type="button" onClick={() => pauseCampaign(campaign)}>
+                            Пауза
                           </button>
                         ) : null}
                         {!['completed', 'cancelled'].includes(campaign.status) ? (
-                          <button className="text-button danger-text" disabled={actionBusy} type="button" onClick={() => cancelCampaign(campaign)}>
-                            {t('common.cancel')}
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </section>
-      </>
-    );
-  }
-
-  function renderTemplatesView() {
-    return (
-      <>
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>
-                {templateForm.id
-                  ? t('customerNotifications.editTemplate')
-                  : t('customerNotifications.createTemplate')}
-              </h2>
-              <p>{t('customerNotifications.templateHint')}</p>
-            </div>
-          </div>
-          <form className="form-grid" onSubmit={handleTemplateSubmit}>
-            <label className="field">
-              <span>{t('customerNotifications.key')}</span>
-              <input
-                required
-                value={templateForm.key}
-                onChange={(event) => setTemplateForm({ ...templateForm, key: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>{t('common.name')}</span>
-              <input
-                required
-                value={templateForm.name}
-                onChange={(event) => setTemplateForm({ ...templateForm, name: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>{t('common.category')}</span>
-              <select
-                value={templateForm.category}
-                onChange={(event) =>
-                  setTemplateForm({
-                    ...templateForm,
-                    category: event.target.value as NotificationTemplateCategory,
-                  })
-                }
-              >
-                <option value="marketing">{labelForEnum('marketing', t)}</option>
-                <option value="service">{labelForEnum('service', t)}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>{t('customerNotifications.variables')}</span>
-              <input
-                placeholder="first_name, promo_code"
-                value={templateForm.allowedVariables}
-                onChange={(event) =>
-                  setTemplateForm({ ...templateForm, allowedVariables: event.target.value })
-                }
-              />
-            </label>
-            <label className="field field-wide">
-              <span>{t('common.title')}</span>
-              <input
-                value={templateForm.title}
-                onChange={(event) => setTemplateForm({ ...templateForm, title: event.target.value })}
-              />
-            </label>
-            <label className="field field-wide">
-              <span>{t('customerNotifications.bodyTemplate')}</span>
-              <textarea
-                required
-                value={templateForm.bodyTemplate}
-                onChange={(event) =>
-                  setTemplateForm({ ...templateForm, bodyTemplate: event.target.value })
-                }
-              />
-            </label>
-            <label className="toggle-label field-wide">
-              <input
-                checked={templateForm.isActive}
-                type="checkbox"
-                onChange={(event) =>
-                  setTemplateForm({ ...templateForm, isActive: event.target.checked })
-                }
-              />
-              {t('common.active')}
-            </label>
-            <div className="form-actions field-wide">
-              <button className="button button-primary" disabled={actionBusy} type="submit">
-                {templateForm.id
-                  ? t('customerNotifications.saveTemplate')
-                  : t('customerNotifications.createTemplate')}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section className="table-panel">
-          <div className="section-heading table-heading">
-            <div>
-              <h2>{t('customerNotifications.templates')}</h2>
-              <p>
-                {t('customerNotifications.templateCount', {
-                  count: templateMeta?.total ?? templates.length,
-                })}
-              </p>
-            </div>
-            <button className="button button-secondary" type="button" onClick={loadTemplates}>
-              {t('common.refresh')}
-            </button>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>{t('customerNotifications.template')}</th>
-                <th>{t('common.category')}</th>
-                <th>{t('customerNotifications.variables')}</th>
-                <th>{t('common.active')}</th>
-                <th>{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="empty-table">{t('customerNotifications.noTemplates')}</div>
-                  </td>
-                </tr>
-              ) : (
-                templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>
-                      <strong>{template.name}</strong>
-                      <small>{template.key}</small>
-                    </td>
-                    <td>
-                      <StatusBadge
-                        className={template.category === 'marketing' ? 'status-info' : 'status-success'}
-                        label={labelForEnum(template.category, t)}
-                      />
-                    </td>
-                    <td>
-                      <small>{template.allowed_variables.join(', ') || '-'}</small>
-                    </td>
-                    <td>
-                      <StatusBadge
-                        className={template.is_active ? 'status-success' : 'status-neutral'}
-                        label={template.is_active ? t('common.active') : t('common.disabled')}
-                      />
-                    </td>
-                    <td>
-                      <div className="table-actions">
-                        <button className="button button-secondary" type="button" onClick={() => editTemplate(template)}>
-                          {t('common.edit')}
-                        </button>
-                        {template.is_active ? (
-                          <button
-                            className="text-button danger-text"
-                            type="button"
-                            onClick={() =>
-                              runAction(async () => {
-                                await api.customerNotifications.disableTemplate(template.id);
-                                setActionMessage(t('customerNotifications.templateDisabled'));
-                                loadTemplates();
-                              })
-                            }
-                          >
-                            {t('customerNotifications.disable')}
+                          <button className="text-button danger-text" type="button" onClick={() => cancelCampaign(campaign)}>
+                            Отменить
                           </button>
                         ) : null}
                       </div>
@@ -1016,8 +802,8 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>{t('customerNotifications.campaignDetail')}</h2>
-              <p>{campaign ? campaign.name : t('customerNotifications.selectCampaign')}</p>
+              <h2>Отчёт по рассылке</h2>
+              <p>{campaign ? campaign.name : 'Выберите рассылку из списка.'}</p>
             </div>
             {campaign ? (
               <StatusBadge
@@ -1029,26 +815,23 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           {campaign ? (
             <>
               <div className="kpi-grid customer-summary-grid">
-                <Kpi label={t('customerNotifications.pending')} value={selectedSummary.pending} />
-                <Kpi label={t('customerNotifications.sending')} value={selectedSummary.sending} />
-                <Kpi label={t('customerNotifications.sent')} value={selectedSummary.sent} />
-                <Kpi label={t('customerNotifications.failed')} value={selectedSummary.failed} />
-                <Kpi label={t('customerNotifications.blocked')} value={selectedSummary.blocked} />
-                <Kpi label={t('customerNotifications.skipped')} value={selectedSummary.skipped} />
-                <Kpi
-                  label={t('customerNotifications.rateLimited')}
-                  value={selectedSummary.rate_limited}
-                />
-                <Kpi label={t('customerNotifications.total')} value={selectedSummary.total} />
+                <Kpi label="Ожидает" value={selectedSummary.pending} />
+                <Kpi label="Отправляется" value={selectedSummary.sending} />
+                <Kpi label="Отправлено" value={selectedSummary.sent} />
+                <Kpi label="Ошибки" value={selectedSummary.failed} />
+                <Kpi label="Пропущено" value={selectedSummary.skipped} />
+                <Kpi label="Заблокировали" value={selectedSummary.blocked} />
+                <Kpi label="Лимит Telegram" value={selectedSummary.rate_limited} />
+                <Kpi label="Всего" value={selectedSummary.total} />
               </div>
-              {['scheduled', 'sending'].includes(campaign.status) ? (
-                <p className="muted-text customer-polling-note">
-                  {t('customerNotifications.pollingHelp')}
-                </p>
-              ) : null}
+              <p className="muted-text customer-polling-note">
+                Отправлено означает, что Telegram Bot API принял сообщение. Это не подтверждение
+                прочтения. После запуска рассылка отправляется автоматически, отчёт обновляется
+                каждые несколько секунд.
+              </p>
               {preview && preview.campaign_id === campaign.id ? (
                 <div className="campaign-preview">
-                  <strong>{t('customerNotifications.previewSample')}</strong>
+                  <strong>Превью</strong>
                   <pre>{preview.rendered_sample}</pre>
                   <small>{preview.eligibility_warnings.join(' ')}</small>
                 </div>
@@ -1060,15 +843,17 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="table-panel">
           <div className="section-heading table-heading">
             <div>
-              <h2>{t('customerNotifications.deliveryReport')}</h2>
-              <p>{t('customerNotifications.rows', { count: deliveryMeta?.total ?? 0 })}</p>
+              <h2>Доставки</h2>
+              <p>{deliveryMeta?.total ?? 0} строк</p>
             </div>
             <div className="inline-actions">
               <select
                 value={deliveryStatus}
-                onChange={(event) => setDeliveryStatus(event.target.value as BroadcastDeliveryStatus | 'all')}
+                onChange={(event) =>
+                  setDeliveryStatus(event.target.value as BroadcastDeliveryStatus | 'all')
+                }
               >
-                <option value="all">{t('common.allStatuses')}</option>
+                <option value="all">Все статусы</option>
                 {deliveryStatuses().map((status) => (
                   <option key={status} value={status}>
                     {labelForEnum(status, t)}
@@ -1077,7 +862,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               </select>
               {campaign ? (
                 <button className="button button-secondary" type="button" onClick={() => loadDeliveryData(campaign.id)}>
-                  {t('common.refresh')}
+                  Обновить
                 </button>
               ) : null}
             </div>
@@ -1085,35 +870,27 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
           <table>
             <thead>
               <tr>
-                <th>{t('customerNotifications.recipient')}</th>
-                <th>{t('common.status')}</th>
-                <th>{t('customerNotifications.attempts')}</th>
-                <th>{t('customerNotifications.telegram')}</th>
-                <th>{t('common.error')}</th>
-                <th>{t('common.updated')}</th>
+                <th>Получатель</th>
+                <th>Статус</th>
+                <th>Попытки</th>
+                <th>Telegram</th>
+                <th>Ошибка</th>
+                <th>Обновлено</th>
               </tr>
             </thead>
             <tbody>
               {!campaign || deliveries.length === 0 ? (
                 <tr>
                   <td colSpan={6}>
-                    <div className="empty-table">{t('customerNotifications.noDeliveryRows')}</div>
+                    <div className="empty-table">Строк доставки пока нет.</div>
                   </td>
                 </tr>
               ) : (
                 deliveries.map((delivery) => (
                   <tr key={delivery.id}>
                     <td>
-                      <strong>
-                        {delivery.user_id
-                          ? `${t('common.user')} ${delivery.user_id}`
-                          : t('customerNotifications.unknownUser')}
-                      </strong>
-                      <small>
-                        {t('customerNotifications.subscription', {
-                          id: delivery.subscription_id,
-                        })}
-                      </small>
+                      <strong>{delivery.user_id ? `Пользователь ${delivery.user_id}` : 'Не привязан к Mini App'}</strong>
+                      <small>Подписка {delivery.subscription_id}</small>
                     </td>
                     <td>
                       <StatusBadge
@@ -1123,28 +900,17 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                     </td>
                     <td>
                       <strong>{delivery.attempt_count}</strong>
-                      <small>
-                        {t('customerNotifications.nextAttempt', {
-                          date: formatOptionalDate(delivery.next_attempt_at, language),
-                        })}
-                      </small>
+                      <small>Следующая: {formatOptionalDate(delivery.next_attempt_at, language)}</small>
                     </td>
                     <td>
-                      <small>{delivery.telegram_chat_id_masked}</small>
-                      <small>
-                        {t('customerNotifications.messageId', {
-                          id: delivery.telegram_message_id ?? '-',
-                        })}
-                      </small>
+                      <small>Сообщение {delivery.telegram_message_id ?? '-'}</small>
                     </td>
                     <td>
                       <small>{delivery.error_code ?? '-'}</small>
                       <small>{delivery.error_message ?? ''}</small>
                     </td>
                     <td>
-                      <small>
-                        {formatOptionalDate(delivery.last_attempt_at ?? delivery.updated_at, language)}
-                      </small>
+                      <small>{formatOptionalDate(delivery.last_attempt_at ?? delivery.updated_at, language)}</small>
                     </td>
                   </tr>
                 ))
@@ -1166,40 +932,38 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>{t('customerNotifications.recipientsTitle')}</h2>
-              <p>{t('customerNotifications.recipientsHint')}</p>
+              <h2>Получатели</h2>
+              <p>Реестр Bot 1: подключение чата и согласия на сервисные и рекламные сообщения.</p>
             </div>
-            <span className="status-badge status-info">
-              {t('customerNotifications.totalCount', { count: total })}
-            </span>
+            <span className="status-badge status-info">{total} всего</span>
           </div>
 
           <form className="filters-row customer-notification-filters" onSubmit={handleRecipientFiltersSubmit}>
             <FilterSelect
-              label={t('customerNotifications.hasChat')}
+              label="Bot 1 chat"
               value={recipientFilters.hasChat}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, hasChat: value })}
             />
             <FilterSelect
-              label={t('customerNotifications.service')}
+              label="Service"
               value={recipientFilters.serviceOptIn}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, serviceOptIn: value })}
             />
             <FilterSelect
-              label={t('customerNotifications.marketing')}
+              label="Акции"
               value={recipientFilters.marketingOptIn}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, marketingOptIn: value })}
             />
             <FilterSelect
-              label={t('customerNotifications.blockedFilter')}
+              label="Blocked"
               value={recipientFilters.blocked}
               onChange={(value) => setRecipientFilters({ ...recipientFilters, blocked: value })}
             />
             <label>
-              <span>{t('orders.userId')}</span>
+              <span>User ID</span>
               <input
                 min="1"
-                placeholder={t('common.any')}
+                placeholder="Любой"
                 type="number"
                 value={recipientFilters.userId}
                 onChange={(event) =>
@@ -1208,7 +972,7 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <label>
-              <span>{t('customerNotifications.telegramUsername')}</span>
+              <span>Telegram username</span>
               <input
                 placeholder="@username"
                 value={recipientFilters.telegramUsername}
@@ -1221,53 +985,43 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
               />
             </label>
             <button className="button button-primary" type="submit">
-              {t('common.apply')}
+              Применить
             </button>
           </form>
         </section>
 
         <section className="table-panel">
           <div className="section-heading table-heading">
-            <h2>{t('customerNotifications.registry')}</h2>
+            <h2>Реестр получателей</h2>
             <div className="inline-actions">
-              <button
-                className="button button-secondary"
-                disabled={!canGoBack}
-                type="button"
-                onClick={() => setSubscriptionOffset(Math.max(0, subscriptionOffset - PAGE_LIMIT))}
-              >
-                {t('common.previous')}
+              <button className="button button-secondary" disabled={!canGoBack} type="button" onClick={() => setSubscriptionOffset(Math.max(0, subscriptionOffset - PAGE_LIMIT))}>
+                Назад
               </button>
-              <button
-                className="button button-secondary"
-                disabled={!canGoNext}
-                type="button"
-                onClick={() => setSubscriptionOffset(subscriptionOffset + PAGE_LIMIT)}
-              >
-                {t('common.next')}
+              <button className="button button-secondary" disabled={!canGoNext} type="button" onClick={() => setSubscriptionOffset(subscriptionOffset + PAGE_LIMIT)}>
+                Дальше
               </button>
               <button className="button button-secondary" type="button" onClick={loadSubscriptions}>
-                {t('common.refresh')}
+                Обновить
               </button>
             </div>
           </div>
           <table>
             <thead>
               <tr>
-                <th>{t('common.user')}</th>
-                <th>{t('customerNotifications.telegram')}</th>
-                <th>{t('customerNotifications.chat')}</th>
-                <th>{t('customerNotifications.service')}</th>
-                <th>{t('customerNotifications.marketing')}</th>
-                <th>{t('customerNotifications.blockedFilter')}</th>
-                <th>{t('customerNotifications.lastActivity')}</th>
+                <th>Получатель</th>
+                <th>Telegram</th>
+                <th>Service</th>
+                <th>Акции</th>
+                <th>Bot 1 chat</th>
+                <th>Blocked</th>
+                <th>Активность</th>
               </tr>
             </thead>
             <tbody>
               {subscriptions.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
-                    <div className="empty-table">{t('customerNotifications.noRecipients')}</div>
+                    <div className="empty-table">По текущим фильтрам получателей нет.</div>
                   </td>
                 </tr>
               ) : (
@@ -1276,79 +1030,51 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
                     <td>
                       <strong>
                         {subscription.user_id
-                          ? `${t('common.user')} ${subscription.user_id}`
-                          : t('common.notLinked')}
+                          ? `Пользователь ${subscription.user_id}`
+                          : 'Не привязан к Mini App'}
                       </strong>
-                      <small>{t('customerNotifications.subscription', { id: subscription.id })}</small>
+                      <small>Подписка {subscription.id}</small>
+                      {!subscription.user_id ? (
+                        <small>
+                          Пользователь открыл Bot 1, но ещё не авторизовался в Mini App этим
+                          Telegram-аккаунтом.
+                        </small>
+                      ) : null}
                     </td>
                     <td>
                       <strong>{formatTelegramName(subscription)}</strong>
-                      <small>
-                        {t('customerNotifications.telegramUser', {
-                          id: subscription.telegram_user_id,
-                        })}
-                      </small>
-                    </td>
-                    <td>
-                      <StatusBadge
-                        className={subscription.has_chat ? 'status-success' : 'status-neutral'}
-                        label={
-                          subscription.has_chat
-                            ? t('customerNotifications.connected')
-                            : t('customerNotifications.missing')
-                        }
-                      />
-                      <small>{subscription.telegram_chat_id_masked ?? '-'}</small>
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.service_opt_in ? 'status-success' : 'status-warning'}
-                        label={
-                          subscription.service_opt_in
-                            ? t('customerNotifications.on')
-                            : t('customerNotifications.off')
-                        }
+                        label={subscription.service_opt_in ? 'включено' : 'выключено'}
                       />
                     </td>
                     <td>
                       <StatusBadge
-                        className={subscription.marketing_opt_in ? 'status-info' : 'status-neutral'}
-                        label={
-                          subscription.marketing_opt_in
-                            ? t('customerNotifications.on')
-                            : t('customerNotifications.off')
-                        }
+                        className={subscription.marketing_opt_in ? 'status-success' : 'status-neutral'}
+                        label={subscription.marketing_opt_in ? 'включено' : 'выключено'}
+                      />
+                    </td>
+                    <td>
+                      <StatusBadge
+                        className={subscription.has_chat ? 'status-success' : 'status-neutral'}
+                        label={subscription.has_chat ? 'подключён' : 'нет'}
                       />
                     </td>
                     <td>
                       <StatusBadge
                         className={subscription.blocked_at ? 'status-danger' : 'status-success'}
-                        label={
-                          subscription.blocked_at
-                            ? t('customerNotifications.blocked')
-                            : t('customerNotifications.ok')
-                        }
+                        label={subscription.blocked_at ? 'заблокировал' : 'ок'}
                       />
                       {subscription.blocked_at ? (
                         <small>{formatDate(subscription.blocked_at, language)}</small>
                       ) : null}
                     </td>
                     <td>
-                      <small>
-                        {t('customerNotifications.startAt', {
-                          date: formatOptionalDate(subscription.last_start_at, language),
-                        })}
-                      </small>
-                      <small>
-                        {t('customerNotifications.stopAt', {
-                          date: formatOptionalDate(subscription.last_stop_at, language),
-                        })}
-                      </small>
-                      <small>
-                        {t('customerNotifications.settingsAt', {
-                          date: formatOptionalDate(subscription.last_settings_at, language),
-                        })}
-                      </small>
+                      <small>Start: {formatOptionalDate(subscription.last_start_at, language)}</small>
+                      <small>Stop: {formatOptionalDate(subscription.last_stop_at, language)}</small>
+                      <small>Settings: {formatOptionalDate(subscription.last_settings_at, language)}</small>
                     </td>
                   </tr>
                 ))
@@ -1358,20 +1084,6 @@ export function CustomerNotificationsPage({ onAuthExpired }: PageProps) {
         </section>
       </>
     );
-  }
-
-  function canStartCampaign(campaign: BroadcastCampaign): boolean {
-    if (campaign.status !== 'draft' && campaign.status !== 'paused') {
-      return false;
-    }
-    if (!campaign.name.trim() || !campaign.message_body.trim()) {
-      return false;
-    }
-    const audience = campaign.audience_filter as Record<string, unknown>;
-    if (audience.scope === 'product') return Number(audience.product_id) > 0;
-    if (audience.scope === 'category') return Number(audience.category_id) > 0;
-    if (audience.scope === 'promo_code') return Number(audience.promo_code_id) > 0;
-    return ['all', 'purchasers'].includes(String(audience.scope ?? 'all'));
   }
 }
 
@@ -1393,14 +1105,23 @@ function formatOptionalDate(value: string | null, language: 'ru' | 'en'): string
   return value ? formatDate(value, language) : '-';
 }
 
-function viewLabel(view: ViewKey, t: ReturnType<typeof useI18n>['t']): string {
+function viewLabel(view: ViewKey): string {
   const labels: Record<ViewKey, string> = {
-    campaigns: t('customerNotifications.campaigns'),
-    templates: t('customerNotifications.templates'),
-    reports: t('customerNotifications.reports'),
-    recipients: t('customerNotifications.recipients'),
+    campaigns: 'Рассылки',
+    reports: 'Отчёты',
+    recipients: 'Получатели',
   };
   return labels[view];
+}
+
+function audienceLabel(value: Record<string, unknown>): string {
+  const scope = String(value.scope ?? 'all');
+  if (scope === 'connected') return 'Все подключённые';
+  if (scope === 'purchasers') return 'Покупатели';
+  if (scope === 'product') return `Купившие товар ${value.product_id ?? ''}`.trim();
+  if (scope === 'category') return `Купившие категорию ${value.category_id ?? ''}`.trim();
+  if (scope === 'promo_code') return `Использовали промокод ${value.promo_code_id ?? ''}`.trim();
+  return 'Все';
 }
 
 function campaignStatuses(): BroadcastCampaignStatus[] {
@@ -1434,6 +1155,20 @@ function toDateTimeLocal(value: string | null): string {
   return date.toISOString().slice(0, 16);
 }
 
+function canStartCampaign(campaign: BroadcastCampaign): boolean {
+  if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+    return false;
+  }
+  if (!campaign.name.trim() || !campaign.message_body.trim()) {
+    return false;
+  }
+  const audience = campaign.audience_filter as Record<string, unknown>;
+  if (audience.scope === 'product') return Number(audience.product_id) > 0;
+  if (audience.scope === 'category') return Number(audience.category_id) > 0;
+  if (audience.scope === 'promo_code') return Number(audience.promo_code_id) > 0;
+  return ['all', 'connected', 'purchasers'].includes(String(audience.scope ?? 'all'));
+}
+
 function StatusBadge({ className, label }: { className: string; label: string }) {
   return <span className={`status-badge ${className}`}>{label}</span>;
 }
@@ -1456,15 +1191,13 @@ function FilterSelect({
   value: BooleanFilter;
   onChange: (value: BooleanFilter) => void;
 }) {
-  const { t } = useI18n();
-
   return (
     <label>
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value as BooleanFilter)}>
-        <option value="all">{t('common.all')}</option>
-        <option value="true">{t('common.yes')}</option>
-        <option value="false">{t('common.no')}</option>
+        <option value="all">Все</option>
+        <option value="true">Да</option>
+        <option value="false">Нет</option>
       </select>
     </label>
   );

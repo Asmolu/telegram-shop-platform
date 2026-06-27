@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_db_session, require_roles
@@ -173,6 +173,31 @@ async def update_campaign(
     ],
 ) -> BroadcastCampaignRead:
     return await service.update_campaign(campaign_id=campaign_id, actor=actor, payload=payload)
+
+
+@router.post("/campaigns/{campaign_id}/image", response_model=BroadcastCampaignRead)
+async def attach_campaign_image(
+    campaign_id: int,
+    file: Annotated[UploadFile, File()],
+    actor: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[
+        CustomerNotificationCampaignService,
+        Depends(get_customer_campaign_service),
+    ],
+) -> BroadcastCampaignRead:
+    return await service.attach_campaign_image(campaign_id=campaign_id, actor=actor, file=file)
+
+
+@router.delete("/campaigns/{campaign_id}/image", response_model=BroadcastCampaignRead)
+async def remove_campaign_image(
+    campaign_id: int,
+    actor: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[
+        CustomerNotificationCampaignService,
+        Depends(get_customer_campaign_service),
+    ],
+) -> BroadcastCampaignRead:
+    return await service.remove_campaign_image(campaign_id=campaign_id, actor=actor)
 
 
 @router.post("/campaigns/{campaign_id}/preview", response_model=BroadcastCampaignPreview)

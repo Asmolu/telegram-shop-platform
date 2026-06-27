@@ -255,29 +255,42 @@ and uses:
 - `POST /api/v1/orders/admin/{order_id}/customer-message` for SELLER/ADMIN
   text and/or JPEG, PNG, or WebP delivery to the order customer through Bot 1
 - `GET/POST/PATCH /api/v1/customer-notifications/templates` for SELLER/ADMIN
-  template management
+  template management; the Seller Panel template UI is hidden, but the backend
+  API remains available for compatibility
 - `GET/POST/PATCH /api/v1/customer-notifications/campaigns` plus
-  `/preview`, `/test`, `/schedule`, `/start`, `/pause`, `/cancel`,
+  `/image`, `/preview`, `/test`, `/schedule`, `/start`, `/pause`, `/cancel`,
   `/process-batch`, `/delivery-summary`, and `/deliveries` for controlled
-  campaign operations and reporting
+  campaign operations and reporting. Each campaign can have one optional
+  JPEG/PNG/WebP image stored under uploads and sent as a Telegram photo with
+  the campaign text as the caption.
 
 Bot 1 stores private chat availability in `CustomerTelegramSubscription`.
 `telegram_user_id` and `telegram_chat_id` are stored separately; Mini App auth
 still validates Telegram `initData` without persisting the raw payload. The
-Mini App Profile shows Telegram notification settings, and Seller Panel has a
-Customer Notifications area for recipients, templates, campaigns, and delivery
-reports. Order service notifications and campaign sends use
+Mini App Profile shows Telegram notification settings, including the marketing
+toggle "Акции и скидки". Bot 1 `/start` enables service and marketing consent,
+while `/stop` disables both. Existing active Bot 1 chats are normalized by the
+campaign-image migration to `marketing_opt_in=true` unless the customer had an
+explicit marketing opt-out timestamp. Mini App Telegram auth and
+`GET /customer-notifications/me/subscription` automatically link existing
+unlinked Bot 1 subscriptions by `telegram_user_id` without exposing raw chat ids
+to the frontend.
+
+Seller Panel has a Customer Notifications area for campaigns, delivery reports,
+and recipients. Templates are no longer shown in that UI. Order service
+notifications and campaign sends use
 `TELEGRAM_CUSTOMER_BOT_TOKEN`; customer campaigns must not use
 `TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBAPP_BOT_TOKEN`.
 Seller-to-customer order messages use the same Bot 1 subscription and delivery
 audit path. Images are validated up to 5 MB and sent directly to Telegram
-without storing a second uploaded copy.
+without storing per-recipient copies.
 
 Phase 2 deliberately keeps recipient exports, arbitrary database field
 interpolation, non-plain Telegram parse modes, and a separate worker process out
 of scope. The backend lifespan worker automatically processes due campaigns in
 small groups when `TELEGRAM_CUSTOMER_BOT_TOKEN` is configured. The protected
-`/process-batch` endpoint remains available for controlled recovery and support.
+`/process-batch` endpoint remains available for controlled recovery and support,
+but it is hidden from the normal Seller Panel workflow.
 Preview and test-send are recommended checks, but are not hidden activation
 requirements. A delivery marked sent means Telegram Bot API accepted the Bot 1
 send; it is not a read receipt. Staging tests should start with one internal

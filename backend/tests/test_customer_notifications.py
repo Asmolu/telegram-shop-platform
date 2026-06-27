@@ -13,6 +13,7 @@ from app.db.models import (
     UserRole,
 )
 from app.main import create_app
+from app.modules.auth.service import AuthService
 from app.modules.customer_notifications.router import get_customer_notifications_service
 from app.modules.customer_notifications.schemas import (
     CustomerBotWebhookResponse,
@@ -109,6 +110,21 @@ class FakeCustomerNotificationsRepository:
     ) -> CustomerTelegramSubscription | None:
         return self.subscriptions.get(telegram_user_id)
 
+    async def link_unlinked_subscription_to_user(
+        self,
+        *,
+        user_id: int,
+        telegram_user_id: int,
+    ) -> CustomerTelegramSubscription | None:
+        linked = await self.get_by_user_id(user_id)
+        if linked is not None:
+            return linked
+        subscription = await self.get_by_telegram_user_id(telegram_user_id)
+        if subscription is None or subscription.user_id is not None:
+            return None
+        subscription.user_id = user_id
+        return subscription
+
 
 @pytest.mark.asyncio
 async def test_customer_bot_start_private_chat_creates_subscription_and_links_user() -> None:
@@ -125,7 +141,9 @@ async def test_customer_bot_start_private_chat_creates_subscription_and_links_us
     assert subscription.chat_type == "private"
     assert subscription.has_chat is True
     assert subscription.service_opt_in is True
-    assert subscription.marketing_opt_in is False
+    assert subscription.marketing_opt_in is True
+    assert subscription.marketing_opted_in_at == _now()
+    assert subscription.marketing_opted_out_at is None
     assert telegram.messages[0][0] == "100"
     assert telegram.messages[0][1] == "Уведомления подключены. Сообщения по заказам включены."
     assert "Telegram-" not in telegram.messages[0][1]
@@ -200,6 +218,49 @@ async def test_customer_bot_callbacks_update_service_and_marketing_opt_in() -> N
         ("callback-id", "Настройки обновлены."),
         ("callback-id", "Настройки обновлены."),
     ]
+
+
+@pytest.mark.asyncio
+async def test_mini_app_patch_marketing_toggle_still_works_with_active_chat() -> None:
+    service, repository, _, _ = _service(users=[_user()])
+    await service.handle_start(_message_update("/start").message, start_payload="")
+    repository.subscriptions[42].marketing_opt_in = False
+    repository.subscriptions[42].marketing_opted_in_at = None
+
+    response = await service.update_my_subscription(
+        user=_user(),
+        payload=CustomerSubscriptionUpdate(marketing_opt_in=True),
+    )
+
+    subscription = repository.subscriptions[42]
+    assert response.marketing_opt_in is True
+    assert subscription.marketing_opt_in is True
+    assert subscription.marketing_opted_in_at == _now()
+    assert subscription.opt_in_source == "mini_app_profile"
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_auto_links_existing_unlinked_customer_subscription() -> None:
+    session = DummySession()
+    auth_service = AuthService(session)  # type: ignore[arg-type]
+    repository = FakeCustomerNotificationsRepository()
+    repository.add(
+        CustomerTelegramSubscription(
+            user_id=None,
+            telegram_user_id=42,
+            telegram_chat_id=100,
+            chat_type="private",
+            has_chat=True,
+            service_opt_in=True,
+            marketing_opt_in=True,
+        )
+    )
+    auth_service.customer_notifications_repository = repository  # type: ignore[assignment]
+
+    await auth_service._link_customer_subscription(_user())  # noqa: SLF001
+
+    assert repository.subscriptions[42].user_id == 1
+    assert session.commits == 1
 
 
 def test_customer_bot_webhook_route_rejects_missing_or_wrong_secret(

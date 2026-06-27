@@ -433,6 +433,18 @@ export const api = {
         method: 'PATCH',
         body,
       }),
+    attachCampaignImage: (campaignId: number, file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiRequest<BroadcastCampaign>(
+        `/customer-notifications/campaigns/${campaignId}/image`,
+        { method: 'POST', formData },
+      );
+    },
+    removeCampaignImage: (campaignId: number) =>
+      apiRequest<BroadcastCampaign>(`/customer-notifications/campaigns/${campaignId}/image`, {
+        method: 'DELETE',
+      }),
     campaignDetail: (campaignId: number) =>
       apiRequest<BroadcastCampaignDetail>(`/customer-notifications/campaigns/${campaignId}`),
     previewCampaign: (campaignId: number) =>

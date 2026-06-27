@@ -605,6 +605,11 @@ export interface BroadcastCampaign {
   message_title: string | null;
   message_body: string;
   parse_mode: string | null;
+  image_path: string | null;
+  image_url: string | null;
+  image_original_filename: string | null;
+  image_mime_type: string | null;
+  image_size_bytes: number | null;
   scheduled_at: string | null;
   started_at: string | null;
   completed_at: string | null;

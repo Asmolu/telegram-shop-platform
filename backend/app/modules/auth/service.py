@@ -1,6 +1,8 @@
+import logging
 from typing import Any
 
 from fastapi import status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -9,13 +11,17 @@ from app.core.security import create_access_token
 from app.db.models import User
 from app.modules.auth.schemas import TokenResponse
 from app.modules.auth.telegram import TelegramInitDataError, validate_telegram_init_data
+from app.modules.customer_notifications.repository import CustomerNotificationsRepository
 from app.modules.users.repository import UsersRepository
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.users_repository = UsersRepository(session)
+        self.customer_notifications_repository = CustomerNotificationsRepository(session)
 
     async def login_with_telegram(self, init_data: str) -> TokenResponse:
         bot_token = settings.telegram_webapp_bot_token or settings.telegram_bot_token
@@ -42,6 +48,7 @@ class AuthService:
             raise AppError("Telegram user payload is missing", status.HTTP_401_UNAUTHORIZED)
 
         user = await self._upsert_user_from_telegram(user_payload)
+        await self._link_customer_subscription(user)
         access_token = create_access_token(
             subject=str(user.id),
             additional_claims={"role": user.role.value},
@@ -70,6 +77,34 @@ class AuthService:
             raise
 
         return user
+
+    async def _link_customer_subscription(self, user: User) -> None:
+        try:
+            existing = await self.customer_notifications_repository.get_by_user_id(user.id)
+            if existing is not None:
+                return
+            subscription = (
+                await self.customer_notifications_repository.link_unlinked_subscription_to_user(
+                    user_id=user.id,
+                    telegram_user_id=user.telegram_id,
+                )
+            )
+            if subscription is None or subscription.user_id != user.id:
+                return
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            logger.warning(
+                "customer notification subscription auto-link conflict",
+                extra={"user_id": user.id, "telegram_user_id": user.telegram_id},
+            )
+        except Exception:
+            await self.session.rollback()
+            logger.warning(
+                "customer notification subscription auto-link failed",
+                extra={"user_id": user.id, "telegram_user_id": user.telegram_id},
+                exc_info=True,
+            )
 
 
 def _optional_str(value: Any) -> str | None:

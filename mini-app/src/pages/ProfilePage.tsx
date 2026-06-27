@@ -231,7 +231,7 @@ export function ProfilePage() {
 
           <label className="toggle-setting">
             <span>
-              <strong>Рекламные предложения</strong>
+              <strong>Акции и скидки</strong>
               <small>Скидки и подборки, только если вы сами включите.</small>
             </span>
             <input

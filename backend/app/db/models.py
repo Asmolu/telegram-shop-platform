@@ -1747,6 +1747,10 @@ class BroadcastCampaign(Base):
     message_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     message_body: Mapped[str] = mapped_column(Text, nullable=False)
     parse_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    image_original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    image_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1778,6 +1782,10 @@ class BroadcastCampaign(Base):
     )
 
     template: Mapped[NotificationTemplate | None] = relationship()
+
+    @property
+    def image_url(self) -> str | None:
+        return f"/uploads/{self.image_path}" if self.image_path else None
 
 
 class BroadcastDelivery(Base):

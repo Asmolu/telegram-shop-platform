@@ -71,6 +71,7 @@ class Settings(BaseSettings):
         "reviews",
         "categories",
         "tags",
+        "customer_campaigns",
         "payment_receipts",
         "temp",
     )

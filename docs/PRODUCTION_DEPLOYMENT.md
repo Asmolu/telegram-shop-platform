@@ -158,12 +158,16 @@ Customer campaign staging flow before production enablement:
 
 1. Use one internal Telegram account and open Bot 1 with `/start`.
 2. In `https://seller.stylexac.ru`, verify Customer Notifications shows the
-   internal recipient with a masked chat id and the expected opt-in state.
-3. Create a plain-text template or draft campaign.
+   internal recipient as connected with service and marketing enabled. Raw chat
+   ids must not appear in the Seller Panel.
+3. Create a text-only draft campaign, then a draft campaign with one JPEG/PNG/WebP
+   image. The image campaign text is sent as the Telegram photo caption.
 4. Run preview and confirm marketing counts exclude non-opted-in recipients.
 5. Send a test message; this uses the current seller/admin Bot 1 subscription,
    not Bot 2 seller chat metadata.
-6. Start a tiny internal campaign and process one bounded batch.
+6. Start or schedule a tiny internal campaign and let the backend lifespan
+   worker send it automatically. The protected process-batch endpoint is
+   support/recovery-only.
 7. Confirm delivery report counts and sanitized errors before enabling larger
    production campaigns.
 
@@ -365,7 +369,9 @@ drill steps, failure behavior, and notification contents.
 - Compose is intended for MVP staging or a single-node deployment, not high availability.
 - Public review and seller moderation lists keep their current response shape; review admin pagination is documented as a later compatibility-safe improvement.
 - Redis is a cache and rate-limit accelerator. Public endpoints fall back to PostgreSQL if Redis is unavailable.
-- Customer Notifications Phase 2 supports controlled Bot 1 campaigns through
-  templates, materialized delivery rows, and bounded process-batch processing.
-  Recipient exports, arbitrary database interpolation, non-plain parse modes,
-  and a separate worker process remain out of scope.
+- Customer Notifications supports controlled Bot 1 campaigns with materialized
+  delivery rows, one optional campaign image, and automatic lifespan-worker
+  processing when `TELEGRAM_CUSTOMER_BOT_TOKEN` is configured. Backend template
+  APIs remain available, but Seller Panel template UI is hidden. Recipient
+  exports, arbitrary database interpolation, non-plain parse modes, and
+  per-recipient image copies remain out of scope.

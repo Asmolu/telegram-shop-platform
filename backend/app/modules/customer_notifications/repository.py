@@ -46,6 +46,23 @@ class CustomerNotificationsRepository:
         )
         return result.scalar_one_or_none()
 
+    async def link_unlinked_subscription_to_user(
+        self,
+        *,
+        user_id: int,
+        telegram_user_id: int,
+    ) -> CustomerTelegramSubscription | None:
+        linked_subscription = await self.get_by_user_id(user_id)
+        if linked_subscription is not None:
+            return linked_subscription
+
+        subscription = await self.get_by_telegram_user_id(telegram_user_id)
+        if subscription is None or subscription.user_id is not None:
+            return None
+
+        subscription.user_id = user_id
+        return subscription
+
     async def list(
         self,
         *,

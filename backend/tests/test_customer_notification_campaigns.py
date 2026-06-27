@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +42,7 @@ from app.modules.customer_notifications.campaigns.service import (
     CustomerNotificationCampaignService,
 )
 from app.modules.telegram.service import TelegramDeliveryError
+from app.modules.uploads.service import ValidatedImageUpload
 
 
 class DummySession:
@@ -74,6 +76,7 @@ class FakeCampaignSender:
     def __init__(self, errors: list[TelegramDeliveryError] | None = None) -> None:
         self.errors = errors or []
         self.messages: list[tuple[int, str, str | None]] = []
+        self.photos: list[tuple[int, bytes, str, str, str]] = []
 
     async def send_message(
         self,
@@ -86,6 +89,95 @@ class FakeCampaignSender:
         if self.errors:
             raise self.errors.pop(0)
         return 777
+
+    async def send_photo(
+        self,
+        *,
+        chat_id: int,
+        photo: bytes,
+        filename: str,
+        mime_type: str,
+        caption: str,
+    ) -> int | None:
+        self.photos.append((chat_id, photo, filename, mime_type, caption))
+        if self.errors:
+            raise self.errors.pop(0)
+        return 778
+
+
+class FakeStorage:
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.deleted: list[str] = []
+        self.next_id = 1
+
+    def save_bytes(self, content: bytes, *, folder: str, suffix: str) -> str:
+        path = f"{folder}/image-{self.next_id}{suffix}"
+        self.next_id += 1
+        self.files[path] = content
+        return path
+
+    def delete(self, relative_path: str) -> None:
+        self.deleted.append(relative_path)
+        self.files.pop(relative_path, None)
+
+    def exists(self, relative_path: str) -> bool:
+        return relative_path in self.files
+
+    def read_bytes(self, relative_path: str) -> bytes:
+        if relative_path not in self.files:
+            raise FileNotFoundError(relative_path)
+        return self.files[relative_path]
+
+
+class FakeUploadsService:
+    def __init__(self, storage: FakeStorage) -> None:
+        self.storage = storage
+
+    async def validate_and_read_image(
+        self,
+        file: object,
+        *,
+        profile: object = None,
+    ) -> ValidatedImageUpload:
+        del profile
+        original_filename = getattr(file, "filename", "") or "upload"
+        content_type = getattr(file, "content_type", "") or ""
+        content = await file.read(5 * 1024 * 1024 + 1)
+        suffix = (
+            "." + original_filename.rsplit(".", 1)[-1].lower()
+            if "." in original_filename
+            else ""
+        )
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise AppError("Invalid file extension", 400)
+        if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise AppError("Invalid MIME type", 400)
+        if len(content) > 5 * 1024 * 1024:
+            raise AppError("File size exceeds limit", 400)
+        return ValidatedImageUpload(
+            content=content,
+            extension=suffix,
+            original_filename=original_filename,
+            mime_type=content_type,
+            size_bytes=len(content),
+        )
+
+
+class FakeUploadFile:
+    def __init__(
+        self,
+        *,
+        filename: str = "campaign.png",
+        content_type: str = "image/png",
+        content: bytes = b"image-bytes",
+    ) -> None:
+        self.filename = filename
+        self.content_type = content_type
+        self._file = BytesIO(content)
+
+    async def read(self, _: int = -1) -> bytes:
+        return self._file.read()
 
 
 class FakeCampaignRepository:
@@ -146,8 +238,12 @@ class FakeCampaignRepository:
             [
                 subscription
                 for subscription in self.subscriptions.values()
-                if self._eligible(subscription, campaign_type)
-                and getattr(audience_filter, "scope", "all") == "all"
+                if self._eligible(
+                    subscription,
+                    campaign_type,
+                    require_user=getattr(audience_filter, "scope", "all") != "connected",
+                )
+                and getattr(audience_filter, "scope", "all") in {"all", "connected"}
             ]
         )
 
@@ -160,8 +256,12 @@ class FakeCampaignRepository:
         return [
             subscription
             for subscription in self.subscriptions.values()
-            if self._eligible(subscription, campaign_type)
-            and getattr(audience_filter, "scope", "all") == "all"
+            if self._eligible(
+                subscription,
+                campaign_type,
+                require_user=getattr(audience_filter, "scope", "all") != "connected",
+            )
+            and getattr(audience_filter, "scope", "all") in {"all", "connected"}
         ]
 
     async def count_campaign_deliveries(self, campaign_id: int) -> int:
@@ -273,8 +373,10 @@ class FakeCampaignRepository:
         self,
         subscription: CustomerTelegramSubscription,
         campaign_type: BroadcastCampaignType,
+        *,
+        require_user: bool = True,
     ) -> bool:
-        if subscription.user_id is None:
+        if require_user and subscription.user_id is None:
             return False
         if not subscription.has_chat or subscription.telegram_chat_id is None:
             return False
@@ -390,6 +492,37 @@ async def test_service_campaign_preview_excludes_service_opt_out_and_missing_cha
     assert preview.recipient_count_estimate == 1
 
 
+@pytest.mark.asyncio
+async def test_connected_audience_includes_unlinked_active_bot1_subscriptions() -> None:
+    service, repository, _, _ = _service()
+    repository.subscriptions = {
+        1: _subscription(marketing_opt_in=True),
+        2: _subscription(id=2, user_id=None, telegram_user_id=43, marketing_opt_in=True),
+        3: _subscription(id=3, user_id=None, telegram_user_id=44, marketing_opt_in=False),
+    }
+    campaign = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignCreate(
+            name="Campaign",
+            type=BroadcastCampaignType.MARKETING,
+            audience_filter={"scope": "connected"},
+            message_body="Campaign body",
+        ),
+    )
+
+    preview = await service.preview_campaign(campaign.id)
+    started = await service.schedule_campaign(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignScheduleRequest(),
+        start_now=True,
+    )
+
+    assert preview.recipient_count_estimate == 2
+    assert started.recipient_count_final == 2
+    assert [delivery.user_id for delivery in repository.deliveries] == [1, None]
+
+
 def test_customer_campaign_sender_uses_customer_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "telegram_customer_bot_token", "customer-token")
     monkeypatch.setattr(settings, "telegram_bot_token", "seller-token")
@@ -422,6 +555,106 @@ async def test_start_materializes_delivery_rows_without_synchronous_broadcast() 
     assert started.status == BroadcastCampaignStatus.SENDING
     assert len(repository.deliveries) == 2
     assert sender.messages == []
+
+
+@pytest.mark.asyncio
+async def test_campaign_image_attach_validates_and_persists_metadata() -> None:
+    service, repository, _, audit = _service()
+    campaign = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=_campaign_payload(campaign_type=BroadcastCampaignType.MARKETING),
+    )
+
+    updated = await service.attach_campaign_image(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.SELLER),
+        file=FakeUploadFile(filename="sale.webp", content_type="image/webp"),
+    )
+
+    assert updated.image_path == "customer_campaigns/image-1.webp"
+    assert updated.image_url == "/uploads/customer_campaigns/image-1.webp"
+    assert updated.image_original_filename == "sale.webp"
+    assert updated.image_mime_type == "image/webp"
+    assert updated.image_size_bytes == len(b"image-bytes")
+    assert audit.actions[-1]["action"] == "customer_notifications.campaign_image_attached"
+
+
+@pytest.mark.asyncio
+async def test_campaign_image_attach_rejects_invalid_mime_type() -> None:
+    service, _, _, _ = _service()
+    campaign = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=_campaign_payload(campaign_type=BroadcastCampaignType.MARKETING),
+    )
+
+    with pytest.raises(AppError, match="Invalid MIME type"):
+        await service.attach_campaign_image(
+            campaign_id=campaign.id,
+            actor=_user(role=UserRole.SELLER),
+            file=FakeUploadFile(filename="sale.png", content_type="text/plain"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_campaign_image_attach_remove_allowed_only_for_draft_or_paused() -> None:
+    service, repository, _, _ = _service()
+    draft = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=_campaign_payload(campaign_type=BroadcastCampaignType.MARKETING),
+    )
+    repository.campaigns[draft.id].status = BroadcastCampaignStatus.SCHEDULED
+
+    with pytest.raises(AppError, match="Only draft or paused campaigns can change images"):
+        await service.attach_campaign_image(
+            campaign_id=draft.id,
+            actor=_user(role=UserRole.SELLER),
+            file=FakeUploadFile(),
+        )
+
+    repository.campaigns[draft.id].status = BroadcastCampaignStatus.PAUSED
+    attached = await service.attach_campaign_image(
+        campaign_id=draft.id,
+        actor=_user(role=UserRole.SELLER),
+        file=FakeUploadFile(),
+    )
+    removed = await service.remove_campaign_image(
+        campaign_id=draft.id,
+        actor=_user(role=UserRole.SELLER),
+    )
+
+    assert attached.image_path is not None
+    assert removed.image_path is None
+
+
+@pytest.mark.asyncio
+async def test_campaign_image_enforces_caption_limit_but_text_only_allows_4096() -> None:
+    service, _, _, _ = _service()
+    text_only = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignCreate(
+            name="Long",
+            type=BroadcastCampaignType.MARKETING,
+            audience_filter={"scope": "all"},
+            message_body="x" * 4096,
+        ),
+    )
+    with_image = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignCreate(
+            name="Long image",
+            type=BroadcastCampaignType.MARKETING,
+            audience_filter={"scope": "all"},
+            message_body="x" * 1025,
+        ),
+    )
+
+    assert text_only.message_body == "x" * 4096
+    with pytest.raises(AppError, match="caption"):
+        await service.attach_campaign_image(
+            campaign_id=with_image.id,
+            actor=_user(role=UserRole.SELLER),
+            file=FakeUploadFile(),
+        )
 
 
 @pytest.mark.asyncio
@@ -668,6 +901,79 @@ async def test_send_test_campaign_uses_actor_bot_1_subscription() -> None:
     assert audit.actions[-1]["action"] == "customer_notifications.test_message_sent"
 
 
+@pytest.mark.asyncio
+async def test_send_test_campaign_uses_send_photo_when_image_present() -> None:
+    service, repository, sender, _ = _service()
+    repository.subscriptions = {1: _subscription(user_id=1, telegram_user_id=42)}
+    campaign = await service.create_campaign(
+        actor=_user(role=UserRole.SELLER),
+        payload=_campaign_payload(campaign_type=BroadcastCampaignType.MARKETING),
+    )
+    saved = await service.attach_campaign_image(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.SELLER),
+        file=FakeUploadFile(filename="campaign.png", content_type="image/png"),
+    )
+
+    response = await service.send_test_message(
+        campaign_id=saved.id,
+        actor=_user(role=UserRole.SELLER),
+        payload=BroadcastCampaignTestRequest(),
+    )
+
+    assert response.telegram_message_id == 778
+    assert sender.messages == []
+    assert sender.photos == [(100, b"image-bytes", "campaign.png", "image/png", "Campaign body")]
+
+
+@pytest.mark.asyncio
+async def test_delivery_processing_uses_send_photo_when_image_present() -> None:
+    service, repository, sender, _ = _service()
+    campaign, delivery, subscription = _campaign_with_delivery(repository)
+    campaign.image_path = "customer_campaigns/campaign.png"
+    campaign.image_original_filename = "campaign.png"
+    campaign.image_mime_type = "image/png"
+    service.storage.files[campaign.image_path] = b"image-bytes"  # type: ignore[attr-defined]
+
+    response = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+
+    assert response.sent == 1
+    assert delivery.status == BroadcastDeliveryStatus.SENT
+    assert delivery.telegram_message_id == 778
+    assert subscription.blocked_at is None
+    assert sender.messages == []
+    assert sender.photos == [(100, b"image-bytes", "campaign.png", "image/png", "Campaign body")]
+
+
+@pytest.mark.asyncio
+async def test_missing_campaign_image_fails_campaign_safely() -> None:
+    service, repository, sender, _ = _service()
+    campaign, delivery, _ = _campaign_with_delivery(repository)
+    campaign.image_path = "customer_campaigns/missing.png"
+    campaign.image_original_filename = "missing.png"
+    campaign.image_mime_type = "image/png"
+
+    response = await service.process_batch(
+        campaign_id=campaign.id,
+        actor=_user(role=UserRole.ADMIN),
+        payload=BroadcastCampaignProcessBatchRequest(limit=1),
+    )
+
+    assert response.processed == 0
+    assert response.skipped == 1
+    assert response.campaign_status == BroadcastCampaignStatus.FAILED
+    assert campaign.status == BroadcastCampaignStatus.FAILED
+    assert delivery.status == BroadcastDeliveryStatus.SKIPPED
+    assert delivery.error_code == "campaign_image_missing"
+    assert delivery.error_message == "Campaign image file is unavailable"
+    assert sender.messages == []
+    assert sender.photos == []
+
+
 class FakeApiService:
     async def list_campaigns(self, **_: object) -> BroadcastCampaignList:
         return BroadcastCampaignList(items=[], meta={"limit": 20, "offset": 0, "total": 0})
@@ -718,11 +1024,14 @@ def _service(
     repository = FakeCampaignRepository()
     sender = FakeCampaignSender(errors=errors)
     audit = FakeAuditService()
+    storage = FakeStorage()
     service = CustomerNotificationCampaignService(
         DummySession(),
         repository=repository,
         sender=sender,
         audit_service=audit,
+        uploads_service=FakeUploadsService(storage),  # type: ignore[arg-type]
+        storage=storage,  # type: ignore[arg-type]
         now_factory=_now,
     )
     return service, repository, sender, audit

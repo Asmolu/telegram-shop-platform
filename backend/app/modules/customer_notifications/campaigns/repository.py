@@ -395,19 +395,20 @@ class CustomerNotificationCampaignRepository:
         campaign_type: BroadcastCampaignType,
         audience_filter: BroadcastAudienceFilter,
     ) -> list[Any]:
+        scope = audience_filter.scope
         conditions: list[Any] = [
-            CustomerTelegramSubscription.user_id.is_not(None),
             CustomerTelegramSubscription.has_chat.is_(True),
             CustomerTelegramSubscription.telegram_chat_id.is_not(None),
             CustomerTelegramSubscription.chat_type == PRIVATE_CHAT_TYPE,
             CustomerTelegramSubscription.blocked_at.is_(None),
         ]
+        if scope != "connected":
+            conditions.append(CustomerTelegramSubscription.user_id.is_not(None))
         if campaign_type == BroadcastCampaignType.MARKETING:
             conditions.append(CustomerTelegramSubscription.marketing_opt_in.is_(True))
         else:
             conditions.append(CustomerTelegramSubscription.service_opt_in.is_(True))
 
-        scope = audience_filter.scope
         if scope == "purchasers":
             conditions.append(self._customer_has_order())
         elif scope == "product":

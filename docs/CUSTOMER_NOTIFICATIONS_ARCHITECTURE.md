@@ -25,8 +25,10 @@ MVP Phase 1 is implemented as a customer subscription registry, Bot 1 webhook,
 Mini App Profile settings, and Seller Panel read-only listing. Phase 1.5 adds
 customer-facing order service notifications through Bot 1, with a minimal
 `CustomerServiceNotificationDelivery` attempt log for order-related service
-messages only. Phase 2 adds controlled Bot 1 templates, campaigns, materialized
-delivery rows, preview/test-send, bounded process-batch delivery, and reports.
+messages only. Phase 2 adds controlled Bot 1 templates, campaigns, one optional
+campaign image, materialized delivery rows, preview/test-send, automatic
+lifespan-worker delivery, and reports. The backend template API remains for
+compatibility, but the Seller Panel no longer shows template management.
 
 ## Current State
 
@@ -159,6 +161,10 @@ Suggested fields:
 | `audience_filter` | JSON | Stored filter definition, not raw recipient list only. |
 | `recipient_count_estimate` | integer | Count at preview/schedule time. |
 | `recipient_count_final` | integer nullable | Count after delivery rows are created. |
+| `image_path` | string nullable | Relative upload path for one optional campaign image. |
+| `image_original_filename` | string nullable | Original filename for audit/preview. |
+| `image_mime_type` | string nullable | `image/jpeg`, `image/png`, or `image/webp`. |
+| `image_size_bytes` | integer nullable | Stored upload size. |
 | `message_title` | string nullable | Report title. |
 | `message_body` | text | Rendered base body or copied template body. |
 | `parse_mode` | string nullable | Telegram parse mode. |
@@ -240,6 +246,8 @@ Seller/admin endpoints:
 | `POST` | `/api/v1/customer-notifications/campaigns/{campaign_id}/preview` | Render message and count eligible recipients. |
 | `POST` | `/api/v1/customer-notifications/campaigns/{campaign_id}/test` | Send to a selected safe test recipient. |
 | `POST` | `/api/v1/customer-notifications/campaigns/{campaign_id}/schedule` | Schedule or start a campaign. |
+| `POST` | `/api/v1/customer-notifications/campaigns/{campaign_id}/image` | Attach or replace one campaign image on draft/paused campaigns. |
+| `DELETE` | `/api/v1/customer-notifications/campaigns/{campaign_id}/image` | Remove the campaign image from draft/paused campaigns. |
 | `POST` | `/api/v1/customer-notifications/campaigns/{campaign_id}/process-batch` | MVP protected batch sender endpoint. |
 | `GET` | `/api/v1/customer-notifications/campaigns/{campaign_id}/deliveries` | Paginated delivery report. |
 
@@ -296,19 +304,38 @@ Service notifications:
 
 - Examples: order status updates, delivery updates, important account/service notices.
 - Eligible only when `has_chat=true`, `telegram_chat_id` is present, `blocked_at is null`, and `service_opt_in=true`.
-- `/start` may enable service notifications because the user has initiated Bot 1 interaction.
+- `/start` enables service and marketing notifications because the user has initiated Bot 1 interaction.
 - `/stop` disables service notifications unless future legal/product policy defines a narrower class of mandatory transactional notices. For MVP, respect `/stop` fully.
 
 Marketing notifications:
 
 - Examples: new collection, sale, promo, abandoned favorites, win-back campaigns.
-- Default false.
-- Must require explicit opt-in from Mini App Profile settings, checkout checkbox, or Bot 1 settings callback.
+- New Bot 1 `/start` sets marketing opt-in. Existing active Bot 1 chats are
+  backfilled to `marketing_opt_in=true` only when `marketing_opted_out_at` is
+  null, so explicit opt-outs are not re-enabled.
+- Mini App Profile settings and Bot 1 settings callbacks can still disable or
+  re-enable marketing separately.
 - Marketing opt-in must record timestamp and source.
 - `/stop` always disables marketing.
 - Mini App Profile must show clear state: chat connected or not, service opt-in, marketing opt-in, and a Bot 1 link when chat is missing.
 
+Linking:
+
+- After Telegram Mini App auth, the backend links an existing unlinked
+  `CustomerTelegramSubscription` by matching `telegram_user_id` to
+  `User.telegram_id` when no other subscription is already linked to that user.
+- `GET /customer-notifications/me/subscription` repeats the same safe linking
+  check. Linking failures are logged without raw initData, bot tokens, or raw
+  chat ids and do not break login.
+
 Recipient eligibility:
+
+- `all`: linked eligible customer subscriptions, preserving the original
+  user-linked behavior.
+- `connected`: all active Bot 1 private-chat subscriptions matching campaign
+  consent, including subscriptions with `user_id=null`.
+- `purchasers`, `product`, `category`, and `promo_code`: linked users only
+  because they require order/user joins.
 
 - Marketing campaigns must query only subscriptions with `marketing_opt_in=true`.
 - Service campaigns must query only subscriptions with `service_opt_in=true`.
@@ -377,16 +404,16 @@ Add a separate Seller Panel area, not part of `SellerBotPage`, for Bot 1 custome
 Required pages:
 
 - Campaign list: status, type, created by, scheduled time, recipient count, sent/failed/blocked progress.
-- Create campaign: type, template, audience filter, message body, schedule time, compliance/consent warning.
-- Preview/test: rendered Telegram preview, variable sample, estimated recipients, explicit test-send action.
+- Create campaign: type, audience filter, message body, optional image, schedule time, compliance/consent warning.
+- Preview/test: rendered Telegram preview, estimated recipients, explicit test-send action.
 - Delivery report: delivery table with user, status, attempts, sent time, sanitized error, and filters.
-- Templates: create/edit reusable service and marketing templates with allowed variables.
 - Recipient list: searchable customer subscription registry showing chat known, service opt-in, marketing opt-in, blocked state, and last interaction.
 
 UX rules:
 
 - Marketing campaigns must show an eligibility count that excludes non-opted-in users.
-- Sending controls should be disabled until preview count and test send are complete.
+- Test send is recommended before start. Seller Panel warns if no test was sent
+  in the current UI session but still allows activation after confirmation.
 - The UI must make Bot 1 customer targeting visually distinct from Bot 2 seller-chat tooling.
 - No bot token or webhook secret is ever shown in the frontend.
 
@@ -485,22 +512,30 @@ Implemented MVP details:
   uses explicit request-supplied values only and does not interpolate arbitrary
   database fields.
 - Audience filters supported in the first Phase 2 implementation are `all`,
-  `purchasers`, `product`, `category`, and `promo_code`.
+  `connected`, `purchasers`, `product`, `category`, and `promo_code`.
+- Campaigns support one optional image. When present, Bot 1 sends `sendPhoto`
+  with `message_body` as the caption and enforces Telegram's 1024-character
+  caption limit. Text-only campaigns keep the 4096-character message limit.
 - Test send targets the current SELLER/ADMIN user's Bot 1 subscription when
   they have opened Bot 1 with `/start`; it does not reuse Bot 2 seller chat
   metadata.
+- The backend lifespan worker processes due scheduled/sending campaigns when
+  `TELEGRAM_CUSTOMER_BOT_TOKEN` is configured. The protected process-batch API
+  remains support/recovery-only and is hidden from the normal Seller Panel UI.
 - Recipient exports, arbitrary chat-id sends, non-plain Telegram parse modes,
-  and a separate worker process remain out of scope.
+  and per-recipient image copies remain out of scope.
 
 Frontend design scope:
 
-- Seller Panel campaign list, create campaign, preview/test, templates, and delivery report pages.
+- Seller Panel campaign list, create campaign, preview/test, recipient registry,
+  and delivery report pages. Template UI is hidden; backend template endpoints
+  remain compatible.
 - Optional Mini App in-app notification center alignment with existing `Notification` records.
 
 Future worker scope:
 
-- Replace the MVP process-batch endpoint with Redis-backed background jobs and a dedicated worker.
-- Add scheduling and priority queues for service vs marketing.
+- Add dedicated queue priority controls for service vs marketing if the
+  lifespan worker becomes insufficient.
 
 ## Testing Plan
 

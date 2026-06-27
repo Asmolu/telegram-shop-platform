@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import status
+from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,11 +52,17 @@ from app.modules.customer_notifications.campaigns.schemas import (
     NotificationTemplateUpdate,
 )
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
+from app.modules.uploads.service import UploadsService
+from app.modules.uploads.storage import LocalStorageService
 
 TELEGRAM_MESSAGE_MAX_LENGTH = 4096
+TELEGRAM_PHOTO_CAPTION_MAX_LENGTH = 1024
 TELEGRAM_ERROR_MESSAGE_MAX_LENGTH = 500
+CAMPAIGN_IMAGE_UPLOAD_FOLDER = "customer_campaigns"
 TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{(?P<name>[A-Za-z_][A-Za-z0-9_]{0,63})\}")
 SUPPORTED_PARSE_MODES: set[str] = set()
+
+logger = logging.getLogger(__name__)
 
 ACTION_TEMPLATE_CREATED = "customer_notifications.template_created"
 ACTION_TEMPLATE_UPDATED = "customer_notifications.template_updated"
@@ -66,6 +73,8 @@ ACTION_CAMPAIGN_SCHEDULED = "customer_notifications.campaign_scheduled"
 ACTION_CAMPAIGN_STARTED = "customer_notifications.campaign_started"
 ACTION_CAMPAIGN_PAUSED = "customer_notifications.campaign_paused"
 ACTION_CAMPAIGN_CANCELLED = "customer_notifications.campaign_cancelled"
+ACTION_CAMPAIGN_IMAGE_ATTACHED = "customer_notifications.campaign_image_attached"
+ACTION_CAMPAIGN_IMAGE_REMOVED = "customer_notifications.campaign_image_removed"
 ACTION_TEST_MESSAGE_SENT = "customer_notifications.test_message_sent"
 ACTION_PROCESS_BATCH_STARTED = "customer_notifications.process_batch_started"
 ACTION_PROCESS_BATCH_COMPLETED = "customer_notifications.process_batch_completed"
@@ -92,6 +101,23 @@ class CustomerCampaignTelegramSender:
             parse_mode=parse_mode,
         )
 
+    async def send_photo(
+        self,
+        *,
+        chat_id: int,
+        photo: bytes,
+        filename: str,
+        mime_type: str,
+        caption: str,
+    ) -> int | None:
+        return await self.telegram_service.send_photo_bytes(
+            str(chat_id),
+            photo,
+            filename=filename,
+            mime_type=mime_type,
+            caption=caption,
+        )
+
 
 @dataclass
 class BatchCounts:
@@ -112,6 +138,13 @@ class DeliverySkip:
     error_message: str
 
 
+@dataclass(frozen=True)
+class CampaignPhoto:
+    content: bytes
+    filename: str
+    mime_type: str
+
+
 class CustomerNotificationCampaignService:
     """Business logic for Bot 1 templates, campaigns, delivery rows, and reports."""
 
@@ -122,12 +155,16 @@ class CustomerNotificationCampaignService:
         repository: CustomerNotificationCampaignRepository | None = None,
         sender: CustomerCampaignTelegramSender | None = None,
         audit_service: AuditService | None = None,
+        uploads_service: UploadsService | None = None,
+        storage: LocalStorageService | None = None,
         now_factory: Any | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or CustomerNotificationCampaignRepository(session)
         self.sender = sender or CustomerCampaignTelegramSender()
         self.audit_service = audit_service or AuditService(session)
+        self.uploads_service = uploads_service or UploadsService(session)
+        self.storage = storage or self.uploads_service.storage
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
 
     async def create_template(
@@ -383,7 +420,11 @@ class CustomerNotificationCampaignService:
         elif "parse_mode" in payload.model_fields_set:
             campaign.parse_mode = self._normalize_parse_mode(payload.parse_mode)
 
-        self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+        self._validate_campaign_message(
+            campaign.message_body,
+            campaign.parse_mode,
+            has_image=campaign.image_path is not None,
+        )
         campaign.recipient_count_estimate = 0
         campaign.recipient_count_final = None
         await self._audit(
@@ -402,10 +443,114 @@ class CustomerNotificationCampaignService:
         await self._refresh_if_supported(campaign)
         return BroadcastCampaignRead.model_validate(campaign)
 
+    async def attach_campaign_image(
+        self,
+        *,
+        campaign_id: int,
+        actor: User,
+        file: UploadFile,
+    ) -> BroadcastCampaignRead:
+        campaign = await self.repository.get_campaign_by_id_for_update(campaign_id)
+        if campaign is None:
+            raise AppError("Broadcast campaign not found", status.HTTP_404_NOT_FOUND)
+        self._require_status(
+            campaign,
+            {BroadcastCampaignStatus.DRAFT, BroadcastCampaignStatus.PAUSED},
+            "Only draft or paused campaigns can change images",
+        )
+
+        upload = await self.uploads_service.validate_and_read_image(file)
+        self._validate_campaign_message(
+            campaign.message_body,
+            campaign.parse_mode,
+            has_image=True,
+        )
+        previous_path = campaign.image_path
+        before_data = self._campaign_snapshot(campaign)
+        new_path = self.storage.save_bytes(
+            upload.content,
+            folder=CAMPAIGN_IMAGE_UPLOAD_FOLDER,
+            suffix=upload.extension,
+        )
+        campaign.image_path = new_path
+        campaign.image_original_filename = upload.original_filename
+        campaign.image_mime_type = upload.mime_type
+        campaign.image_size_bytes = upload.size_bytes
+
+        try:
+            await self._audit(
+                actor=actor,
+                action=ACTION_CAMPAIGN_IMAGE_ATTACHED,
+                entity_type="broadcast_campaign",
+                entity_id=campaign.id,
+                before_data=before_data,
+                after_data=self._campaign_snapshot(campaign),
+                metadata={
+                    "campaign_type": campaign.type.value,
+                    "image_size_bytes": upload.size_bytes,
+                    "replaced": previous_path is not None,
+                },
+            )
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            self._delete_upload_safely(new_path, stage="campaign_image_db_integrity")
+            raise AppError(
+                "Broadcast campaign image attach failed",
+                status.HTTP_409_CONFLICT,
+            ) from exc
+        except Exception:
+            await self.session.rollback()
+            self._delete_upload_safely(new_path, stage="campaign_image_db_failure")
+            raise
+
+        if previous_path and previous_path != new_path:
+            self._delete_upload_safely(previous_path, stage="campaign_image_replace")
+        await self._refresh_if_supported(campaign)
+        return BroadcastCampaignRead.model_validate(campaign)
+
+    async def remove_campaign_image(
+        self,
+        *,
+        campaign_id: int,
+        actor: User,
+    ) -> BroadcastCampaignRead:
+        campaign = await self.repository.get_campaign_by_id_for_update(campaign_id)
+        if campaign is None:
+            raise AppError("Broadcast campaign not found", status.HTTP_404_NOT_FOUND)
+        self._require_status(
+            campaign,
+            {BroadcastCampaignStatus.DRAFT, BroadcastCampaignStatus.PAUSED},
+            "Only draft or paused campaigns can change images",
+        )
+        previous_path = campaign.image_path
+        if previous_path is None:
+            return BroadcastCampaignRead.model_validate(campaign)
+
+        before_data = self._campaign_snapshot(campaign)
+        self._clear_campaign_image_fields(campaign)
+        await self._audit(
+            actor=actor,
+            action=ACTION_CAMPAIGN_IMAGE_REMOVED,
+            entity_type="broadcast_campaign",
+            entity_id=campaign.id,
+            before_data=before_data,
+            after_data=self._campaign_snapshot(campaign),
+            metadata={"campaign_type": campaign.type.value},
+        )
+        await self._commit("Broadcast campaign image remove failed")
+        self._delete_upload_safely(previous_path, stage="campaign_image_remove")
+        await self._refresh_if_supported(campaign)
+        return BroadcastCampaignRead.model_validate(campaign)
+
     async def preview_campaign(self, campaign_id: int) -> BroadcastCampaignPreview:
         campaign = await self._get_campaign_or_404(campaign_id)
         audience_filter = self._parse_audience_filter(campaign.audience_filter)
-        self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+        self._validate_campaign_message(
+            campaign.message_body,
+            campaign.parse_mode,
+            has_image=campaign.image_path is not None,
+        )
         recipient_count = await self.repository.count_eligible_recipients(
             campaign_type=campaign.type,
             audience_filter=audience_filter,
@@ -427,7 +572,12 @@ class CustomerNotificationCampaignService:
         payload: BroadcastCampaignTestRequest,
     ) -> BroadcastCampaignTestResponse:
         campaign = await self._get_campaign_or_404(campaign_id)
-        self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+        has_image = campaign.image_path is not None
+        self._validate_campaign_message(
+            campaign.message_body,
+            campaign.parse_mode,
+            has_image=has_image,
+        )
         subscription = await self.repository.get_test_subscription_for_user(
             user_id=actor.id,
             telegram_user_id=actor.telegram_id,
@@ -441,16 +591,35 @@ class CustomerNotificationCampaignService:
         message = campaign.message_body
         if payload.message_suffix:
             message = f"{message}\n\n{payload.message_suffix}"
-            self._validate_campaign_message(message, campaign.parse_mode)
+            self._validate_campaign_message(
+                message,
+                campaign.parse_mode,
+                has_image=has_image,
+            )
 
         assert subscription is not None
         assert subscription.telegram_chat_id is not None
         try:
-            telegram_message_id = await self.sender.send_message(
-                chat_id=subscription.telegram_chat_id,
-                message=message,
-                parse_mode=campaign.parse_mode,
-            )
+            photo = self._read_campaign_photo(campaign)
+            if photo is not None:
+                telegram_message_id = await self.sender.send_photo(
+                    chat_id=subscription.telegram_chat_id,
+                    photo=photo.content,
+                    filename=photo.filename,
+                    mime_type=photo.mime_type,
+                    caption=message,
+                )
+            else:
+                telegram_message_id = await self.sender.send_message(
+                    chat_id=subscription.telegram_chat_id,
+                    message=message,
+                    parse_mode=campaign.parse_mode,
+                )
+        except OSError as exc:
+            raise AppError(
+                "Campaign image file is unavailable",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ) from exc
         except TelegramDeliveryError as exc:
             raise AppError(
                 self._sanitize_error_message(exc),
@@ -664,6 +833,48 @@ class CustomerNotificationCampaignService:
             campaign.status = BroadcastCampaignStatus.SENDING
             campaign.started_at = campaign.started_at or now
 
+        try:
+            campaign_photo = self._read_campaign_photo(campaign)
+        except OSError:
+            counts = BatchCounts()
+            counts.skipped += await self.repository.skip_remaining_deliveries(
+                campaign_id=campaign.id,
+                now=now,
+                error_code="campaign_image_missing",
+                error_message="Campaign image file is unavailable",
+            )
+            campaign.status = BroadcastCampaignStatus.FAILED
+            campaign.completed_at = now
+            remaining = await self.repository.count_unfinished_deliveries(
+                campaign_id=campaign.id
+            )
+            await self._audit(
+                actor=actor,
+                action=ACTION_PROCESS_BATCH_COMPLETED,
+                entity_type="broadcast_campaign",
+                entity_id=campaign.id,
+                metadata={
+                    "processed": 0,
+                    "skipped": counts.skipped,
+                    "remaining": remaining,
+                    "campaign_type": campaign.type.value,
+                    "error_code": "campaign_image_missing",
+                },
+            )
+            await self._commit("Broadcast campaign process-batch failed")
+            return BroadcastCampaignProcessBatchResponse(
+                campaign_id=campaign.id,
+                processed=0,
+                sent=0,
+                failed=0,
+                blocked=0,
+                rate_limited=0,
+                retried=0,
+                skipped=counts.skipped,
+                remaining=remaining,
+                campaign_status=campaign.status,
+            )
+
         deliveries = await self.repository.deliveries_for_processing(
             campaign_id=campaign.id,
             now=now,
@@ -673,7 +884,11 @@ class CustomerNotificationCampaignService:
         campaign_failed = False
         for delivery in deliveries:
             counts.processed += 1
-            result = await self._process_delivery(campaign=campaign, delivery=delivery)
+            result = await self._process_delivery(
+                campaign=campaign,
+                delivery=delivery,
+                campaign_photo=campaign_photo,
+            )
             setattr(counts, result, getattr(counts, result) + 1)
             if delivery.error_code == "bad_request":
                 campaign_failed = True
@@ -801,6 +1016,7 @@ class CustomerNotificationCampaignService:
         *,
         campaign: BroadcastCampaign,
         delivery: BroadcastDelivery,
+        campaign_photo: CampaignPhoto | None,
     ) -> str:
         now = self._now()
         skip = self._delivery_skip(campaign=campaign, delivery=delivery)
@@ -818,11 +1034,20 @@ class CustomerNotificationCampaignService:
         delivery.attempt_count += 1
         delivery.last_attempt_at = now
         try:
-            telegram_message_id = await self.sender.send_message(
-                chat_id=delivery.telegram_chat_id,
-                message=campaign.message_body,
-                parse_mode=campaign.parse_mode,
-            )
+            if campaign_photo is not None:
+                telegram_message_id = await self.sender.send_photo(
+                    chat_id=delivery.telegram_chat_id,
+                    photo=campaign_photo.content,
+                    filename=campaign_photo.filename,
+                    mime_type=campaign_photo.mime_type,
+                    caption=campaign.message_body,
+                )
+            else:
+                telegram_message_id = await self.sender.send_message(
+                    chat_id=delivery.telegram_chat_id,
+                    message=campaign.message_body,
+                    parse_mode=campaign.parse_mode,
+                )
         except TelegramDeliveryError as exc:
             return self._mark_delivery_error(delivery=delivery, error=exc, now=now)
 
@@ -1015,11 +1240,23 @@ class CustomerNotificationCampaignService:
                 status.HTTP_400_BAD_REQUEST,
             )
 
-    def _validate_campaign_message(self, message_body: str, parse_mode: str | None) -> None:
+    def _validate_campaign_message(
+        self,
+        message_body: str,
+        parse_mode: str | None,
+        *,
+        has_image: bool = False,
+    ) -> None:
         self._normalize_parse_mode(parse_mode)
-        if len(message_body) > TELEGRAM_MESSAGE_MAX_LENGTH:
+        max_length = TELEGRAM_PHOTO_CAPTION_MAX_LENGTH if has_image else TELEGRAM_MESSAGE_MAX_LENGTH
+        if len(message_body) > max_length:
+            message = (
+                "Campaign image caption exceeds Telegram photo caption length"
+                if has_image
+                else "Campaign message exceeds Telegram message length"
+            )
             raise AppError(
-                "Campaign message exceeds Telegram message length",
+                message,
                 status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1031,9 +1268,15 @@ class CustomerNotificationCampaignService:
             issues.append("message_body is required")
         else:
             try:
-                self._validate_campaign_message(campaign.message_body, campaign.parse_mode)
+                self._validate_campaign_message(
+                    campaign.message_body,
+                    campaign.parse_mode,
+                    has_image=campaign.image_path is not None,
+                )
             except AppError as exc:
                 issues.append(exc.message)
+        if campaign.image_path is not None and not self.storage.exists(campaign.image_path):
+            issues.append("campaign image file is unavailable")
         try:
             self._parse_audience_filter(campaign.audience_filter)
         except AppError as exc:
@@ -1098,6 +1341,13 @@ class CustomerNotificationCampaignService:
             warnings.append("Marketing estimate excludes customers without marketing opt-in.")
         else:
             warnings.append("Service estimate excludes customers without service opt-in.")
+        audience_filter = self._parse_audience_filter(campaign.audience_filter)
+        if audience_filter.scope == "connected":
+            warnings.append(
+                "Connected audience can include Bot 1 recipients not linked to Mini App users."
+            )
+        if campaign.image_path is not None:
+            warnings.append("Campaign image uses Telegram photo caption limit: 1024 characters.")
         if recipient_count == 0:
             warnings.append("No eligible recipients match this campaign audience.")
         return warnings
@@ -1137,6 +1387,27 @@ class CustomerNotificationCampaignService:
             and subscription.chat_type == PRIVATE_CHAT_TYPE
             and subscription.blocked_at is None
         )
+
+    def _read_campaign_photo(self, campaign: BroadcastCampaign) -> CampaignPhoto | None:
+        if campaign.image_path is None:
+            return None
+        return CampaignPhoto(
+            content=self.storage.read_bytes(campaign.image_path),
+            filename=campaign.image_original_filename or "campaign-image",
+            mime_type=campaign.image_mime_type or "image/jpeg",
+        )
+
+    def _clear_campaign_image_fields(self, campaign: BroadcastCampaign) -> None:
+        campaign.image_path = None
+        campaign.image_original_filename = None
+        campaign.image_mime_type = None
+        campaign.image_size_bytes = None
+
+    def _delete_upload_safely(self, path: str, *, stage: str) -> None:
+        try:
+            self.storage.delete(path)
+        except OSError:
+            logger.warning("Failed to delete campaign upload at stage %s", stage)
 
     def _batch_limit(self, requested_limit: int | None) -> int:
         configured = max(1, settings.customer_campaign_batch_size)
@@ -1221,6 +1492,10 @@ class CustomerNotificationCampaignService:
             "message_title": campaign.message_title,
             "message_length": len(campaign.message_body),
             "parse_mode": campaign.parse_mode,
+            "has_image": campaign.image_path is not None,
+            "image_original_filename": campaign.image_original_filename,
+            "image_mime_type": campaign.image_mime_type,
+            "image_size_bytes": campaign.image_size_bytes,
             "scheduled_at": self._date_value(campaign.scheduled_at),
             "started_at": self._date_value(campaign.started_at),
             "completed_at": self._date_value(campaign.completed_at),

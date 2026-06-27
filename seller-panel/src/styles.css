@@ -1838,6 +1838,25 @@ textarea:focus {
   min-height: 132px;
 }
 
+.campaign-image-field {
+  gap: 10px;
+}
+
+.campaign-image-preview {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.campaign-image-preview img {
+  aspect-ratio: 4 / 3;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  height: 84px;
+  object-fit: cover;
+  width: 112px;
+}
+
 .campaign-guidance {
   display: grid;
   gap: 6px;

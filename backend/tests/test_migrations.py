@@ -465,6 +465,28 @@ def test_customer_campaign_models_bind_database_values_and_constraints() -> None
     assert "uq_broadcast_deliveries_campaign_subscription" in delivery_constraints
 
 
+def test_campaign_image_migration_and_backfill_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260627_0037_add_campaign_images_and_marketing_backfill.py"
+    )
+    content = migration_path.read_text()
+    campaign_table = BroadcastCampaign.__table__
+
+    assert "image_path" in content
+    assert "image_original_filename" in content
+    assert "image_mime_type" in content
+    assert "image_size_bytes" in content
+    assert "marketing_opted_out_at IS NULL" in content
+    assert "migration_existing_bot1_chat" in content
+    assert campaign_table.c.image_path.nullable is True
+    assert campaign_table.c.image_path.type.length == 1024
+    assert campaign_table.c.image_original_filename.type.length == 255
+    assert campaign_table.c.image_mime_type.type.length == 100
+
+
 def test_order_item_color_and_banner_display_type_migration() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]
