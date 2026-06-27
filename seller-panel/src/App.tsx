@@ -17,6 +17,7 @@ import { ReviewsPage } from './pages/Reviews/ReviewsPage';
 import { StatisticsPage } from './pages/Statistics/StatisticsPage';
 import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
 import { CustomerNotificationsPage } from './pages/CustomerNotifications/CustomerNotificationsPage';
+import { ChannelEntryPage } from './pages/ChannelEntry/ChannelEntryPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 
 const navItems: NavItem[] = [
@@ -30,6 +31,7 @@ const navItems: NavItem[] = [
   { path: '/reviews', labelKey: 'nav.reviews' },
   { path: '/statistics', labelKey: 'nav.statistics' },
   { path: '/customer-notifications', labelKey: 'nav.customerNotifications' },
+  { path: '/channel-entry', labelKey: 'nav.channelEntry' },
   { path: '/seller-bot', labelKey: 'nav.sellerBot' },
   { path: '/settings', labelKey: 'nav.settings' },
 ];
@@ -53,6 +55,7 @@ function getPageTitleKey(path: string): string {
   if (path.startsWith('/reviews')) return 'nav.reviews';
   if (path.startsWith('/statistics')) return 'nav.statistics';
   if (path.startsWith('/customer-notifications')) return 'nav.customerNotifications';
+  if (path.startsWith('/channel-entry')) return 'nav.channelEntry';
   if (path.startsWith('/seller-bot')) return 'nav.sellerBot';
   if (path.startsWith('/settings')) return 'nav.settings';
   return 'nav.dashboard';
@@ -189,6 +192,7 @@ function renderPage(
   if (path === '/reviews') return <ReviewsPage {...sharedPageProps} />;
   if (path === '/statistics') return <StatisticsPage {...sharedPageProps} />;
   if (path === '/customer-notifications') return <CustomerNotificationsPage {...sharedPageProps} />;
+  if (path === '/channel-entry') return <ChannelEntryPage {...sharedPageProps} />;
   if (path === '/seller-bot') return <SellerBotPage {...sharedPageProps} />;
   if (path === '/settings') return <SettingsPage {...sharedPageProps} />;
 

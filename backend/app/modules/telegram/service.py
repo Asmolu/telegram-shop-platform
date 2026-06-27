@@ -252,6 +252,80 @@ class TelegramService:
         if not body.get("ok", False):
             raise self._delivery_error_from_body(body)
 
+    async def get_chat(self, chat_id: str) -> dict[str, object]:
+        body = await self._post("getChat", {"chat_id": chat_id})
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise TelegramDeliveryError("Telegram API returned invalid chat metadata")
+        return result
+
+    async def get_bot_member_status(self, chat_id: str) -> dict[str, object]:
+        bot = await self.get_me()
+        bot_id = bot.get("id")
+        if not isinstance(bot_id, int):
+            raise TelegramDeliveryError("Telegram API returned invalid bot profile")
+        body = await self._post("getChatMember", {"chat_id": chat_id, "user_id": bot_id})
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise TelegramDeliveryError("Telegram API returned invalid chat member metadata")
+        return result
+
+    async def send_channel_entry_message(
+        self,
+        chat_id: str,
+        text: str,
+        button_text: str,
+        button_url: str,
+        *,
+        disable_notification: bool = False,
+    ) -> int | None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+            "disable_notification": disable_notification,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": button_text,
+                            "url": button_url,
+                        }
+                    ]
+                ]
+            },
+        }
+        body = await self._post("sendMessage", payload)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        message_id = result.get("message_id")
+        return int(message_id) if isinstance(message_id, int) else None
+
+    async def pin_chat_message(
+        self,
+        chat_id: str,
+        message_id: int,
+        *,
+        disable_notification: bool = True,
+    ) -> None:
+        body = await self._post(
+            "pinChatMessage",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "disable_notification": disable_notification,
+            },
+        )
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+
     async def get_file(self, file_id: str) -> dict[str, object]:
         body = await self._post("getFile", {"file_id": file_id})
         if not body.get("ok", False):

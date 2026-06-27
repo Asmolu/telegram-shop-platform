@@ -7,6 +7,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.banners.router import router as banners_router
 from app.modules.cart.router import router as cart_router
 from app.modules.categories.router import router as categories_router
+from app.modules.channel_entry.router import router as channel_entry_router
 from app.modules.customer_notifications.campaigns.router import (
     router as customer_notification_campaigns_router,
 )
@@ -47,6 +48,7 @@ api_router.include_router(product_reviews_router)
 api_router.include_router(favorites_router)
 api_router.include_router(notifications_router)
 api_router.include_router(categories_router)
+api_router.include_router(channel_entry_router)
 api_router.include_router(customer_notifications_router)
 api_router.include_router(customer_notification_campaigns_router)
 api_router.include_router(tags_router)
