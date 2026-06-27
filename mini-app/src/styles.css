@@ -2199,6 +2199,7 @@ label {
 }
 
 .description-card__copy {
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 

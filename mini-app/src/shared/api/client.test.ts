@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  addCartItem,
+  addFavorite,
+} from './index';
+import {
   ApiClientError,
   apiRequest,
   clearStoredAccessToken,
@@ -8,6 +12,7 @@ import {
   toApiErrorMessage,
 } from './client';
 import { shouldClearStoredTokenAfterAuthError } from '../auth/sessionPolicy';
+import { getNetworkState, setNetworkState } from '../network/networkState';
 import { flushTelemetry } from '../telemetry';
 
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -38,6 +43,7 @@ describe('apiRequest resilience', () => {
 
   afterEach(() => {
     clearStoredAccessToken();
+    setNetworkState('online');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -196,6 +202,31 @@ describe('apiRequest resilience', () => {
       request_id: 'req-telemetry',
       error_category: 'temporary_server_failure',
     });
+  });
+
+  it('keeps successful favorite and cart mutations local to the screen', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 1, user_id: 1, product_id: 10 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 1, user_id: 1, items: [], total: '0.00' }));
+    vi.stubGlobal('fetch', fetchMock);
+    setNetworkState('online');
+
+    await addFavorite(10);
+    await addCartItem(10, 100);
+
+    expect(getNetworkState()).toBe('online');
+  });
+
+  it('does not show the global network banner for local mutation failures', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ detail: 'temporary' }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+    setNetworkState('online');
+
+    await expect(addCartItem(10, 100)).rejects.toMatchObject({
+      kind: 'temporary_server_failure',
+    });
+
+    expect(getNetworkState()).toBe('online');
   });
 
   it('clears JWT only for confirmed authentication errors', () => {

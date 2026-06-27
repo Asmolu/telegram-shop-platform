@@ -8,7 +8,9 @@ import {
   normalizeEndpointScope,
   trackTelemetry,
 } from '../telemetry';
+import { getStoredAccessToken } from '../auth/tokenStorage';
 import { buildApiUrl, getApiOriginFromBase, normalizeApiBaseUrl } from '../utils/urls';
+export { clearStoredAccessToken, getStoredAccessToken, storeAccessToken } from '../auth/tokenStorage';
 
 export type ApiErrorKind =
   | 'authentication'
@@ -53,7 +55,6 @@ export class ApiClientError extends Error {
 }
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
-const TOKEN_STORAGE_KEY = 'telegram_shop_mini_app_access_token';
 
 export const API_TIMEOUT_MS = {
   read: 12_000,
@@ -79,6 +80,7 @@ export type ApiRequestOptions = RequestInit & {
   retry?: boolean;
   dedupe?: boolean;
   idempotencyKey?: string;
+  networkImpact?: 'global' | 'local';
 };
 
 export function getApiBaseUrl() {
@@ -87,18 +89,6 @@ export function getApiBaseUrl() {
 
 export function getApiOrigin() {
   return getApiOriginFromBase(getApiBaseUrl());
-}
-
-export function getStoredAccessToken() {
-  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
-}
-
-export function storeAccessToken(token: string) {
-  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-}
-
-export function clearStoredAccessToken() {
-  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
 export function createIdempotencyKey(prefix = 'miniapp') {
@@ -142,7 +132,17 @@ export async function apiRequest<T>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const { query, headers, body, timeoutMs, retry = true, dedupe = true, idempotencyKey, ...rest } = options;
+  const {
+    query,
+    headers,
+    body,
+    timeoutMs,
+    retry = true,
+    dedupe = true,
+    idempotencyKey,
+    networkImpact = 'global',
+    ...rest
+  } = options;
   const method = (rest.method ?? 'GET').toUpperCase();
   const url = buildUrl(path, query);
   const canRetry = retry && isRetryableReadRequest(method, path);
@@ -162,6 +162,7 @@ export async function apiRequest<T>(
     headers,
     idempotencyKey,
     method,
+    networkImpact,
     rest,
     timeoutMs,
     url,
@@ -184,6 +185,7 @@ async function requestWithRetry<T>({
   headers,
   idempotencyKey,
   method,
+  networkImpact,
   rest,
   timeoutMs,
   url,
@@ -193,6 +195,7 @@ async function requestWithRetry<T>({
   headers?: HeadersInit;
   idempotencyKey?: string;
   method: string;
+  networkImpact: 'global' | 'local';
   rest: Omit<RequestInit, 'body' | 'headers'>;
   timeoutMs?: number;
   url: string;
@@ -207,6 +210,7 @@ async function requestWithRetry<T>({
         headers,
         idempotencyKey,
         method,
+        networkImpact,
         rest,
         timeoutMs,
         url,
@@ -236,7 +240,9 @@ async function requestWithRetry<T>({
         ...getConnectionTelemetry(),
       });
       await waitForRetryDelay(error, attempt, rest.signal);
-      markNetworkRequestStarted();
+      if (networkImpact === 'global') {
+        markNetworkRequestStarted();
+      }
     }
   }
 
@@ -248,6 +254,7 @@ async function executeRequest<T>({
   headers,
   idempotencyKey,
   method,
+  networkImpact,
   rest,
   timeoutMs,
   url,
@@ -257,6 +264,7 @@ async function executeRequest<T>({
   headers?: HeadersInit;
   idempotencyKey?: string;
   method: string;
+  networkImpact: 'global' | 'local';
   rest: Omit<RequestInit, 'body' | 'headers'>;
   timeoutMs?: number;
   url: string;
@@ -293,7 +301,9 @@ async function executeRequest<T>({
     const responseSizeBucket = byteBucket(response.headers.get('content-length'));
 
     if (response.status === 204) {
-      markNetworkRequestSuccess(durationMs);
+      if (networkImpact === 'global') {
+        markNetworkRequestSuccess(durationMs);
+      }
       trackTelemetry('api.request_completed', {
         method,
         endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
@@ -315,7 +325,9 @@ async function executeRequest<T>({
 
     if (!response.ok) {
       const apiError = createHttpError(response, payload, requestId);
-      markNetworkRequestFailure(apiError);
+      if (networkImpact === 'global') {
+        markNetworkRequestFailure(apiError);
+      }
       trackTelemetry('api.request_failed', {
         method,
         endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
@@ -331,7 +343,9 @@ async function executeRequest<T>({
       throw apiError;
     }
 
-    markNetworkRequestSuccess(durationMs);
+    if (networkImpact === 'global') {
+      markNetworkRequestSuccess(durationMs);
+    }
     trackTelemetry('api.request_completed', {
       method,
       endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
@@ -349,7 +363,9 @@ async function executeRequest<T>({
       throw error;
     }
     const normalizedError = createFetchError(error, abort.timedOut);
-    markNetworkRequestFailure(normalizedError);
+    if (networkImpact === 'global') {
+      markNetworkRequestFailure(normalizedError);
+    }
     trackTelemetry('api.request_failed', {
       method,
       endpoint_scope: normalizeEndpointScope(new URL(url).pathname),

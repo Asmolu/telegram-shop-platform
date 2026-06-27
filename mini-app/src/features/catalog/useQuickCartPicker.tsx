@@ -56,9 +56,15 @@ export function useQuickCartPicker({
 }: QuickCartPickerOptions) {
   const [pickerProduct, setPickerProduct] = React.useState<Product | null>(null);
   const [busyVariantId, setBusyVariantId] = React.useState<number | null>(null);
+  const busyVariantIdsRef = React.useRef<Set<number>>(new Set());
 
   const addVariant = React.useCallback(
     async (product: Product, variant: ProductVariant) => {
+      if (busyVariantIdsRef.current.has(variant.id)) {
+        return;
+      }
+
+      busyVariantIdsRef.current.add(variant.id);
       setBusyVariantId(variant.id);
       try {
         await addCartItem(product.id, variant.id, 1);
@@ -68,6 +74,7 @@ export function useQuickCartPicker({
       } catch (error) {
         onNotice(toApiErrorMessage(error));
       } finally {
+        busyVariantIdsRef.current.delete(variant.id);
         setBusyVariantId(null);
       }
     },

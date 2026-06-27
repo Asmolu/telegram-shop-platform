@@ -170,7 +170,9 @@ export async function flushTelemetry({ preferBeacon = false }: { preferBeacon?: 
     return;
   }
 
-  if (preferBeacon && navigator.sendBeacon) {
+  const token = getStoredAccessToken();
+
+  if (preferBeacon && navigator.sendBeacon && !token) {
     const blob = new Blob([payload], { type: 'application/json' });
     if (navigator.sendBeacon(telemetryUrl(), blob)) {
       return;
@@ -178,10 +180,15 @@ export async function flushTelemetry({ preferBeacon = false }: { preferBeacon?: 
   }
 
   try {
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
     await fetch(telemetryUrl(), {
       method: 'POST',
       body: payload,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       keepalive: payload.length <= MAX_PAYLOAD_BYTES,
     });
   } catch {
@@ -407,3 +414,4 @@ function isTelemetryEnabled() {
   return import.meta.env.VITE_TELEMETRY_DISABLED !== 'true';
 }
 import { buildTelemetryUrl, normalizeApiBaseUrl } from '../utils/urls';
+import { getStoredAccessToken } from '../auth/tokenStorage';

@@ -19,6 +19,7 @@ import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
 import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
+import { runLockedAction } from '../shared/utils/actionLock';
 import { displaySize, sortVariants } from '../shared/utils/sizes';
 
 const NO_COLOR_KEY = '__no_color__';
@@ -73,10 +74,14 @@ export function ProductDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [cartAction, setCartAction] = React.useState<'buy' | 'cart' | null>(null);
+  const [favoriteBusy, setFavoriteBusy] = React.useState(false);
   const [reviewText, setReviewText] = React.useState('');
   const [reviewRating, setReviewRating] = React.useState(5);
   const [reviewBusy, setReviewBusy] = React.useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = React.useState(false);
+  const favoriteActionLock = React.useRef({ current: false });
+  const cartActionLock = React.useRef({ current: false });
+  const favoriteRef = React.useRef(favorite);
   const requireAuth = React.useCallback(() => {
     if (isAuthenticated) {
       return true;
@@ -88,6 +93,10 @@ export function ProductDetailPage() {
     requireAuth,
     onNotice: setNotice,
   });
+
+  React.useEffect(() => {
+    favoriteRef.current = favorite;
+  }, [favorite]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -123,7 +132,7 @@ export function ProductDetailPage() {
           const activeVariant = firstSelectableVariant(activeVariants);
           setSelectedColorKey(activeVariant ? getVariantColorKey(activeVariant) : null);
           setSelectedVariantId(activeVariant?.id ?? null);
-        }
+      }
       } catch (loadError) {
         if (!cancelled) {
           setError(toApiErrorMessage(loadError));
@@ -132,7 +141,7 @@ export function ProductDetailPage() {
         if (!cancelled) {
           setLoading(false);
         }
-      }
+        }
     }
 
     void load();
@@ -251,17 +260,38 @@ export function ProductDetailPage() {
       return;
     }
 
-    try {
-      if (favorite) {
-        await removeFavorite(product.id);
-        setFavorite(false);
-      } else {
-        await addFavorite(product.id);
-        setFavorite(true);
+    await runLockedAction(favoriteActionLock.current, async () => {
+      const wasFavorite = favoriteRef.current;
+      const nextFavorite = !wasFavorite;
+      setFavorite(nextFavorite);
+      favoriteRef.current = nextFavorite;
+      setFavoriteBusy(true);
+      setNotice(null);
+
+      try {
+        if (wasFavorite) {
+          await removeFavorite(product.id);
+        } else {
+          await addFavorite(product.id);
+        }
+      } catch (actionError) {
+        const serverFavoriteState = await getServerFavoriteState(product.id);
+        if (
+          serverFavoriteState === nextFavorite
+          || (!wasFavorite && isFavoriteAlreadyExistsError(actionError))
+        ) {
+          setFavorite(nextFavorite);
+          favoriteRef.current = nextFavorite;
+          return;
+        }
+
+        setFavorite(wasFavorite);
+        favoriteRef.current = wasFavorite;
+        setNotice(toApiErrorMessage(actionError));
+      } finally {
+        setFavoriteBusy(false);
       }
-    } catch (actionError) {
-      setNotice(toApiErrorMessage(actionError));
-    }
+    });
   }
 
   async function runCartAction(action: 'buy' | 'cart') {
@@ -282,25 +312,27 @@ export function ProductDetailPage() {
       return;
     }
 
-    try {
-      setCartAction(action);
-      if (!inCart) {
-        const nextCart = await addCartItem(product.id, selectedVariant.id, 1);
-        setCart(nextCart);
-        setAddedVariantIds((current) => new Set(current).add(selectedVariant.id));
-        window.dispatchEvent(new Event('miniapp:cart-updated'));
-      }
+    await runLockedAction(cartActionLock.current, async () => {
+      try {
+        setCartAction(action);
+        if (!inCart) {
+          const nextCart = await addCartItem(product.id, selectedVariant.id, 1);
+          setCart(nextCart);
+          setAddedVariantIds((current) => new Set(current).add(selectedVariant.id));
+          window.dispatchEvent(new Event('miniapp:cart-updated'));
+        }
 
-      if (action === 'buy') {
-        navigate(withReturnTo('/checkout', currentPath));
-        return;
+        if (action === 'buy') {
+          navigate(withReturnTo('/checkout', currentPath));
+          return;
+        }
+        setNotice(inCart ? 'Товар уже в корзине.' : 'Товар добавлен в корзину.');
+      } catch (actionError) {
+        setNotice(toApiErrorMessage(actionError));
+      } finally {
+        setCartAction(null);
       }
-      setNotice(inCart ? 'Товар уже в корзине.' : 'Товар добавлен в корзину.');
-    } catch (actionError) {
-      setNotice(toApiErrorMessage(actionError));
-    } finally {
-      setCartAction(null);
-    }
+    });
   }
 
   async function submitReview(event: React.FormEvent<HTMLFormElement>) {
@@ -378,7 +410,7 @@ export function ProductDetailPage() {
         title="Товар"
         backFallback="/main"
         right={
-          <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" onClick={() => void toggleFavorite()}>
+          <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" disabled={favoriteBusy} onClick={() => void toggleFavorite()}>
             {favorite ? '♥' : '♡'}
           </button>
         }
@@ -577,6 +609,29 @@ export function ProductDetailPage() {
       </div>
     </div>
   );
+}
+
+async function getServerFavoriteState(productId: number) {
+  try {
+    const favorites = await getFavorites({ dedupe: false, retry: false, networkImpact: 'local' });
+    return favorites.items.some((favorite) => favorite.product_id === productId);
+  } catch {
+    return null;
+  }
+}
+
+function isFavoriteAlreadyExistsError(error: unknown) {
+  const maybeError = error as { status?: number; message?: string; details?: unknown };
+  if (maybeError?.status !== 409) {
+    return false;
+  }
+
+  const detail = typeof maybeError.details === 'string'
+    ? maybeError.details
+    : maybeError.details && typeof maybeError.details === 'object'
+      ? JSON.stringify(maybeError.details)
+      : '';
+  return `${maybeError.message ?? ''} ${detail}`.toLowerCase().includes('favorite');
 }
 
 function ColorButton({

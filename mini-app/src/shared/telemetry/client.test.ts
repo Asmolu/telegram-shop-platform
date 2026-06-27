@@ -8,6 +8,7 @@ async function loadTelemetry() {
 describe('telemetry client', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.localStorage.clear();
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 202 })));
     Object.defineProperty(navigator, 'sendBeacon', {
@@ -33,6 +34,7 @@ describe('telemetry client', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     const [, init] = vi.mocked(fetch).mock.calls[0];
     expect(init?.keepalive).toBe(true);
+    expect(new Headers(init?.headers).has('Authorization')).toBe(false);
     const payload = JSON.parse(String(init?.body));
     expect(payload.events).toHaveLength(2);
     expect(payload.events[0]).not.toHaveProperty('initData');
@@ -64,6 +66,34 @@ describe('telemetry client', () => {
       'https://api.stylexac.ru/api/v1/analytics/telemetry',
       expect.any(Blob),
     );
+  });
+
+  it('sends Authorization through fetch when an access token exists', async () => {
+    const { storeAccessToken } = await import('../auth/tokenStorage');
+    storeAccessToken('jwt-for-telemetry');
+    const { flushTelemetry, trackTelemetry } = await loadTelemetry();
+
+    trackTelemetry('checkout.failed', { endpoint_scope: '/orders/checkout' });
+    await flushTelemetry();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer jwt-for-telemetry');
+  });
+
+  it('uses keepalive fetch instead of beacon when auth attribution is available', async () => {
+    const { storeAccessToken } = await import('../auth/tokenStorage');
+    storeAccessToken('jwt-for-pagehide');
+    const { flushTelemetry, trackTelemetry } = await loadTelemetry();
+
+    trackTelemetry('chunk.recovery_failed', { error_category: 'chunk_load_failed' });
+    await flushTelemetry({ preferBeacon: true });
+
+    expect(navigator.sendBeacon).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(init?.keepalive).toBe(true);
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer jwt-for-pagehide');
   });
 
   it('drops telemetry failures without changing network state', async () => {

@@ -99,16 +99,23 @@ export function getBanners(options: ApiRequestOptions = {}) {
 }
 
 export function trackBannerClick(bannerId: number) {
-  return apiRequest(`/banners/${bannerId}/click`, { method: 'POST' });
+  return apiRequest(`/banners/${bannerId}/click`, { method: 'POST', networkImpact: 'local' });
 }
 
 export function getCart(options: ApiRequestOptions = {}) {
   return apiRequest<Cart>('/cart', options);
 }
 
-export function addCartItem(productId: number, productVariantId: number, quantity = 1) {
+export function addCartItem(
+  productId: number,
+  productVariantId: number,
+  quantity = 1,
+  options: ApiRequestOptions = {},
+) {
   return apiRequest<Cart>('/cart/items', {
+    ...options,
     method: 'POST',
+    networkImpact: options.networkImpact ?? 'local',
     body: JSON.stringify({
       product_id: productId,
       product_variant_id: productVariantId,
@@ -120,6 +127,7 @@ export function addCartItem(productId: number, productVariantId: number, quantit
 export function updateCartItem(itemId: number, quantity: number) {
   return apiRequest<Cart>(`/cart/items/${itemId}`, {
     method: 'PATCH',
+    networkImpact: 'local',
     body: JSON.stringify({ quantity }),
   });
 }
@@ -127,6 +135,7 @@ export function updateCartItem(itemId: number, quantity: number) {
 export function updateCartItemSelection(itemId: number, isSelected: boolean) {
   return apiRequest<Cart>(`/cart/items/${itemId}/selection`, {
     method: 'PATCH',
+    networkImpact: 'local',
     body: JSON.stringify({ is_selected: isSelected }),
   });
 }
@@ -134,6 +143,7 @@ export function updateCartItemSelection(itemId: number, isSelected: boolean) {
 export function updateCartSelection(isSelected: boolean, itemIds?: number[]) {
   return apiRequest<Cart>('/cart/selection', {
     method: 'PATCH',
+    networkImpact: 'local',
     body: JSON.stringify({
       is_selected: isSelected,
       item_ids: itemIds,
@@ -142,22 +152,28 @@ export function updateCartSelection(isSelected: boolean, itemIds?: number[]) {
 }
 
 export function removeCartItem(itemId: number) {
-  return apiRequest<Cart>(`/cart/items/${itemId}`, { method: 'DELETE' });
+  return apiRequest<Cart>(`/cart/items/${itemId}`, { method: 'DELETE', networkImpact: 'local' });
 }
 
 export function getFavorites(options: ApiRequestOptions = {}) {
   return apiRequest<FavoriteList>('/favorites', options);
 }
 
-export function addFavorite(productId: number) {
+export function addFavorite(productId: number, options: ApiRequestOptions = {}) {
   return apiRequest<Favorite>('/favorites', {
+    ...options,
     method: 'POST',
+    networkImpact: options.networkImpact ?? 'local',
     body: JSON.stringify({ product_id: productId }),
   });
 }
 
-export function removeFavorite(productId: number) {
-  return apiRequest<void>(`/favorites/${productId}`, { method: 'DELETE' });
+export function removeFavorite(productId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<void>(`/favorites/${productId}`, {
+    ...options,
+    method: 'DELETE',
+    networkImpact: options.networkImpact ?? 'local',
+  });
 }
 
 export function validatePromoCode(code: string) {

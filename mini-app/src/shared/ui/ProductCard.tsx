@@ -2,6 +2,7 @@ import React from 'react';
 import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
 import { trackTelemetry } from '../telemetry';
+import { runLockedAction } from '../utils/actionLock';
 import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
 import { getProductBadge, getProductBadgeColor, getProductBadgePosition } from '../utils/images';
 import { CartIcon, HeartIcon } from './Icons';
@@ -80,6 +81,7 @@ function ProductCardComponent({
   imageFetchPriority?: 'high' | 'low' | 'auto';
 }) {
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
+  const actionLock = React.useRef({ current: false });
   const badge = getProductBadge(product);
   const badgeType = product.image_badge_type !== 'none'
     ? product.image_badge_type
@@ -110,12 +112,14 @@ function ProductCardComponent({
       return;
     }
 
-    setBusyAction(action);
-    try {
-      await callback(product);
-    } finally {
-      setBusyAction(null);
-    }
+    await runLockedAction(actionLock.current, async () => {
+      setBusyAction(action);
+      try {
+        await callback(product);
+      } finally {
+        setBusyAction(null);
+      }
+    });
   }
 
   return (

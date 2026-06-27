@@ -241,7 +241,7 @@ export function StatisticsPage({ onAuthExpired }: PageProps) {
               events.map((event) => (
                 <tr key={event.id}>
                   <td>{event.event_name}</td>
-                  <td>{event.user_id ?? t('common.anonymous')}</td>
+                  <td>{formatAnalyticsUserLabel(event, t('common.anonymous'))}</td>
                   <td>
                     <small>{t('common.product')} {event.product_id ?? '-'}</small>
                     <small>{t('orders.order')} {event.order_id ?? '-'}</small>
@@ -266,6 +266,10 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
       <strong>{value}</strong>
     </article>
   );
+}
+
+export function formatAnalyticsUserLabel(event: Pick<AnalyticsEvent, 'user_id'>, anonymousLabel: string) {
+  return event.user_id === null ? anonymousLabel : `ID ${event.user_id}`;
 }
 
 function eventNameForFilter(filter: EventFilter): string | undefined {

@@ -21,7 +21,7 @@ export function CategoryPage() {
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const { addToCart, toggleFavorite, notice, clearNotice } = useProductActions({
+  const { addToCart, sizePicker, toggleFavorite, notice, clearNotice } = useProductActions({
     favoriteIds,
     setFavoriteIds,
   });
@@ -98,6 +98,7 @@ export function CategoryPage() {
           ))}
         </div>
       ) : null}
+      {sizePicker}
     </div>
   );
 }
