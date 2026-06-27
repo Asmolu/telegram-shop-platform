@@ -57,6 +57,25 @@ describe('ProductDetailPage description', () => {
     vi.clearAllMocks();
   });
 
+  it('renders the size fit hint between product info and variants', async () => {
+    apiMocks.getProduct.mockResolvedValue(productFixture());
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    const hint = await screen.findByText('Мы подбираем размер по росту и весу.');
+    const productInfoCard = container.querySelector('.product-gallery + .detail-card');
+    const variantCard = container.querySelector('.variant-selector-card');
+
+    expect(hint.closest('.product-fit-hint')).not.toBeNull();
+    expect(productInfoCard).not.toBeNull();
+    expect(variantCard).not.toBeNull();
+    expect(productInfoCard!.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(hint.compareDocumentPosition(variantCard!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('preserves newline text rendering in collapsed and expanded states', async () => {
     const styles = readFileSync('src/styles.css', 'utf-8');
     const description = [

@@ -2077,6 +2077,18 @@ label {
   line-height: 1.15;
 }
 
+.product-fit-hint {
+  gap: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  box-shadow: none;
+}
+
+.product-fit-hint p {
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .variant-carousel {
   display: flex;
   gap: 8px;
@@ -2657,6 +2669,14 @@ label {
 .summary-card {
   display: grid;
   gap: 10px;
+}
+
+.summary-card__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .summary-card__total {

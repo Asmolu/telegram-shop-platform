@@ -451,6 +451,10 @@ export function ProductDetailPage() {
         )}
       </section>
 
+      <section className="detail-card product-fit-hint">
+        <p>Мы подбираем размер по росту и весу.</p>
+      </section>
+
       <section className="detail-card variant-selector-card">
         {showColorSelector ? (
           <>

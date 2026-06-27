@@ -486,6 +486,7 @@ function CartItemsTab({
       ) : null}
 
       <section className="summary-card">
+        <p className="summary-card__hint">Цена сформирована без учёта стоимости доставки.</p>
         <div><span>Выбрано</span><strong>{selectedQuantity}</strong></div>
         <div><span>Товары</span><strong>{formatPrice(selectedTotal)}</strong></div>
         <div><span>Скидка</span><strong>{formatPrice(promoValidation?.discount_amount ?? 0)}</strong></div>
