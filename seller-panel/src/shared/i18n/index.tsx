@@ -1358,6 +1358,62 @@ Object.assign(dictionaries.en, {
   'customerNotifications.pollingHelp': 'Statuses refresh every 5 seconds. Sent means accepted by Bot 1, not read by the customer.',
 });
 
+Object.assign(dictionaries.ru, {
+  'productEditor.matrixSummary': 'Сформировано строк: {count} / {expected}',
+  'productEditor.generateMatrix': 'Сформировать варианты',
+  'productEditor.matrixColors': 'Какие цвета',
+  'productEditor.matrixColorsPlaceholder': 'чёрный, белый, красный',
+  'productEditor.matrixSizes': 'Размеры этого товара',
+  'productEditor.matrixNoRows': 'Выберите размеры и сформируйте варианты.',
+  'productEditor.noColor': 'Без цвета',
+  'productEditor.noColorBlock': 'Без цвета',
+  'productEditor.colorBlockTitle': '{color} цвет товара',
+  'productEditor.matrixRowsCount': '{count} строк',
+  'productEditor.outsideMatrix': 'Существующие варианты вне матрицы',
+  'productEditor.outsideMatrixHint':
+    'Эти строки сохраняются и не будут удалены без явного действия.',
+  'productEditor.skuReadOnly': 'SKU формируется автоматически',
+  'productEditor.stockForVariant': 'Остаток: {variant}',
+  'productEditor.reservedForVariant': 'Резерв: {variant}',
+  'productEditor.matrixSelectSize': 'Выберите хотя бы один размер.',
+  'productEditor.regenerateNewSkus': 'Перегенерировать новые SKU',
+  'productEditor.duplicateSkuBackend':
+    'Backend вернул конфликт SKU. Перегенерируйте SKU для новых строк и сохраните ещё раз.',
+  'productEditor.quantity.integer':
+    'Остаток и резерв для {variant} должны быть целыми числами.',
+  'productEditor.quantity.negative':
+    'Остаток и резерв для {variant} не могут быть меньше 0.',
+  'productEditor.quantity.reservedAboveStock':
+    'Резерв для {variant} не может быть больше остатка.',
+});
+
+Object.assign(dictionaries.en, {
+  'productEditor.matrixSummary': 'Rows formed: {count} / {expected}',
+  'productEditor.generateMatrix': 'Build variants',
+  'productEditor.matrixColors': 'Colors',
+  'productEditor.matrixColorsPlaceholder': 'black, white, red',
+  'productEditor.matrixSizes': 'Product sizes',
+  'productEditor.matrixNoRows': 'Select sizes and build variants.',
+  'productEditor.noColor': 'No color',
+  'productEditor.noColorBlock': 'No color',
+  'productEditor.colorBlockTitle': '{color} product color',
+  'productEditor.matrixRowsCount': '{count} rows',
+  'productEditor.outsideMatrix': 'Existing variants outside matrix',
+  'productEditor.outsideMatrixHint':
+    'These rows are kept and will not be deleted without an explicit action.',
+  'productEditor.skuReadOnly': 'SKU is generated automatically',
+  'productEditor.stockForVariant': 'Stock: {variant}',
+  'productEditor.reservedForVariant': 'Reserved: {variant}',
+  'productEditor.matrixSelectSize': 'Select at least one size.',
+  'productEditor.regenerateNewSkus': 'Regenerate new SKU',
+  'productEditor.duplicateSkuBackend':
+    'The backend returned a duplicate SKU conflict. Regenerate SKU for new rows and save again.',
+  'productEditor.quantity.integer': 'Stock and reserved for {variant} must be integers.',
+  'productEditor.quantity.negative': 'Stock and reserved for {variant} cannot be below 0.',
+  'productEditor.quantity.reservedAboveStock':
+    'Reserved quantity for {variant} cannot exceed stock.',
+});
+
 interface I18nContextValue {
   language: Language;
   setLanguage: (language: Language) => void;

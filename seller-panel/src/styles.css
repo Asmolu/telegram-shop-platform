@@ -888,6 +888,14 @@ textarea:focus {
   color: #b91c1c;
 }
 
+.form-error-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .success-banner {
   border: 1px solid #bbf7d0;
   background: #f0fdf4;
@@ -1134,6 +1142,121 @@ textarea:focus {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #f9fafb;
+}
+
+.variant-builder-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(280px, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.size-chip-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.size-chip {
+  min-width: 54px;
+  min-height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #374151;
+  padding: 6px 10px;
+  font-weight: 800;
+}
+
+.size-chip:hover {
+  border-color: #c4b5fd;
+  color: #6d28d9;
+}
+
+.size-chip-selected {
+  border-color: #7c3aed;
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.variant-matrix-list,
+.variant-matrix-block {
+  display: grid;
+  gap: 12px;
+}
+
+.variant-matrix-list,
+.variant-empty-text {
+  margin-top: 16px;
+}
+
+.variant-matrix-block {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.variant-matrix-block-warning {
+  margin-top: 14px;
+  border-color: #fbbf24;
+  background: #fffbeb;
+}
+
+.variant-matrix-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.variant-matrix-heading h3,
+.variant-matrix-heading p {
+  margin: 0;
+}
+
+.variant-matrix-heading span {
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.variant-matrix-table {
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.variant-matrix-table table {
+  min-width: 780px;
+}
+
+.variant-matrix-table th,
+.variant-matrix-table td {
+  padding: 8px 10px;
+}
+
+.variant-matrix-table input {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.sku-input {
+  min-width: 220px;
+  border-color: #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.compact-toggle {
+  min-width: 126px;
+  white-space: nowrap;
 }
 
 .image-strip {
@@ -1873,6 +1996,10 @@ textarea:focus {
   }
 
   .variant-row {
+    grid-template-columns: 1fr;
+  }
+
+  .variant-builder-grid {
     grid-template-columns: 1fr;
   }
 

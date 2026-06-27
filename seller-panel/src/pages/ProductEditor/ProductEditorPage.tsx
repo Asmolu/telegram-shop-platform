@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
-import { api, resolveMediaUrl } from '../../shared/api';
+import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
   Product,
@@ -8,7 +8,6 @@ import type {
   ProductImageBadgeType,
   ProductSizeGrid,
   ProductStatus,
-  ProductVariantPayload,
   Tag,
 } from '../../shared/api';
 import { labelForEnum, useI18n } from '../../shared/i18n';
@@ -16,6 +15,24 @@ import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { ImageCropEditor, PRODUCT_IMAGE_CROP_SPEC } from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, formatMoney, slugify } from '../../shared/utils/format';
+import {
+  allowedSizes,
+  buildColorInputFromRows,
+  buildVariantMatrixRows,
+  deriveSelectedSizesFromRows,
+  getIncompatibleSizes,
+  getPersistedIncompatibleSizes,
+  groupVariantMatrixRows,
+  hasDuplicateVariantKeys,
+  normalizeMatrixColorInput,
+  normalizeSizeForGrid,
+  regenerateNewSkusForRows,
+  sortSizesForGrid,
+  toProductVariantPayload,
+  validateVariantQuantities,
+  type MatrixColor,
+  type VariantMatrixRow,
+} from './variantMatrix';
 
 interface PageProps {
   mode: 'create' | 'edit';
@@ -48,7 +65,7 @@ interface CategoryAssignmentRow {
   priority: '1' | '2' | '3';
 }
 
-interface VariantRow {
+interface VariantRow extends VariantMatrixRow {
   localId: number;
   id?: number;
   size: string;
@@ -78,9 +95,6 @@ const initialForm: ProductFormState = {
   tagIds: [],
 };
 
-const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'] as const;
-const SHOE_SIZES_EU = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'] as const;
-const SHOE_SIZES_RU = SHOE_SIZES_EU;
 const BADGE_COLORS: Array<{ value: ProductImageBadgeColor; labelKey: string }> = [
   { value: 'purple', labelKey: 'productEditor.badgeColorPurple' },
   { value: 'pink', labelKey: 'productEditor.badgeColorPink' },
@@ -98,12 +112,6 @@ const BADGE_POSITIONS: Array<{ value: ProductImageBadgePosition; labelKey: strin
   { value: 'bottom-right', labelKey: 'productEditor.badgePositionBottomRight' },
 ];
 
-function allowedSizes(sizeGrid: ProductSizeGrid): readonly string[] {
-  if (sizeGrid === 'shoes_eu') return SHOE_SIZES_EU;
-  if (sizeGrid === 'shoes_ru') return SHOE_SIZES_RU;
-  return CLOTHING_SIZES;
-}
-
 function createCategoryAssignmentRow(priority: '1' | '2' | '3' = '1'): CategoryAssignmentRow {
   return {
     localId: Date.now() + Math.random(),
@@ -112,16 +120,8 @@ function createCategoryAssignmentRow(priority: '1' | '2' | '3' = '1'): CategoryA
   };
 }
 
-function createVariantRow(): VariantRow {
-  return {
-    localId: Date.now() + Math.random(),
-    size: '',
-    color: '',
-    sku: '',
-    stockQuantity: '0',
-    reservedQuantity: '0',
-    isActive: true,
-  };
+function createVariantLocalId(): number {
+  return Date.now() + Math.random();
 }
 
 export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }: PageProps) {
@@ -130,7 +130,9 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [categoryAssignments, setCategoryAssignments] = useState<CategoryAssignmentRow[]>([
     createCategoryAssignmentRow(),
   ]);
-  const [variants, setVariants] = useState<VariantRow[]>([createVariantRow()]);
+  const [variants, setVariants] = useState<VariantRow[]>([]);
+  const [matrixColorInput, setMatrixColorInput] = useState('');
+  const [selectedMatrixSizes, setSelectedMatrixSizes] = useState<string[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
@@ -142,6 +144,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [canRegenerateNewSkus, setCanRegenerateNewSkus] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [createdProductId, setCreatedProductId] = useState<number | null>(null);
 
@@ -159,8 +162,21 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         setCategories(categoryList);
         setTags(tagList);
         setAvailableProducts(productList.items);
+        setCanRegenerateNewSkus(false);
 
         if (loadedProduct) {
+          const loadedVariants: VariantRow[] = loadedProduct.variants.map((variant) => ({
+            localId: variant.id,
+            id: variant.id,
+            size: variant.size,
+            color: variant.color ?? '',
+            sku: variant.sku,
+            stockQuantity: String(variant.stock_quantity),
+            reservedQuantity: String(variant.reserved_quantity),
+            isActive: variant.is_active,
+          }));
+          const loadedSizeGrid = loadedProduct.size_grid ?? 'clothing_alpha';
+
           setProduct(loadedProduct);
           setForm({
             name: loadedProduct.name,
@@ -171,7 +187,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             oldPrice: loadedProduct.old_price ? String(loadedProduct.old_price) : '',
             searchPriority: String(loadedProduct.search_priority ?? 2),
             searchAliases: loadedProduct.search_aliases ?? '',
-            sizeGrid: loadedProduct.size_grid ?? 'clothing_alpha',
+            sizeGrid: loadedSizeGrid,
             imageBadgeType: loadedProduct.image_badge_type ?? 'none',
             imageBadgeText: loadedProduct.image_badge_text ?? '',
             imageBadgeColor:
@@ -187,23 +203,17 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           setRelatedProductIds(
             (loadedProduct.related_product_ids ?? []).map((relatedId) => String(relatedId)),
           );
-          setVariants(
-            loadedProduct.variants.length > 0
-              ? loadedProduct.variants.map((variant) => ({
-                  localId: variant.id,
-                  id: variant.id,
-                  size: variant.size,
-                  color: variant.color ?? '',
-                  sku: variant.sku,
-                  stockQuantity: String(variant.stock_quantity),
-                  reservedQuantity: String(variant.reserved_quantity),
-                  isActive: variant.is_active,
-                }))
-              : [createVariantRow()],
-          );
+          setVariants(loadedVariants);
+          setMatrixColorInput(buildColorInputFromRows(loadedVariants));
+          setSelectedMatrixSizes(deriveSelectedSizesFromRows(loadedSizeGrid, loadedVariants));
         } else {
+          setProduct(null);
+          setForm(initialForm);
           setCategoryAssignments([createCategoryAssignmentRow()]);
           setRelatedProductIds([]);
+          setVariants([]);
+          setMatrixColorInput('');
+          setSelectedMatrixSizes([]);
         }
       })
       .catch(setError)
@@ -247,32 +257,29 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       setFormError(t('productEditor.legacyRuToEuBlocked'));
       return;
     }
-    const persistedIncompatible = variants
-      .filter((variant) => variant.id && variant.size.trim())
-      .map((variant) => variant.size.trim())
-      .filter((size) => !allowedSizes(nextGrid).includes(size));
+    const persistedIncompatible = getPersistedIncompatibleSizes(variants, nextGrid);
     if (persistedIncompatible.length > 0) {
       setFormError(
         t('productEditor.persistedIncompatibleSizes', {
-          sizes: Array.from(new Set(persistedIncompatible)).join(', '),
+          sizes: persistedIncompatible.join(', '),
         }),
       );
       return;
     }
-    const incompatible = variants
-      .filter((variant) => !variant.remove && variant.size.trim())
-      .map((variant) => variant.size.trim())
-      .filter((size) => !allowedSizes(nextGrid).includes(size));
+    const incompatible = getIncompatibleSizes(variants, nextGrid);
     if (incompatible.length > 0) {
       setFormError(
         t('productEditor.incompatibleSizes', {
-          sizes: Array.from(new Set(incompatible)).join(', '),
+          sizes: incompatible.join(', '),
         }),
       );
       return;
     }
     setFormError(null);
     updateField('sizeGrid', nextGrid);
+    setSelectedMatrixSizes((current) =>
+      sortSizesForGrid(nextGrid, current.filter((size) => normalizeSizeForGrid(nextGrid, size))),
+    );
   }
 
   function handleImageSelection(event: ChangeEvent<HTMLInputElement>) {
@@ -370,9 +377,56 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         );
       }
 
-      const next = current.filter((variant) => variant.localId !== row.localId);
-      return next.length > 0 ? next : [createVariantRow()];
+      return current.filter((variant) => variant.localId !== row.localId);
     });
+  }
+
+  function toggleMatrixSize(size: string) {
+    setSelectedMatrixSizes((current) => {
+      const normalized = normalizeSizeForGrid(form.sizeGrid, size);
+      if (!normalized) {
+        return current;
+      }
+      const next = current.includes(normalized)
+        ? current.filter((currentSize) => currentSize !== normalized)
+        : [...current, normalized];
+      return sortSizesForGrid(form.sizeGrid, next);
+    });
+  }
+
+  function generateVariantMatrix() {
+    const normalizedSizes = sortSizesForGrid(form.sizeGrid, selectedMatrixSizes);
+    if (normalizedSizes.length === 0) {
+      setFormError(t('productEditor.matrixSelectSize'));
+      return;
+    }
+
+    const normalizedColorInput = normalizeMatrixColorInput(matrixColorInput);
+    setSelectedMatrixSizes(normalizedSizes);
+    setMatrixColorInput(normalizedColorInput);
+    setVariants((current) =>
+      buildVariantMatrixRows(current, {
+        sizeGrid: form.sizeGrid,
+        selectedSizes: normalizedSizes,
+        colorInput: normalizedColorInput,
+        productName: form.name,
+        productSlug: form.slug,
+        createLocalId: createVariantLocalId,
+      }),
+    );
+    setCanRegenerateNewSkus(false);
+    setFormError(null);
+  }
+
+  function regenerateNewVariantSkus() {
+    setVariants((current) =>
+      regenerateNewSkusForRows(current, {
+        productName: form.name,
+        productSlug: form.slug,
+      }),
+    );
+    setCanRegenerateNewSkus(false);
+    setFormError(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -380,6 +434,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     setSaving(true);
     setError(null);
     setFormError(null);
+    setCanRegenerateNewSkus(false);
     setSuccess(null);
 
     if (!form.name.trim() || !form.slug.trim() || !form.basePrice.trim()) {
@@ -437,10 +492,22 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       return;
     }
 
-    const variantKeys = variants
-      .filter((variant) => !variant.remove && variant.size.trim())
-      .map((variant) => `${variant.size.trim()}::${normalizeVariantColorKey(variant.color)}`);
-    if (hasDuplicateValues(variantKeys)) {
+    const quantityValidation = validateVariantQuantities(variants);
+    if (!quantityValidation.ok) {
+      setFormError(
+        t(`productEditor.quantity.${quantityValidation.reason}`, {
+          variant: formatVariantValidationTarget(
+            quantityValidation.size,
+            quantityValidation.color,
+            t,
+          ),
+        }),
+      );
+      setSaving(false);
+      return;
+    }
+
+    if (hasDuplicateVariantKeys(variants)) {
       setFormError(t('productEditor.duplicateVariants'));
       setSaving(false);
       return;
@@ -488,7 +555,12 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         loadFormData();
       }
     } catch (requestError) {
-      setError(requestError);
+      if (isDuplicateSkuError(requestError)) {
+        setFormError(t('productEditor.duplicateSkuBackend'));
+        setCanRegenerateNewSkus(true);
+      } else {
+        setError(requestError);
+      }
     } finally {
       setSaving(false);
     }
@@ -518,14 +590,10 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         throw new Error(t('productEditor.variantRequired'));
       }
 
-      const payload: ProductVariantPayload = {
-        size: row.size.trim(),
-        color: row.color.trim() || null,
-        sku: row.sku.trim(),
-        stock_quantity: Number(row.stockQuantity || 0),
-        reserved_quantity: Number(row.reservedQuantity || 0),
-        is_active: row.isActive,
-      };
+      const payload = toProductVariantPayload(row);
+      if (!payload) {
+        continue;
+      }
 
       if (row.id) {
         await api.products.updateVariant(row.id, payload);
@@ -541,11 +609,30 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   }
 
   const visibleVariants = variants.filter((variant) => !variant.remove);
+  const matrixGrouping = groupVariantMatrixRows(visibleVariants, {
+    sizeGrid: form.sizeGrid,
+    selectedSizes: selectedMatrixSizes,
+    colorInput: matrixColorInput,
+  });
+  const matrixRowCount = matrixGrouping.groups.reduce(
+    (total, group) => total + group.rows.length,
+    0,
+  );
+  const expectedMatrixRowCount = selectedMatrixSizes.length * matrixGrouping.groups.length;
   const activeCropFile = pendingCropFiles[0] ?? null;
 
   return (
     <form className="page-stack" onSubmit={handleSubmit}>
-      {formError ? <div className="form-error">{formError}</div> : null}
+      {formError ? (
+        <div className="form-error form-error-with-action">
+          <span>{formError}</span>
+          {canRegenerateNewSkus ? (
+            <button className="button button-secondary" type="button" onClick={regenerateNewVariantSkus}>
+              {t('productEditor.regenerateNewSkus')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {success ? (
         <div className="success-banner">
           {success}{' '}
@@ -983,109 +1070,282 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
 
       <section className="panel">
         <div className="section-heading">
-          <h2>{t('productEditor.variantsStock')}</h2>
-          <button className="button button-secondary" type="button" onClick={() => setVariants((current) => [...current, createVariantRow()])}>
-            {t('productEditor.addVariant')}
+          <div>
+            <h2>{t('productEditor.variantsStock')}</h2>
+            <p className="muted-text">
+              {t('productEditor.matrixSummary', {
+                count: matrixRowCount,
+                expected: expectedMatrixRowCount,
+              })}
+            </p>
+          </div>
+          <button className="button button-primary" type="button" onClick={generateVariantMatrix}>
+            {t('productEditor.generateMatrix')}
           </button>
         </div>
-        <label className="field field-wide">
-          <span>{t('productEditor.sizeGrid')}</span>
-          <select
-            value={form.sizeGrid}
-            onChange={(event) => changeSizeGrid(event.target.value as ProductSizeGrid)}
-          >
-            <option value="clothing_alpha">{t('productEditor.sizeGridClothing')}</option>
-            <option value="shoes_eu">{t('productEditor.sizeGridShoesEu')}</option>
-            {form.sizeGrid === 'shoes_ru' ? (
-              <option value="shoes_ru">{t('productEditor.sizeGridShoesRuLegacy')}</option>
-            ) : null}
-          </select>
-        </label>
-        <div className="variant-grid">
-          {visibleVariants.map((variant) => (
-            <div className="variant-row" key={variant.localId}>
-              <label>
-                <span>{t('productEditor.size')}</span>
-                <select
-                  value={variant.size}
-                  onChange={(event) => updateVariant(variant.localId, { size: event.target.value })}
-                >
-                  <option value="">{t('productEditor.selectSize')}</option>
-                  {variant.size && !allowedSizes(form.sizeGrid).includes(variant.size) ? (
-                    <option value={variant.size} disabled>{variant.size}</option>
-                  ) : null}
-                  {allowedSizes(form.sizeGrid).map((size) => (
-                    <option value={size} key={size}>
-                      {size === 'ONE_SIZE' ? t('productEditor.oneSize') : size}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>{t('productEditor.color')}</span>
-                <input
-                  autoComplete="off"
-                  value={variant.color}
-                  onChange={(event) => updateVariant(variant.localId, { color: event.target.value })}
-                />
-                <small className="field-hint">{t('productEditor.colorHint')}</small>
-              </label>
-              <label>
-                <span>{t('productEditor.sku')}</span>
-                <input
-                  value={variant.sku}
-                  onChange={(event) => updateVariant(variant.localId, { sku: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>{t('productEditor.stock')}</span>
-                <input
-                  min="0"
-                  type="number"
-                  value={variant.stockQuantity}
-                  onChange={(event) =>
-                    updateVariant(variant.localId, { stockQuantity: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                <span>{t('productEditor.reserved')}</span>
-                <input
-                  min="0"
-                  type="number"
-                  value={variant.reservedQuantity}
-                  onChange={(event) =>
-                    updateVariant(variant.localId, { reservedQuantity: event.target.value })
-                  }
-                />
-              </label>
-              <label className="toggle-label">
-                <input
-                  checked={variant.isActive}
-                  type="checkbox"
-                  onChange={(event) =>
-                    updateVariant(variant.localId, { isActive: event.target.checked })
-                  }
-                />
-                {t('common.active')}
-              </label>
-              <button
-                className="text-button danger-text"
-                type="button"
-                onClick={() => removeVariant(variant)}
-              >
-                {t('common.remove')}
-              </button>
-              <div className="variant-summary">
-                <strong>{variant.size === 'ONE_SIZE' ? t('productEditor.oneSize') : variant.size || '—'}</strong>
-                <span>{variant.color || t('common.notProvided')}</span>
-                <span>{Math.max(0, Number(variant.stockQuantity || 0) - Number(variant.reservedQuantity || 0))}/{Number(variant.stockQuantity || 0)} {t('productEditor.stock')}</span>
-                <span>{variant.sku || 'SKU —'}</span>
-                <span>{variant.isActive ? t('common.active') : t('common.inactive')}</span>
-              </div>
+
+        <div className="variant-builder-grid">
+          <label className="field">
+            <span>{t('productEditor.sizeGrid')}</span>
+            <select
+              value={form.sizeGrid}
+              onChange={(event) => changeSizeGrid(event.target.value as ProductSizeGrid)}
+            >
+              <option value="clothing_alpha">{t('productEditor.sizeGridClothing')}</option>
+              <option value="shoes_eu">{t('productEditor.sizeGridShoesEu')}</option>
+              {form.sizeGrid === 'shoes_ru' ? (
+                <option value="shoes_ru">{t('productEditor.sizeGridShoesRuLegacy')}</option>
+              ) : null}
+            </select>
+          </label>
+          <label className="field">
+            <span>{t('productEditor.matrixColors')}</span>
+            <input
+              autoComplete="off"
+              placeholder={t('productEditor.matrixColorsPlaceholder')}
+              value={matrixColorInput}
+              onBlur={() => setMatrixColorInput(normalizeMatrixColorInput(matrixColorInput))}
+              onChange={(event) => setMatrixColorInput(event.target.value)}
+            />
+          </label>
+          <div className="field field-wide">
+            <span>{t('productEditor.matrixSizes')}</span>
+            <div className="size-chip-grid" role="group" aria-label={t('productEditor.matrixSizes')}>
+              {allowedSizes(form.sizeGrid).map((size) => {
+                const selected = selectedMatrixSizes.includes(size);
+                return (
+                  <button
+                    className={`size-chip ${selected ? 'size-chip-selected' : ''}`}
+                    key={size}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => toggleMatrixSize(size)}
+                  >
+                    {formatSizeLabel(size, t)}
+                  </button>
+                );
+              })}
             </div>
-          ))}
+          </div>
         </div>
+        <>
+            {matrixRowCount > 0 ? (
+              <div className="variant-matrix-list">
+                {matrixGrouping.groups
+                  .filter((group) => group.rows.length > 0)
+                  .map((group) => (
+                    <div className="variant-matrix-block" key={group.color.key}>
+                      <div className="variant-matrix-heading">
+                        <h3>{formatColorBlockTitle(group.color, t)}</h3>
+                        <span>
+                          {t('productEditor.matrixRowsCount', { count: group.rows.length })}
+                        </span>
+                      </div>
+                      <div className="variant-matrix-table">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>{t('productEditor.size')}</th>
+                              <th>{t('productEditor.sku')}</th>
+                              <th>{t('productEditor.stock')}</th>
+                              <th>{t('productEditor.reserved')}</th>
+                              <th>{t('common.active')}</th>
+                              <th>{t('common.actions')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.rows.map((variant) => (
+                              <tr key={variant.localId}>
+                                <td>
+                                  <strong>{formatSizeLabel(variant.size, t)}</strong>
+                                </td>
+                                <td>
+                                  <input
+                                    className="sku-input"
+                                    readOnly
+                                    title={t('productEditor.skuReadOnly')}
+                                    value={variant.sku}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    inputMode="numeric"
+                                    min="0"
+                                    step="1"
+                                    type="number"
+                                    value={variant.stockQuantity}
+                                    aria-label={t('productEditor.stockForVariant', {
+                                      variant: formatVariantValidationTarget(
+                                        variant.size,
+                                        variant.color,
+                                        t,
+                                      ),
+                                    })}
+                                    onChange={(event) =>
+                                      updateVariant(variant.localId, {
+                                        stockQuantity: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    inputMode="numeric"
+                                    max={Math.max(0, Number(variant.stockQuantity || 0))}
+                                    min="0"
+                                    step="1"
+                                    type="number"
+                                    value={variant.reservedQuantity}
+                                    aria-label={t('productEditor.reservedForVariant', {
+                                      variant: formatVariantValidationTarget(
+                                        variant.size,
+                                        variant.color,
+                                        t,
+                                      ),
+                                    })}
+                                    onChange={(event) =>
+                                      updateVariant(variant.localId, {
+                                        reservedQuantity: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <label className="toggle-label compact-toggle">
+                                    <input
+                                      checked={variant.isActive}
+                                      type="checkbox"
+                                      onChange={(event) =>
+                                        updateVariant(variant.localId, {
+                                          isActive: event.target.checked,
+                                        })
+                                      }
+                                    />
+                                    {variant.isActive ? t('common.active') : t('common.inactive')}
+                                  </label>
+                                </td>
+                                <td>
+                                  <button
+                                    className="text-button danger-text"
+                                    type="button"
+                                    onClick={() => removeVariant(variant)}
+                                  >
+                                    {t('common.remove')}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="muted-text variant-empty-text">{t('productEditor.matrixNoRows')}</p>
+            )}
+
+            {matrixGrouping.outsideRows.length > 0 ? (
+              <div className="variant-matrix-block variant-matrix-block-warning">
+                <div className="variant-matrix-heading">
+                  <div>
+                    <h3>{t('productEditor.outsideMatrix')}</h3>
+                    <p className="muted-text">{t('productEditor.outsideMatrixHint')}</p>
+                  </div>
+                  <span>
+                    {t('productEditor.matrixRowsCount', {
+                      count: matrixGrouping.outsideRows.length,
+                    })}
+                  </span>
+                </div>
+                <div className="variant-matrix-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{t('productEditor.size')}</th>
+                        <th>{t('productEditor.color')}</th>
+                        <th>{t('productEditor.sku')}</th>
+                        <th>{t('productEditor.stock')}</th>
+                        <th>{t('productEditor.reserved')}</th>
+                        <th>{t('common.active')}</th>
+                        <th>{t('common.actions')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matrixGrouping.outsideRows.map((variant) => (
+                        <tr key={variant.localId}>
+                          <td>
+                            <strong>{formatSizeLabel(variant.size, t)}</strong>
+                          </td>
+                          <td>{formatColorLabel(variant.color, t)}</td>
+                          <td>
+                            <input
+                              className="sku-input"
+                              readOnly
+                              title={t('productEditor.skuReadOnly')}
+                              value={variant.sku}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              inputMode="numeric"
+                              min="0"
+                              step="1"
+                              type="number"
+                              value={variant.stockQuantity}
+                              onChange={(event) =>
+                                updateVariant(variant.localId, {
+                                  stockQuantity: event.target.value,
+                                })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              inputMode="numeric"
+                              max={Math.max(0, Number(variant.stockQuantity || 0))}
+                              min="0"
+                              step="1"
+                              type="number"
+                              value={variant.reservedQuantity}
+                              onChange={(event) =>
+                                updateVariant(variant.localId, {
+                                  reservedQuantity: event.target.value,
+                                })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <label className="toggle-label compact-toggle">
+                              <input
+                                checked={variant.isActive}
+                                type="checkbox"
+                                onChange={(event) =>
+                                  updateVariant(variant.localId, {
+                                    isActive: event.target.checked,
+                                  })
+                                }
+                              />
+                              {variant.isActive ? t('common.active') : t('common.inactive')}
+                            </label>
+                          </td>
+                          <td>
+                            <button
+                              className="text-button danger-text"
+                              type="button"
+                              onClick={() => removeVariant(variant)}
+                            >
+                              {t('common.remove')}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+        </>
       </section>
 
       <div className="form-actions">
@@ -1130,8 +1390,36 @@ function getDefaultBadgeColor(badgeType: ProductImageBadgeType): ProductImageBad
   return 'purple';
 }
 
-function normalizeVariantColorKey(color: string) {
-  return color.trim().toLocaleLowerCase('ru-RU');
+function formatSizeLabel(size: string, t: ReturnType<typeof useI18n>['t']): string {
+  return size === 'ONE_SIZE' ? t('productEditor.oneSize') : size || t('common.notProvided');
+}
+
+function formatColorLabel(color: string, t: ReturnType<typeof useI18n>['t']): string {
+  return color.trim() || t('productEditor.noColor');
+}
+
+function formatColorBlockTitle(color: MatrixColor, t: ReturnType<typeof useI18n>['t']): string {
+  if (color.isNoColor) {
+    return t('productEditor.noColorBlock');
+  }
+
+  return t('productEditor.colorBlockTitle', { color: color.label });
+}
+
+function formatVariantValidationTarget(
+  size: string,
+  color: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  return `${formatSizeLabel(size, t)} / ${formatColorLabel(color, t)}`;
+}
+
+function isDuplicateSkuError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) {
+    return false;
+  }
+
+  return error.status === 409 && error.message.toLocaleLowerCase('en-US').includes('sku');
 }
 
 function getDefaultBadgePosition(badgeType: ProductImageBadgeType): ProductImageBadgePosition {
