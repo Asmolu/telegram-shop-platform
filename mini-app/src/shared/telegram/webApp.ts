@@ -18,6 +18,12 @@ export type TelegramUser = {
   photo_url?: string;
 };
 
+export type TelegramWriteAccessResult = 'granted' | 'denied' | 'unavailable';
+type TelegramWriteAccessCallbackValue =
+  | boolean
+  | string
+  | { status?: string; granted?: boolean };
+
 type TelegramSafeAreaInset = {
   top?: number;
   right?: number;
@@ -53,6 +59,9 @@ export type TelegramWebApp = {
   requestFullscreen?: () => void;
   exitFullscreen?: () => void;
   disableVerticalSwipes?: () => void;
+  requestWriteAccess?: (
+    callback?: (result: TelegramWriteAccessCallbackValue) => void,
+  ) => void | Promise<TelegramWriteAccessCallbackValue>;
   close?: () => void;
   openTelegramLink?: (url: string) => void;
 };
@@ -139,6 +148,59 @@ export function getTelegramInitData() {
 
 export function getTelegramUser() {
   return getTelegramWebApp()?.initDataUnsafe?.user ?? null;
+}
+
+function normalizeWriteAccessResult(
+  result: TelegramWriteAccessCallbackValue | undefined,
+): TelegramWriteAccessResult {
+  if (result === true) {
+    return 'granted';
+  }
+  if (typeof result === 'string') {
+    const normalized = result.toLowerCase();
+    return normalized === 'allowed' || normalized === 'granted' ? 'granted' : 'denied';
+  }
+  if (!result || typeof result !== 'object') {
+    return 'denied';
+  }
+  if (result.granted === true) {
+    return 'granted';
+  }
+  if (typeof result.status === 'string') {
+    const normalized = result.status.toLowerCase();
+    return normalized === 'allowed' || normalized === 'granted' ? 'granted' : 'denied';
+  }
+  return 'denied';
+}
+
+export function canRequestTelegramWriteAccess() {
+  return typeof getTelegramWebApp()?.requestWriteAccess === 'function';
+}
+
+export async function requestTelegramWriteAccess(): Promise<TelegramWriteAccessResult> {
+  const webApp = getTelegramWebApp();
+  if (typeof webApp?.requestWriteAccess !== 'function') {
+    return 'unavailable';
+  }
+
+  try {
+    return await new Promise<TelegramWriteAccessResult>((resolve) => {
+      let settled = false;
+      const finish = (result: TelegramWriteAccessCallbackValue | undefined) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(normalizeWriteAccessResult(result));
+      };
+      const maybePromise = webApp.requestWriteAccess?.(finish);
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        maybePromise.then(finish).catch(() => finish(false));
+      }
+    });
+  } catch {
+    return 'denied';
+  }
 }
 
 export function getTelegramThemeParams() {

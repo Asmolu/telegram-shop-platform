@@ -7,6 +7,7 @@ import type {
   CustomerNotificationStartLink,
   CustomerNotificationSubscription,
   CustomerNotificationSubscriptionUpdate,
+  CustomerNotificationWriteAccessRequest,
   Favorite,
   FavoriteList,
   ManualPayment,
@@ -243,6 +244,15 @@ export function updateCustomerNotificationSubscription(
 ) {
   return apiRequest<CustomerNotificationSubscription>('/customer-notifications/me/subscription', {
     method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function recordCustomerNotificationWriteAccess(
+  payload: CustomerNotificationWriteAccessRequest,
+) {
+  return apiRequest<CustomerNotificationSubscription>('/customer-notifications/me/write-access', {
+    method: 'POST',
     body: JSON.stringify(payload),
   });
 }

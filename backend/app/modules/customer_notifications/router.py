@@ -12,6 +12,7 @@ from app.modules.customer_notifications.schemas import (
     CustomerSubscriptionMe,
     CustomerSubscriptionStartLink,
     CustomerSubscriptionUpdate,
+    CustomerWriteAccessRequest,
 )
 from app.modules.customer_notifications.service import CustomerNotificationsService
 
@@ -45,6 +46,18 @@ async def update_my_subscription(
     ],
 ) -> CustomerSubscriptionMe:
     return await service.update_my_subscription(user=current_user, payload=payload)
+
+
+@router.post("/me/write-access", response_model=CustomerSubscriptionMe)
+async def record_my_write_access(
+    payload: CustomerWriteAccessRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[
+        CustomerNotificationsService,
+        Depends(get_customer_notifications_service),
+    ],
+) -> CustomerSubscriptionMe:
+    return await service.record_write_access_result(user=current_user, payload=payload)
 
 
 @router.post("/me/start-link", response_model=CustomerSubscriptionStartLink)

@@ -64,14 +64,18 @@ Bot 1 cannot safely message all current Mini App users immediately.
 
 Telegram Mini App auth proves the user's Telegram identity for the Mini App session, but it does not prove that Bot 1 has a private chat with the user. A bot can send a private message only after the user has initiated interaction with that bot, commonly by opening the bot and sending `/start`, clicking a deep link, or otherwise creating a valid private chat update.
 
+For users who enter from a channel pinned Mini App button, the Mini App can also request explicit Bot 1 write access with `Telegram.WebApp.requestWriteAccess()`. A successful write-access grant allows service notifications to target the user's Telegram id through Bot 1 without pretending that a `/start` private chat webhook was received. This permission is not treated as marketing consent.
+
 Required interaction to collect a valid Bot 1 `chat_id`:
 
-1. User opens Bot 1 directly or through a deep link, for example `/start notify_<token>` or `/start`.
+1. User opens Bot 1 directly or through a deep link, for example `/start notifications` or `/start`.
 2. Telegram sends Bot 1 a webhook update with `message.chat.id` and `message.from.id`.
 3. Backend verifies the webhook secret, matches `from.id` to an existing `User.telegram_id` when possible, and stores the private `chat_id`.
 4. Backend records service and marketing consent state separately.
 
 `telegram_id` and private `chat_id` are often the same for private chats, but the architecture should store `chat_id` from the webhook update instead of assuming equality.
+
+When write access is granted through the Mini App, the backend stores explicit write-access state and service opt-in. It does not set `has_chat=true` or invent a `telegram_chat_id`; delivery resolves the send target as the real private `telegram_chat_id` first, then `telegram_user_id` only when write access was granted.
 
 ## Proposed Data Model
 
@@ -103,6 +107,10 @@ Suggested fields:
 | `marketing_opted_in_at` | datetime nullable | Consent timestamp. |
 | `marketing_opted_out_at` | datetime nullable | Last opt-out timestamp. |
 | `service_opted_out_at` | datetime nullable | Last service opt-out timestamp. |
+| `write_access_granted` | bool | True only after the Mini App records a successful `requestWriteAccess()` result. |
+| `write_access_granted_at` | datetime nullable | Last successful write-access grant timestamp. |
+| `write_access_denied_at` | datetime nullable | Last denied write-access request timestamp. |
+| `write_access_source` | string nullable | Safe source label such as `mini_app_request_write_access`; never raw initData. |
 | `last_start_at` | datetime nullable | Last `/start`. |
 | `last_stop_at` | datetime nullable | Last `/stop`. |
 | `last_settings_at` | datetime nullable | Last `/settings` interaction. |
@@ -116,6 +124,7 @@ Indexes and constraints:
 - Unique on `user_id` when non-null.
 - Unique on `telegram_user_id`.
 - Index on `(has_chat, service_opt_in, marketing_opt_in)`.
+- Index on `(write_access_granted, service_opt_in)`.
 - Index on `blocked_at`.
 
 ### NotificationTemplate
@@ -229,6 +238,7 @@ Customer-facing Mini App endpoints:
 | --- | --- | --- |
 | `GET` | `/api/v1/customer-notifications/me/subscription` | Return current user's Bot 1 chat/consent state. |
 | `PATCH` | `/api/v1/customer-notifications/me/subscription` | Update service/marketing opt-in preferences from Mini App Profile settings. |
+| `POST` | `/api/v1/customer-notifications/me/write-access` | Persist Mini App `requestWriteAccess()` grant/denial for Bot 1 service notifications. |
 | `POST` | `/api/v1/customer-notifications/me/start-link` | Create a short-lived deep link payload for collecting Bot 1 chat id. |
 
 Seller/admin endpoints:
@@ -283,7 +293,7 @@ Webhook path:
 Command handling:
 
 - `/start`: collect private `chat_id`, update last-seen Telegram fields, link by `from.id` to `User.telegram_id` when possible, set `has_chat=true`, set `service_opt_in=true`, do not set marketing opt-in unless the payload explicitly represents a marketing consent flow.
-- `/start notify_<token>`: link a Mini App-generated token to the authenticated user, collect `chat_id`, enable service opt-in, and show settings buttons.
+- `/start notifications`: collect `chat_id`, enable service opt-in, and show settings buttons for the Mini App fallback flow.
 - `/start marketing_<token>`: collect `chat_id` and set marketing opt-in only if the token was generated from an explicit Mini App or checkout consent action.
 - `/stop`: opt out of marketing and service sends, set stop timestamp, keep the subscription row for suppression and audit/reporting.
 - `/settings`: send inline buttons for service notifications and marketing notifications.
@@ -303,8 +313,11 @@ Callbacks update consent state and respond with the current settings. They shoul
 Service notifications:
 
 - Examples: order status updates, delivery updates, important account/service notices.
-- Eligible only when `has_chat=true`, `telegram_chat_id` is present, `blocked_at is null`, and `service_opt_in=true`.
+- Eligible only when `blocked_at is null`, `service_opt_in=true`, and one valid Bot 1 send target exists:
+  - active private chat: `has_chat=true`, `telegram_chat_id` is present, and `chat_type=private`;
+  - or Mini App write access: `write_access_granted=true`, in which case the sender targets `telegram_user_id`.
 - `/start` enables service and marketing notifications because the user has initiated Bot 1 interaction.
+- Mini App write access enables service notifications only. It does not silently enable `marketing_opt_in`.
 - `/stop` disables service notifications unless future legal/product policy defines a narrower class of mandatory transactional notices. For MVP, respect `/stop` fully.
 
 Marketing notifications:
@@ -317,7 +330,7 @@ Marketing notifications:
   re-enable marketing separately.
 - Marketing opt-in must record timestamp and source.
 - `/stop` always disables marketing.
-- Mini App Profile must show clear state: chat connected or not, service opt-in, marketing opt-in, and a Bot 1 link when chat is missing.
+- Mini App Profile must show clear state: notifications available, permission required or denied, bot blocked, service opt-in, marketing opt-in, and a Bot 1 link when chat/write access is missing.
 
 Linking:
 

@@ -401,6 +401,26 @@ def test_customer_subscription_model_has_unique_user_and_telegram_constraints() 
     assert table.c.telegram_chat_id.index is True
 
 
+def test_customer_write_access_migration_adds_explicit_permission_state() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260628_0039_add_customer_write_access_state.py"
+    )
+    content = migration_path.read_text(encoding="utf-8")
+    table = CustomerTelegramSubscription.__table__
+
+    assert "write_access_granted" in content
+    assert "write_access_granted_at" in content
+    assert "write_access_denied_at" in content
+    assert "write_access_source" in content
+    assert table.c.write_access_granted.nullable is False
+    assert table.c.write_access_granted_at.nullable is True
+    assert table.c.write_access_denied_at.nullable is True
+    assert table.c.write_access_source.type.length == 100
+
+
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

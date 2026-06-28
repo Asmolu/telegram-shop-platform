@@ -356,6 +356,11 @@ class CustomerTelegramSubscription(Base):
             "service_opt_in",
             "marketing_opt_in",
         ),
+        Index(
+            "ix_customer_telegram_subscriptions_write_access",
+            "write_access_granted",
+            "service_opt_in",
+        ),
         Index("ix_customer_telegram_subscriptions_blocked_at", "blocked_at"),
     )
 
@@ -407,6 +412,21 @@ class CustomerTelegramSubscription(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    write_access_granted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    write_access_granted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    write_access_denied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    write_access_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_stop_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_settings_at: Mapped[datetime | None] = mapped_column(

@@ -22,6 +22,7 @@ from app.modules.customer_notifications.schemas import (
     CustomerSubscriptionMe,
     CustomerSubscriptionStartLink,
     CustomerSubscriptionUpdate,
+    CustomerWriteAccessRequest,
 )
 from app.modules.customer_notifications.service import CustomerNotificationsService
 from app.modules.telegram.router import get_customer_bot_webhook_service
@@ -240,6 +241,126 @@ async def test_mini_app_patch_marketing_toggle_still_works_with_active_chat() ->
 
 
 @pytest.mark.asyncio
+async def test_mini_app_write_access_grant_creates_service_only_sendable_subscription() -> None:
+    service, repository, _, _ = _service(users=[_user()])
+
+    response = await service.record_write_access_result(
+        user=_user(),
+        payload=CustomerWriteAccessRequest(
+            granted=True,
+            source="mini_app_request_write_access",
+        ),
+    )
+
+    subscription = repository.subscriptions[42]
+    assert response.service_notifications_available is True
+    assert response.availability_status == "available"
+    assert response.has_chat is False
+    assert response.write_access_granted is True
+    assert subscription.user_id == 1
+    assert subscription.telegram_user_id == 42
+    assert subscription.telegram_chat_id is None
+    assert subscription.has_chat is False
+    assert subscription.write_access_granted is True
+    assert subscription.write_access_granted_at == _now()
+    assert subscription.write_access_denied_at is None
+    assert subscription.service_opt_in is True
+    assert subscription.marketing_opt_in is False
+    assert subscription.opt_in_source == "mini_app_request_write_access"
+
+
+@pytest.mark.asyncio
+async def test_mini_app_write_access_denial_does_not_enable_sendability() -> None:
+    service, repository, _, _ = _service(users=[_user()])
+
+    response = await service.record_write_access_result(
+        user=_user(),
+        payload=CustomerWriteAccessRequest(
+            granted=False,
+            source="mini_app_request_write_access",
+        ),
+    )
+
+    subscription = repository.subscriptions[42]
+    assert response.service_notifications_available is False
+    assert response.availability_status == "permission_denied"
+    assert response.write_access_granted is False
+    assert subscription.write_access_granted is False
+    assert subscription.write_access_denied_at == _now()
+    assert subscription.service_opt_in is False
+    assert subscription.marketing_opt_in is False
+
+
+@pytest.mark.asyncio
+async def test_write_access_grant_does_not_clear_existing_blocked_state() -> None:
+    service, repository, _, _ = _service(users=[_user()])
+    repository.add(
+        CustomerTelegramSubscription(
+            user_id=1,
+            telegram_user_id=42,
+            telegram_chat_id=None,
+            chat_type="unknown",
+            has_chat=False,
+            service_opt_in=False,
+            marketing_opt_in=False,
+            blocked_at=_now(),
+            last_delivery_error="Forbidden: bot was blocked by the user",
+        )
+    )
+
+    response = await service.record_write_access_result(
+        user=_user(),
+        payload=CustomerWriteAccessRequest(granted=True),
+    )
+
+    subscription = repository.subscriptions[42]
+    assert response.service_notifications_available is False
+    assert response.availability_status == "bot_blocked"
+    assert subscription.write_access_granted is True
+    assert subscription.service_opt_in is True
+    assert subscription.blocked_at == _now()
+    assert subscription.last_delivery_error == "Forbidden: bot was blocked by the user"
+
+
+@pytest.mark.asyncio
+async def test_mini_app_write_access_links_subscription_created_by_start_before_auth() -> None:
+    service, repository, _, _ = _service(users=[])
+    await service.handle_start(_message_update("/start").message, start_payload="")
+    assert repository.subscriptions[42].user_id is None
+
+    service.users_repository = FakeUsersRepository([_user()])
+    response = await service.record_write_access_result(
+        user=_user(),
+        payload=CustomerWriteAccessRequest(granted=True),
+    )
+
+    subscription = repository.subscriptions[42]
+    assert subscription.user_id == 1
+    assert subscription.has_chat is True
+    assert subscription.telegram_chat_id == 100
+    assert response.service_notifications_available is True
+
+
+@pytest.mark.asyncio
+async def test_start_after_mini_app_auth_keeps_real_private_chat_target() -> None:
+    service, repository, _, _ = _service(users=[_user()])
+    await service.get_my_subscription(_user())
+
+    response = await service.handle_start(
+        _message_update("/start notifications").message,
+        start_payload="notifications",
+    )
+
+    subscription = repository.subscriptions[42]
+    assert response.result == "started_with_payload"
+    assert subscription.user_id == 1
+    assert subscription.telegram_chat_id == 100
+    assert subscription.has_chat is True
+    assert subscription.service_opt_in is True
+    assert subscription.marketing_opt_in is True
+
+
+@pytest.mark.asyncio
 async def test_telegram_login_auto_links_existing_unlinked_customer_subscription() -> None:
     session = DummySession()
     auth_service = AuthService(session)  # type: ignore[arg-type]
@@ -318,7 +439,7 @@ def test_mini_app_get_subscription_route_returns_current_user_state() -> None:
 
     assert response.status_code == 200
     assert response.json()["has_chat"] is False
-    assert response.json()["bot_start_link"] == "https://t.me/customerbot?start=notify"
+    assert response.json()["bot_start_link"] == "https://t.me/customerbot?start=notifications"
 
 
 def test_mini_app_patch_subscription_respects_missing_chat_state() -> None:
@@ -336,6 +457,56 @@ def test_mini_app_patch_subscription_respects_missing_chat_state() -> None:
     assert response.status_code == 200
     assert response.json()["has_chat"] is False
     assert response.json()["marketing_opt_in"] is False
+
+
+def test_mini_app_write_access_route_requires_authenticated_user() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/v1/customer-notifications/me/write-access",
+            json={"granted": True, "source": "mini_app_request_write_access"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_mini_app_write_access_route_returns_updated_subscription_state() -> None:
+    app = _app_with_current_user(_user())
+    fake_service = FakeApiService()
+    app.dependency_overrides[get_customer_notifications_service] = lambda: fake_service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/customer-notifications/me/write-access",
+                json={"granted": True, "source": "mini_app_request_write_access"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["service_notifications_available"] is True
+    assert fake_service.write_access_payload == {
+        "granted": True,
+        "source": "mini_app_request_write_access",
+    }
+
+
+def test_mini_app_write_access_route_rejects_raw_init_data() -> None:
+    app = _app_with_current_user(_user())
+    app.dependency_overrides[get_customer_notifications_service] = lambda: FakeApiService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/customer-notifications/me/write-access",
+                json={
+                    "granted": True,
+                    "source": "mini_app_request_write_access",
+                    "initData": "raw-secret-init-data",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
 
 
 def test_seller_can_list_customer_notification_subscriptions() -> None:
@@ -406,6 +577,9 @@ class FakeWebhookService:
 
 
 class FakeApiService:
+    def __init__(self) -> None:
+        self.write_access_payload: dict[str, object] | None = None
+
     async def get_my_subscription(self, _: User) -> CustomerSubscriptionMe:
         return _me_subscription()
 
@@ -418,10 +592,20 @@ class FakeApiService:
         del user, payload
         return _me_subscription()
 
+    async def record_write_access_result(
+        self,
+        *,
+        user: User,
+        payload: CustomerWriteAccessRequest,
+    ) -> CustomerSubscriptionMe:
+        del user
+        self.write_access_payload = payload.model_dump()
+        return _me_subscription(available=payload.granted, write_access_granted=payload.granted)
+
     async def create_start_link(self, _: User) -> CustomerSubscriptionStartLink:
         return CustomerSubscriptionStartLink(
-            bot_start_link="https://t.me/customerbot?start=notify",
-            start_command="/start notify",
+            bot_start_link="https://t.me/customerbot?start=notifications",
+            start_command="/start notifications",
         )
 
     async def list_subscriptions(self, **_: object) -> CustomerSubscriptionList:
@@ -437,9 +621,12 @@ class FakeApiService:
                     "telegram_last_name": None,
                     "chat_type": "private",
                     "has_chat": True,
+                    "write_access_granted": False,
                     "service_opt_in": True,
                     "marketing_opt_in": False,
                     "blocked_at": None,
+                    "write_access_granted_at": None,
+                    "write_access_denied_at": None,
                     "last_start_at": _now(),
                     "last_stop_at": None,
                     "last_settings_at": None,
@@ -519,15 +706,25 @@ def _user(role: UserRole = UserRole.USER) -> User:
     )
 
 
-def _me_subscription() -> CustomerSubscriptionMe:
+def _me_subscription(
+    *,
+    available: bool = False,
+    write_access_granted: bool = False,
+) -> CustomerSubscriptionMe:
     return CustomerSubscriptionMe(
-        has_chat=False,
-        service_opt_in=False,
+        has_chat=available and not write_access_granted,
+        write_access_granted=write_access_granted,
+        service_notifications_available=available,
+        availability_status="available" if available else "permission_required",
+        availability_reason=None if available else "no_private_chat_or_write_access",
+        service_opt_in=available,
         marketing_opt_in=False,
         blocked_at=None,
+        write_access_granted_at=_now() if write_access_granted else None,
+        write_access_denied_at=None,
         telegram_username=None,
-        bot_start_link="https://t.me/customerbot?start=notify",
-        start_command="/start notify",
+        bot_start_link="https://t.me/customerbot?start=notifications",
+        start_command="/start notifications",
     )
 
 

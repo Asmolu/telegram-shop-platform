@@ -52,6 +52,7 @@ from app.modules.customer_notifications.schemas import (
     CustomerSubscriptionMe,
     CustomerSubscriptionStartLink,
     CustomerSubscriptionUpdate,
+    CustomerWriteAccessRequest,
 )
 from app.modules.orders.repository import OrdersRepository
 from app.modules.telegram.schemas import TelegramCallbackQuery, TelegramMessage, TelegramUpdate
@@ -70,7 +71,7 @@ COMMAND_RE = re.compile(
 )
 PRIVATE_CHAT_TYPE = "private"
 UNKNOWN_CHAT_TYPE = "unknown"
-START_LINK_PAYLOAD = "notify"
+START_LINK_PAYLOAD = "notifications"
 CALLBACK_PREFIX = "customer_notifications"
 ACTION_SUBSCRIPTION_UPDATED = "customer_notifications.subscription_updated"
 ACTION_CUSTOMER_ORDER_NOTIFICATION_SENT = "customer_order_notification_sent"
@@ -90,6 +91,25 @@ ORDER_CANCELLED_CUSTOMER_MESSAGE = "Заказ отменён"
 
 
 WELCOME_MESSAGE = "Уведомления подключены. Сообщения по заказам включены."
+
+
+def has_active_private_chat(subscription: CustomerTelegramSubscription) -> bool:
+    return (
+        subscription.has_chat
+        and subscription.telegram_chat_id is not None
+        and subscription.chat_type == PRIVATE_CHAT_TYPE
+        and subscription.blocked_at is None
+    )
+
+
+def resolve_customer_service_send_target(
+    subscription: CustomerTelegramSubscription,
+) -> int | None:
+    if has_active_private_chat(subscription):
+        return subscription.telegram_chat_id
+    if bool(subscription.write_access_granted) and subscription.blocked_at is None:
+        return subscription.telegram_user_id
+    return None
 
 
 class CustomerTelegramSender:
@@ -201,11 +221,12 @@ class SellerCustomerOrderMessageService:
         await self._commit("Не удалось создать попытку отправки сообщения")
 
         assert subscription is not None
-        assert subscription.telegram_chat_id is not None
+        send_target = resolve_customer_service_send_target(subscription)
+        assert send_target is not None
         try:
             if validated_photo is not None:
                 telegram_message_id = await self.sender.send_photo(
-                    subscription.telegram_chat_id,
+                    send_target,
                     validated_photo.content,
                     filename=validated_photo.original_filename,
                     mime_type=validated_photo.mime_type,
@@ -214,7 +235,7 @@ class SellerCustomerOrderMessageService:
             else:
                 assert clean_text is not None
                 telegram_message_id = await self.sender.send_message(
-                    subscription.telegram_chat_id,
+                    send_target,
                     clean_text,
                 )
         except TelegramDeliveryError as exc:
@@ -255,11 +276,12 @@ class SellerCustomerOrderMessageService:
             )
         if subscription.blocked_at is not None:
             return ("subscription_blocked", "Покупатель заблокировал Bot 1.")
-        if (
-            not subscription.has_chat
-            or subscription.telegram_chat_id is None
-            or subscription.chat_type != PRIVATE_CHAT_TYPE
-        ):
+        if resolve_customer_service_send_target(subscription) is None:
+            if subscription.write_access_denied_at is not None:
+                return (
+                    "write_access_denied",
+                    "Покупатель не разрешил Bot 1 отправлять уведомления о заказах.",
+                )
             return (
                 "chat_unavailable",
                 "У покупателя нет активного личного чата с Bot 1.",
@@ -506,10 +528,11 @@ class CustomerServiceNotificationDeliveryService:
         await self._commit("Customer service notification delivery creation failed")
 
         assert subscription is not None
-        assert subscription.telegram_chat_id is not None
+        send_target = resolve_customer_service_send_target(subscription)
+        assert send_target is not None
         try:
             telegram_message_id = await self.sender.send_message(
-                subscription.telegram_chat_id,
+                send_target,
                 message,
             )
         except TelegramDeliveryError as exc:
@@ -548,12 +571,14 @@ class CustomerServiceNotificationDeliveryService:
             return "subscription_user_mismatch", "Subscription is not linked to order user"
         if subscription.blocked_at is not None:
             return "subscription_blocked", "Customer Bot 1 chat is blocked"
-        if not subscription.has_chat:
-            return "chat_unavailable", "Customer Bot 1 private chat is unavailable"
-        if subscription.telegram_chat_id is None:
-            return "chat_missing", "Customer Bot 1 chat id is missing"
-        if subscription.chat_type != PRIVATE_CHAT_TYPE:
-            return "non_private_chat", "Customer Bot 1 chat is not private"
+        if resolve_customer_service_send_target(subscription) is None:
+            if subscription.write_access_denied_at is not None:
+                return "write_access_denied", "Customer denied Bot 1 write access"
+            if subscription.has_chat and subscription.telegram_chat_id is None:
+                return "chat_missing", "Customer Bot 1 chat id is missing"
+            if subscription.has_chat and subscription.chat_type != PRIVATE_CHAT_TYPE:
+                return "non_private_chat", "Customer Bot 1 chat is not private"
+            return "chat_unavailable", "Customer Bot 1 private chat or write access is unavailable"
         if not subscription.service_opt_in:
             return "service_opt_out", "Customer opted out of service notifications"
         return None
@@ -788,7 +813,7 @@ class CustomerNotificationsService:
         now = self._now()
 
         if payload.service_opt_in is not None:
-            if payload.service_opt_in and self._has_active_private_chat(subscription):
+            if payload.service_opt_in and self._has_service_send_target(subscription):
                 subscription.service_opt_in = True
                 subscription.service_opted_out_at = None
                 subscription.opt_in_source = "mini_app_profile"
@@ -813,6 +838,39 @@ class CustomerNotificationsService:
             source="mini_app_profile",
         )
         await self._commit("Customer notification subscription update failed")
+        await self._refresh(subscription)
+        return self._me_response(subscription)
+
+    async def record_write_access_result(
+        self,
+        *,
+        user: User,
+        payload: CustomerWriteAccessRequest,
+    ) -> CustomerSubscriptionMe:
+        subscription = await self._get_or_create_subscription_for_user(user)
+        before_data = self._subscription_snapshot(subscription)
+        now = self._now()
+
+        if payload.granted:
+            subscription.write_access_granted = True
+            subscription.write_access_granted_at = now
+            subscription.write_access_denied_at = None
+            subscription.write_access_source = payload.source
+            subscription.service_opt_in = True
+            subscription.service_opted_out_at = None
+            subscription.opt_in_source = payload.source
+        else:
+            subscription.write_access_granted = False
+            subscription.write_access_denied_at = now
+            subscription.write_access_source = payload.source
+
+        await self._audit_if_changed(
+            subscription=subscription,
+            before_data=before_data,
+            actor_user_id=user.id,
+            source=payload.source,
+        )
+        await self._commit("Customer notification write access update failed")
         await self._refresh(subscription)
         return self._me_response(subscription)
 
@@ -1033,6 +1091,7 @@ class CustomerNotificationsService:
             has_chat=False,
             service_opt_in=False,
             marketing_opt_in=False,
+            write_access_granted=False,
         )
         self.repository.add(subscription)
         return subscription
@@ -1076,6 +1135,7 @@ class CustomerNotificationsService:
                 has_chat=False,
                 service_opt_in=False,
                 marketing_opt_in=False,
+                write_access_granted=False,
             )
             self.repository.add(subscription)
         elif user is not None and subscription.user_id is None:
@@ -1227,12 +1287,10 @@ class CustomerNotificationsService:
         return message.chat.type == PRIVATE_CHAT_TYPE
 
     def _has_active_private_chat(self, subscription: CustomerTelegramSubscription) -> bool:
-        return (
-            subscription.has_chat
-            and subscription.telegram_chat_id is not None
-            and subscription.chat_type == PRIVATE_CHAT_TYPE
-            and subscription.blocked_at is None
-        )
+        return has_active_private_chat(subscription)
+
+    def _has_service_send_target(self, subscription: CustomerTelegramSubscription) -> bool:
+        return resolve_customer_service_send_target(subscription) is not None
 
     def _me_response(
         self,
@@ -1242,22 +1300,36 @@ class CustomerNotificationsService:
         if subscription is None:
             return CustomerSubscriptionMe(
                 has_chat=False,
+                write_access_granted=False,
+                service_notifications_available=False,
+                availability_status="permission_required",
+                availability_reason="no_subscription",
                 service_opt_in=False,
                 marketing_opt_in=False,
                 blocked_at=None,
+                write_access_granted_at=None,
+                write_access_denied_at=None,
                 telegram_username=None,
                 bot_start_link=start_link.bot_start_link,
                 start_command=start_link.start_command,
             )
 
         has_chat = self._has_active_private_chat(subscription)
+        availability_status, availability_reason = self._subscription_availability(subscription)
+        service_notifications_available = availability_status == "available"
         return CustomerSubscriptionMe(
             has_chat=has_chat,
+            write_access_granted=bool(subscription.write_access_granted),
+            service_notifications_available=service_notifications_available,
+            availability_status=availability_status,
+            availability_reason=availability_reason,
             service_opt_in=subscription.service_opt_in,
             marketing_opt_in=subscription.marketing_opt_in,
             blocked_at=subscription.blocked_at,
+            write_access_granted_at=subscription.write_access_granted_at,
+            write_access_denied_at=subscription.write_access_denied_at,
             telegram_username=subscription.telegram_username,
-            bot_start_link=None if has_chat else start_link.bot_start_link,
+            bot_start_link=None if service_notifications_available else start_link.bot_start_link,
             start_command=start_link.start_command,
         )
 
@@ -1275,9 +1347,12 @@ class CustomerNotificationsService:
             telegram_last_name=subscription.telegram_last_name,
             chat_type=subscription.chat_type,
             has_chat=subscription.has_chat,
+            write_access_granted=bool(subscription.write_access_granted),
             service_opt_in=subscription.service_opt_in,
             marketing_opt_in=subscription.marketing_opt_in,
             blocked_at=subscription.blocked_at,
+            write_access_granted_at=subscription.write_access_granted_at,
+            write_access_denied_at=subscription.write_access_denied_at,
             last_start_at=subscription.last_start_at,
             last_stop_at=subscription.last_stop_at,
             last_settings_at=subscription.last_settings_at,
@@ -1285,6 +1360,21 @@ class CustomerNotificationsService:
             created_at=subscription.created_at,
             updated_at=subscription.updated_at,
         )
+
+    def _subscription_availability(
+        self,
+        subscription: CustomerTelegramSubscription,
+    ) -> tuple[str, str | None]:
+        if subscription.blocked_at is not None:
+            return "bot_blocked", "blocked"
+        has_send_target = self._has_service_send_target(subscription)
+        if has_send_target and subscription.service_opt_in:
+            return "available", None
+        if has_send_target and not subscription.service_opt_in:
+            return "service_opt_out", "service_opt_in_false"
+        if subscription.write_access_denied_at is not None:
+            return "permission_denied", "write_access_denied"
+        return "permission_required", "no_private_chat_or_write_access"
 
     def _start_link(self) -> CustomerSubscriptionStartLink:
         username = (settings.telegram_customer_bot_username or "").strip().lstrip("@")
@@ -1306,6 +1396,17 @@ class CustomerNotificationsService:
             "telegram_user_id": subscription.telegram_user_id,
             "has_chat": subscription.has_chat,
             "chat_type": subscription.chat_type,
+            "write_access_granted": bool(subscription.write_access_granted),
+            "write_access_granted_at": (
+                subscription.write_access_granted_at.isoformat()
+                if subscription.write_access_granted_at is not None
+                else None
+            ),
+            "write_access_denied_at": (
+                subscription.write_access_denied_at.isoformat()
+                if subscription.write_access_denied_at is not None
+                else None
+            ),
             "service_opt_in": subscription.service_opt_in,
             "marketing_opt_in": subscription.marketing_opt_in,
             "blocked_at": (

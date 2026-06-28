@@ -130,6 +130,75 @@ async def test_order_created_skips_ineligible_subscription_states(
 
 
 @pytest.mark.asyncio
+async def test_channel_entry_only_subscription_is_not_sendable_before_write_access() -> None:
+    subscription = _subscription(has_chat=False, telegram_chat_id=None, chat_type="unknown")
+    service, _, sender, _ = _delivery_service(subscription=subscription)
+
+    delivery = await service.notify_order_created(_order_created_payload())
+
+    assert delivery is not None
+    assert delivery.status == CustomerServiceNotificationDeliveryStatus.SKIPPED
+    assert delivery.error_code == "chat_unavailable"
+    assert sender.messages == []
+
+
+@pytest.mark.asyncio
+async def test_write_access_subscription_sends_to_telegram_user_id_without_fake_chat() -> None:
+    subscription = _subscription(
+        has_chat=False,
+        telegram_chat_id=None,
+        chat_type="unknown",
+        write_access_granted=True,
+    )
+    service, _, sender, _ = _delivery_service(subscription=subscription)
+
+    delivery = await service.notify_order_created(_order_created_payload())
+
+    assert delivery is not None
+    assert delivery.status == CustomerServiceNotificationDeliveryStatus.SENT
+    assert sender.messages[0][0] == 42
+    assert subscription.has_chat is False
+    assert subscription.telegram_chat_id is None
+
+
+@pytest.mark.asyncio
+async def test_denied_write_access_subscription_is_not_sendable() -> None:
+    subscription = _subscription(
+        has_chat=False,
+        telegram_chat_id=None,
+        chat_type="unknown",
+        write_access_denied_at=_now(),
+    )
+    service, _, sender, _ = _delivery_service(subscription=subscription)
+
+    delivery = await service.notify_order_created(_order_created_payload())
+
+    assert delivery is not None
+    assert delivery.status == CustomerServiceNotificationDeliveryStatus.SKIPPED
+    assert delivery.error_code == "write_access_denied"
+    assert sender.messages == []
+
+
+@pytest.mark.asyncio
+async def test_blocked_write_access_subscription_remains_ineligible() -> None:
+    subscription = _subscription(
+        has_chat=False,
+        telegram_chat_id=None,
+        chat_type="unknown",
+        write_access_granted=True,
+        blocked_at=_now(),
+    )
+    service, _, sender, _ = _delivery_service(subscription=subscription)
+
+    delivery = await service.notify_order_created(_order_created_payload())
+
+    assert delivery is not None
+    assert delivery.status == CustomerServiceNotificationDeliveryStatus.SKIPPED
+    assert delivery.error_code == "subscription_blocked"
+    assert sender.messages == []
+
+
+@pytest.mark.asyncio
 async def test_telegram_failure_does_not_raise_or_rollback_delivery_flow() -> None:
     service, _, sender, session = _delivery_service(
         subscription=_subscription(),
@@ -327,21 +396,28 @@ def _delivery_service(
 def _subscription(
     *,
     has_chat: bool = True,
+    telegram_chat_id: int | None = 100,
+    chat_type: str = "private",
     service_opt_in: bool = True,
+    write_access_granted: bool = False,
+    write_access_denied_at: datetime | None = None,
     blocked_at: datetime | None = None,
 ) -> CustomerTelegramSubscription:
     return CustomerTelegramSubscription(
         id=7,
         user_id=1,
         telegram_user_id=42,
-        telegram_chat_id=100,
+        telegram_chat_id=telegram_chat_id,
         telegram_username="buyer",
         telegram_first_name="Ada",
         telegram_last_name=None,
-        chat_type="private",
+        chat_type=chat_type,
         has_chat=has_chat,
         service_opt_in=service_opt_in,
         marketing_opt_in=True,
+        write_access_granted=write_access_granted,
+        write_access_granted_at=_now() if write_access_granted else None,
+        write_access_denied_at=write_access_denied_at,
         blocked_at=blocked_at,
         created_at=_now(),
         updated_at=_now(),

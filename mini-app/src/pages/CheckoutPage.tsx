@@ -4,17 +4,21 @@ import {
   createIdempotencyKey,
   getApiErrorTelemetryCategory,
   getCart,
+  getCustomerNotificationSubscription,
   getPersonalData,
   isTemporaryNetworkError,
+  recordCustomerNotificationWriteAccess,
   toApiErrorMessage,
   validatePromoCode,
   type Cart,
+  type CustomerNotificationSubscription,
   type OrderDeliveryMethod,
   type PersonalData,
   type PromoValidation,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
+import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
@@ -28,6 +32,18 @@ const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string }[] = [
   { value: 'WB', label: 'ВБ доставка' },
   { value: 'CDEK', label: 'СДЭК' },
 ];
+const NOTIFICATION_WRITE_ACCESS_SOURCE = 'mini_app_request_write_access';
+const BOT_1_NOTIFICATION_START_LINK = 'https://t.me/CheckYouStyleBot?start=notifications';
+
+function areServiceNotificationsAvailable(subscription: CustomerNotificationSubscription | null) {
+  if (!subscription) {
+    return false;
+  }
+  if (typeof subscription.service_notifications_available === 'boolean') {
+    return subscription.service_notifications_available;
+  }
+  return Boolean(subscription.has_chat && subscription.service_opt_in && !subscription.blocked_at);
+}
 
 export function CheckoutPage() {
   const { currentPath, searchParams, navigate } = useRouter();
@@ -38,6 +54,13 @@ export function CheckoutPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [subscription, setSubscription] =
+    React.useState<CustomerNotificationSubscription | null>(null);
+  const [notificationPromptDismissed, setNotificationPromptDismissed] = React.useState(false);
+  const [notificationPermissionLoading, setNotificationPermissionLoading] = React.useState(false);
+  const [notificationPermissionMessage, setNotificationPermissionMessage] =
+    React.useState<string | null>(null);
+  const [notificationFallbackVisible, setNotificationFallbackVisible] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const checkoutKeyRef = React.useRef<string | null>(null);
   const checkoutLockRef = React.useRef(false);
@@ -67,12 +90,14 @@ export function CheckoutPage() {
       setLoading(true);
       setError(null);
       try {
-        const [result, personalData] = await Promise.all([
+        const [result, personalData, notificationState] = await Promise.all([
           getCart(),
           getPersonalData().catch(() => null),
+          getCustomerNotificationSubscription().catch(() => null),
         ]);
         if (!cancelled) {
           setCart(result);
+          setSubscription(notificationState);
           if (personalData) {
             applyPersonalData(personalData);
           }
@@ -175,6 +200,57 @@ export function CheckoutPage() {
     setPromoCode('');
     setPromoValidation(null);
     setNotice(null);
+  }
+
+  async function handleAllowOrderNotifications() {
+    setNotificationPermissionLoading(true);
+    setNotificationPermissionMessage(null);
+    setNotificationFallbackVisible(false);
+
+    try {
+      const result = await requestTelegramWriteAccess();
+      if (result === 'granted') {
+        const nextState = await recordCustomerNotificationWriteAccess({
+          granted: true,
+          source: NOTIFICATION_WRITE_ACCESS_SOURCE,
+        });
+        setSubscription(nextState);
+        if (areServiceNotificationsAvailable(nextState)) {
+          setNotificationPermissionMessage('Уведомления о заказах включены');
+          setNotificationPromptDismissed(true);
+        } else {
+          setNotificationPermissionMessage(
+            nextState.availability_status === 'bot_blocked'
+              ? 'Бот заблокирован. Откройте @CheckYouStyleBot и разблокируйте его.'
+              : 'Откройте Bot 1, чтобы получать статусы заказа',
+          );
+          setNotificationFallbackVisible(true);
+        }
+        return;
+      }
+
+      if (result === 'denied') {
+        const nextState = await recordCustomerNotificationWriteAccess({
+          granted: false,
+          source: NOTIFICATION_WRITE_ACCESS_SOURCE,
+        }).catch(() => null);
+        if (nextState) {
+          setSubscription(nextState);
+        }
+        setNotificationPermissionMessage('Можно подключить уведомления через Bot 1');
+      } else {
+        setNotificationPermissionMessage('Откройте Bot 1, чтобы получать статусы заказа');
+      }
+      setNotificationFallbackVisible(true);
+    } catch (permissionError) {
+      setNotificationPermissionMessage(toApiErrorMessage(permissionError));
+    } finally {
+      setNotificationPermissionLoading(false);
+    }
+  }
+
+  function handleOpenNotificationBot() {
+    openTelegramLink(subscription?.bot_start_link ?? BOT_1_NOTIFICATION_START_LINK);
   }
 
   async function getValidatedPromoCodeForCheckout() {
@@ -281,6 +357,15 @@ export function CheckoutPage() {
 
   const selectedItems = cart?.items.filter((item) => item.is_selected) ?? [];
   const selectedTotal = cart?.selected_total ?? cart?.total ?? '0';
+  const serviceNotificationsAvailable = areServiceNotificationsAvailable(subscription);
+  const notificationAvailabilityStatus = subscription?.availability_status;
+  const showNotificationPrompt = Boolean(
+    subscription
+    && !serviceNotificationsAvailable
+    && !notificationPromptDismissed
+    && notificationAvailabilityStatus !== 'service_opt_out',
+  );
+  const notificationFallbackLink = subscription?.bot_start_link ?? BOT_1_NOTIFICATION_START_LINK;
 
   if (!isAuthenticated) {
     return (
@@ -334,6 +419,61 @@ export function CheckoutPage() {
               <span>{promoValidation.code}: −{formatPrice(promoValidation.discount_amount)}</span>
               <button type="button" onClick={clearPromo}>Убрать</button>
             </div>
+          ) : null}
+
+          {serviceNotificationsAvailable ? (
+            <InlineNotice tone="success">
+              <span>Уведомления о заказах включены</span>
+            </InlineNotice>
+          ) : null}
+
+          {showNotificationPrompt ? (
+            <section className="notification-permission-prompt">
+              <div>
+                <h2>Разрешить уведомления о заказе в Telegram?</h2>
+                <p>Мы сможем прислать статус заказа: принят, в пути, доставлен.</p>
+                {subscription?.availability_status === 'bot_blocked' ? (
+                  <p className="form-error">
+                    Бот заблокирован. Откройте @CheckYouStyleBot и разблокируйте его.
+                  </p>
+                ) : null}
+                {notificationPermissionMessage ? (
+                  <p className="muted-text">{notificationPermissionMessage}</p>
+                ) : null}
+                {notificationFallbackVisible ? (
+                  <button
+                    className="secondary-button full-width"
+                    type="button"
+                    onClick={handleOpenNotificationBot}
+                  >
+                    Открыть Bot 1
+                  </button>
+                ) : null}
+              </div>
+              <div className="notification-permission-prompt__actions">
+                <button
+                  className="primary-button"
+                  disabled={notificationPermissionLoading}
+                  type="button"
+                  onClick={handleAllowOrderNotifications}
+                >
+                  {notificationPermissionLoading ? 'Запрашиваем...' : 'Разрешить уведомления'}
+                </button>
+                <button
+                  className="text-button"
+                  disabled={notificationPermissionLoading}
+                  type="button"
+                  onClick={() => setNotificationPromptDismissed(true)}
+                >
+                  Позже
+                </button>
+              </div>
+              {notificationFallbackVisible ? (
+                <a className="notification-permission-prompt__fallback" href={notificationFallbackLink}>
+                  {notificationFallbackLink}
+                </a>
+              ) : null}
+            </section>
           ) : null}
 
           <form className="checkout-form" onSubmit={submitCheckout}>

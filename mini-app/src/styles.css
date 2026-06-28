@@ -576,6 +576,17 @@ label {
   color: var(--primary);
 }
 
+.text-button {
+  min-height: 44px;
+  border: 0;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .full-width {
   width: 100%;
 }
@@ -3128,6 +3139,49 @@ label {
   margin-top: 12px;
 }
 
+.notification-permission-prompt {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  border-radius: 16px;
+  padding: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.notification-permission-prompt h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.notification-permission-prompt p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.notification-permission-prompt .form-error,
+.notification-permission-prompt .muted-text {
+  margin-top: 8px;
+}
+
+.notification-permission-prompt__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.notification-permission-prompt__fallback {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .delivery-method-field {
   min-width: 0;
 }
@@ -3265,6 +3319,11 @@ label {
 .notification-row {
   border-top: 1px solid var(--border);
   padding-top: 10px;
+}
+
+.notification-profile-actions {
+  display: grid;
+  gap: 8px;
 }
 
 .toggle-setting {

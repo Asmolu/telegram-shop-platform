@@ -387,9 +387,15 @@ export type CheckoutPayload = {
 
 export type CustomerNotificationSubscription = {
   has_chat: boolean;
+  write_access_granted?: boolean;
+  service_notifications_available?: boolean;
+  availability_status?: string;
+  availability_reason?: string | null;
   service_opt_in: boolean;
   marketing_opt_in: boolean;
   blocked_at?: string | null;
+  write_access_granted_at?: string | null;
+  write_access_denied_at?: string | null;
   telegram_username?: string | null;
   bot_start_link?: string | null;
   start_command: string;
@@ -398,6 +404,11 @@ export type CustomerNotificationSubscription = {
 export type CustomerNotificationSubscriptionUpdate = {
   service_opt_in?: boolean;
   marketing_opt_in?: boolean;
+};
+
+export type CustomerNotificationWriteAccessRequest = {
+  granted: boolean;
+  source?: string;
 };
 
 export type CustomerNotificationStartLink = {

@@ -122,6 +122,30 @@ async def test_seller_sends_text_to_customer_through_bot_1() -> None:
 
 
 @pytest.mark.asyncio
+async def test_seller_order_message_uses_write_access_user_id_without_private_chat() -> None:
+    subscription = _subscription(
+        has_chat=False,
+        telegram_chat_id=None,
+        chat_type="unknown",
+        write_access_granted=True,
+    )
+    service, repository, sender = _service(subscription=subscription)
+
+    response = await service.send(
+        order_id=10,
+        actor_user_id=9,
+        text="Ваш заказ в пути.",
+        photo=None,
+    )
+
+    assert sender.messages == [(42, "Ваш заказ в пути.")]
+    assert response.telegram_message_id == 501
+    assert repository.deliveries[0].status == CustomerServiceNotificationDeliveryStatus.SENT
+    assert subscription.has_chat is False
+    assert subscription.telegram_chat_id is None
+
+
+@pytest.mark.asyncio
 async def test_seller_sends_photo_with_optional_caption_through_bot_1() -> None:
     service, repository, sender = _service()
 
@@ -274,17 +298,25 @@ def _service(
     return service, repository, sender
 
 
-def _subscription() -> CustomerTelegramSubscription:
+def _subscription(
+    *,
+    has_chat: bool = True,
+    telegram_chat_id: int | None = 100,
+    chat_type: str = "private",
+    write_access_granted: bool = False,
+) -> CustomerTelegramSubscription:
     return CustomerTelegramSubscription(
         id=7,
         user_id=1,
         telegram_user_id=42,
-        telegram_chat_id=100,
+        telegram_chat_id=telegram_chat_id,
         telegram_username="buyer",
-        chat_type="private",
-        has_chat=True,
+        chat_type=chat_type,
+        has_chat=has_chat,
         service_opt_in=True,
         marketing_opt_in=False,
+        write_access_granted=write_access_granted,
+        write_access_granted_at=_now() if write_access_granted else None,
         created_at=_now(),
         updated_at=_now(),
     )

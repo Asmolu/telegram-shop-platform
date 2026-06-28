@@ -2,16 +2,29 @@ import React from 'react';
 import {
   createCustomerNotificationStartLink,
   getCustomerNotificationSubscription,
+  recordCustomerNotificationWriteAccess,
   toApiErrorMessage,
   updateCustomerNotificationSubscription,
   type CustomerNotificationSubscription,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
-import { SUPPORT_TELEGRAM_URL, openTelegramLink } from '../shared/telegram/webApp';
+import { SUPPORT_TELEGRAM_URL, openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
 import { useTheme } from '../shared/theme/ThemeProvider';
 import { EmptyState, TopBar } from '../shared/ui';
 import { getUserDisplayName } from '../shared/utils/format';
+
+const NOTIFICATION_WRITE_ACCESS_SOURCE = 'mini_app_request_write_access';
+
+function areServiceNotificationsAvailable(subscription: CustomerNotificationSubscription | null) {
+  if (!subscription) {
+    return false;
+  }
+  if (typeof subscription.service_notifications_available === 'boolean') {
+    return subscription.service_notifications_available;
+  }
+  return Boolean(subscription.has_chat && subscription.service_opt_in && !subscription.blocked_at);
+}
 
 export function ProfilePage() {
   const { currentPath, navigate } = useRouter();
@@ -28,9 +41,10 @@ export function ProfilePage() {
   const username = displayUser?.username
     ? `@${displayUser.username}`
     : 'Имя пользователя не указано';
+  const serviceNotificationsAvailable = areServiceNotificationsAvailable(subscription);
   const notificationChatLabel = subscription?.telegram_username
     ? `@${subscription.telegram_username}`
-    : subscription?.has_chat
+    : serviceNotificationsAvailable
       ? 'готов'
       : 'нужно открыть бот';
 
@@ -77,9 +91,47 @@ export function ProfilePage() {
     try {
       const nextState = await updateCustomerNotificationSubscription({ [field]: value });
       setSubscription(nextState);
-      if (value && !nextState.has_chat) {
+      if (value && !areServiceNotificationsAvailable(nextState)) {
         setNotificationsHint('Сначала откройте бота, чтобы мы могли писать вам в Telegram.');
       }
+    } catch (error) {
+      setNotificationsError(toApiErrorMessage(error));
+    } finally {
+      setNotificationsSaving(null);
+    }
+  }
+
+  async function handleAllowNotificationWriteAccess() {
+    setNotificationsSaving('write-access');
+    setNotificationsError(null);
+    setNotificationsHint(null);
+
+    try {
+      const result = await requestTelegramWriteAccess();
+      if (result === 'granted') {
+        const nextState = await recordCustomerNotificationWriteAccess({
+          granted: true,
+          source: NOTIFICATION_WRITE_ACCESS_SOURCE,
+        });
+        setSubscription(nextState);
+        setNotificationsHint(
+          areServiceNotificationsAvailable(nextState)
+            ? 'Уведомления о заказах включены'
+            : 'Откройте Bot 1, чтобы получать статусы заказа.',
+        );
+        return;
+      }
+
+      if (result === 'denied') {
+        const nextState = await recordCustomerNotificationWriteAccess({
+          granted: false,
+          source: NOTIFICATION_WRITE_ACCESS_SOURCE,
+        }).catch(() => null);
+        if (nextState) {
+          setSubscription(nextState);
+        }
+      }
+      setNotificationsHint('Откройте Bot 1, чтобы получать статусы заказа.');
     } catch (error) {
       setNotificationsError(toApiErrorMessage(error));
     } finally {
@@ -197,9 +249,9 @@ export function ProfilePage() {
           <div className="notification-settings-card__heading">
             <h2>Уведомления в Telegram</h2>
             <strong
-              className={subscription?.has_chat ? 'status-text-success' : 'status-text-warning'}
+              className={serviceNotificationsAvailable ? 'status-text-success' : 'status-text-warning'}
             >
-              {subscription?.has_chat ? 'подключены' : 'не подключены'}
+              {serviceNotificationsAvailable ? 'подключены' : 'не подключены'}
             </strong>
           </div>
 
@@ -244,15 +296,25 @@ export function ProfilePage() {
             />
           </label>
 
-          {!subscription?.has_chat ? (
-            <button
-              className="primary-button full-width"
-              disabled={notificationsSaving !== null}
-              type="button"
-              onClick={handleOpenNotificationBot}
-            >
-              {notificationsSaving === 'start-link' ? 'Открываем...' : 'Открыть бот'}
-            </button>
+          {!serviceNotificationsAvailable ? (
+            <div className="notification-profile-actions">
+              <button
+                className="primary-button full-width"
+                disabled={notificationsSaving !== null}
+                type="button"
+                onClick={handleAllowNotificationWriteAccess}
+              >
+                {notificationsSaving === 'write-access' ? 'Запрашиваем...' : 'Разрешить уведомления'}
+              </button>
+              <button
+                className="secondary-button full-width"
+                disabled={notificationsSaving !== null}
+                type="button"
+                onClick={handleOpenNotificationBot}
+              >
+                {notificationsSaving === 'start-link' ? 'Открываем...' : 'Открыть бот'}
+              </button>
+            </div>
           ) : null}
 
           <p className="muted-text">
