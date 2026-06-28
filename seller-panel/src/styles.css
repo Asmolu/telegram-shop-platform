@@ -1040,10 +1040,10 @@ textarea:focus {
   max-width: calc(100% - 20px);
   overflow: hidden;
   border-radius: 999px;
-  padding: 7px 11px;
+  padding: 8.5px 13px;
   background: #7c3aed;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1;
   text-overflow: ellipsis;

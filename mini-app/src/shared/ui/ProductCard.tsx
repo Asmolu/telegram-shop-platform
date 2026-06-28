@@ -3,7 +3,13 @@ import type { Product } from '../api';
 import { Link } from '../router/RouterProvider';
 import { trackTelemetry } from '../telemetry';
 import { runLockedAction } from '../utils/actionLock';
-import { formatCompactPrice, formatDiscountPercent, getDisplayOldPrice } from '../utils/format';
+import {
+  formatCompactPrice,
+  formatDiscountPercent,
+  getDiscountBadgeTier,
+  getDiscountPercent,
+  getDisplayOldPrice,
+} from '../utils/format';
 import { getProductBadge, getProductBadgeColor, getProductBadgePosition } from '../utils/images';
 import { CartIcon, HeartIcon } from './Icons';
 import { ProductImageCarousel } from './ProductImageCarousel';
@@ -93,7 +99,10 @@ function ProductCardComponent({
   const badgePosition = getProductBadgePosition(product, badgeType);
   const badgeColor = getProductBadgeColor(product, badgeType);
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
+  const discountPercent = oldPrice ? getDiscountPercent(product.base_price, oldPrice) : null;
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
+  const discountTier = getDiscountBadgeTier(discountPercent);
+  const hasConfiguredBadge = product.image_badge_type !== 'none' && Boolean(badge);
   const brand = product.brand?.trim() || 'Без бренда';
   const reviewLine = getReviewLine(product);
 
@@ -135,13 +144,21 @@ function ProductCardComponent({
           {badge ? (
             <span
               className={`product-badge product-badge--${badgeType} product-badge--color-${badgeColor} product-badge--position-${badgePosition} ${
-                discount && badgePosition === 'bottom-left' ? 'product-badge--above-discount' : ''
+                hasConfiguredBadge ? 'product-badge--configured' : ''
+              } ${
+                discountTier && badgePosition === 'bottom-left'
+                  ? `product-badge--above-discount product-badge--above-discount-tier-${discountTier}`
+                  : ''
               }`}
             >
               {badge}
             </span>
           ) : null}
-          {discount ? <span className="product-discount-badge">{discount}</span> : null}
+          {discount && discountTier ? (
+            <span className={`product-discount-badge discount-badge--tier-${discountTier}`}>
+              {discount}
+            </span>
+          ) : null}
         </Link>
         {onFavoriteToggle ? (
           <button

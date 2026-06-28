@@ -100,6 +100,29 @@ describe('product image variants', () => {
     );
     expect(screen.getAllByAltText('Hoodie')[1].getAttribute('loading')).toBe('lazy');
   });
+
+  it('applies the expected discount tier class on product cards', () => {
+    render(
+      <RouterProvider>
+        <ProductCard product={productFixture({ base_price: '62.00', old_price: '100.00' })} />
+      </RouterProvider>,
+    );
+
+    const badge = screen.getByText('-38%');
+
+    expect(badge.classList.contains('product-discount-badge')).toBe(true);
+    expect(badge.classList.contains('discount-badge--tier-2')).toBe(true);
+  });
+
+  it('does not render a discount badge without an effective discount', () => {
+    const { container } = render(
+      <RouterProvider>
+        <ProductCard product={productFixture({ base_price: '100.00', old_price: null })} />
+      </RouterProvider>,
+    );
+
+    expect(container.querySelector('.product-discount-badge')).toBeNull();
+  });
 });
 
 function productFixture(overrides: Partial<Product> = {}): Product {

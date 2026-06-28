@@ -31,7 +31,9 @@ export function getDisplayOldPrice(price: string | number | null | undefined, ol
   return candidate;
 }
 
-export function formatDiscountPercent(price: string | number | null | undefined, oldPrice?: string | number | null) {
+export type DiscountBadgeTier = 1 | 2 | 3 | 4 | 5;
+
+export function getDiscountPercent(price: string | number | null | undefined, oldPrice?: string | number | null) {
   const current = Number(price ?? 0);
   const previous = Number(oldPrice ?? 0);
 
@@ -39,7 +41,32 @@ export function formatDiscountPercent(price: string | number | null | undefined,
     return null;
   }
 
-  return `-${Math.round(((previous - current) / previous) * 100)}%`;
+  const percent = Math.round(((previous - current) / previous) * 100);
+  return percent > 0 ? percent : null;
+}
+
+export function formatDiscountPercent(price: string | number | null | undefined, oldPrice?: string | number | null) {
+  const percent = getDiscountPercent(price, oldPrice);
+
+  if (!percent) {
+    return null;
+  }
+
+  return `-${percent}%`;
+}
+
+export function getDiscountBadgeTier(percent: number | null | undefined): DiscountBadgeTier | null {
+  const normalized = Number(percent);
+
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return null;
+  }
+
+  if (normalized <= 20) return 1;
+  if (normalized <= 40) return 2;
+  if (normalized <= 60) return 3;
+  if (normalized <= 80) return 4;
+  return 5;
 }
 
 export function formatDate(value: string | null | undefined) {

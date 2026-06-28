@@ -1086,19 +1086,28 @@ label {
 }
 
 .product-badge {
+  --product-badge-font-size: 10px;
+  --product-badge-padding-block: 4px;
+  --product-badge-padding-inline: 7px;
   position: absolute;
   z-index: 3;
   max-width: calc(100% - 70px);
   overflow: hidden;
   border-radius: 999px;
-  padding: 4px 7px;
+  padding: var(--product-badge-padding-block) var(--product-badge-padding-inline);
   background: var(--primary);
   color: var(--primary-contrast);
-  font-size: 10px;
+  font-size: var(--product-badge-font-size);
   font-weight: 900;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.product-badge--configured {
+  --product-badge-font-size: 12px;
+  --product-badge-padding-block: 5px;
+  --product-badge-padding-inline: 8px;
 }
 
 .product-badge--position-top-left {
@@ -1123,6 +1132,26 @@ label {
 
 .product-badge--above-discount {
   bottom: 31px;
+}
+
+.product-badge--above-discount-tier-1 {
+  bottom: 29px;
+}
+
+.product-badge--above-discount-tier-2 {
+  bottom: 31px;
+}
+
+.product-badge--above-discount-tier-3 {
+  bottom: 34px;
+}
+
+.product-badge--above-discount-tier-4 {
+  bottom: 36px;
+}
+
+.product-badge--above-discount-tier-5 {
+  bottom: 38px;
 }
 
 .product-badge--color-pink {
@@ -1156,15 +1185,53 @@ label {
 }
 
 .product-discount-badge {
+  --discount-badge-font-size: 10px;
+  --discount-badge-padding-block: 4px;
+  --discount-badge-padding-inline: 7px;
   position: absolute;
   left: 8px;
   bottom: 8px;
+  max-width: calc(100% - 64px);
+  overflow: hidden;
   border-radius: 999px;
-  padding: 4px 7px;
+  padding: var(--discount-badge-padding-block) var(--discount-badge-padding-inline);
   background: #ffe4ef;
   color: #e60052;
-  font-size: 10px;
+  font-size: var(--discount-badge-font-size);
   font-weight: 900;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-discount-badge.discount-badge--tier-1 {
+  --discount-badge-font-size: 9px;
+  --discount-badge-padding-block: 3.5px;
+  --discount-badge-padding-inline: 6px;
+}
+
+.product-discount-badge.discount-badge--tier-2 {
+  --discount-badge-font-size: 10px;
+  --discount-badge-padding-block: 4px;
+  --discount-badge-padding-inline: 7px;
+}
+
+.product-discount-badge.discount-badge--tier-3 {
+  --discount-badge-font-size: 11px;
+  --discount-badge-padding-block: 4.5px;
+  --discount-badge-padding-inline: 8px;
+}
+
+.product-discount-badge.discount-badge--tier-4 {
+  --discount-badge-font-size: 12px;
+  --discount-badge-padding-block: 5px;
+  --discount-badge-padding-inline: 8.5px;
+}
+
+.product-discount-badge.discount-badge--tier-5 {
+  --discount-badge-font-size: 13px;
+  --discount-badge-padding-block: 5px;
+  --discount-badge-padding-inline: 9px;
 }
 
 .product-badge--position-top-left + .product-discount-badge,
@@ -1948,10 +2015,10 @@ label {
   max-width: calc(100% - 120px);
   overflow: hidden;
   border-radius: 999px;
-  padding: 7px 10px;
+  padding: 8px 12px;
   background: var(--primary);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 900;
   line-height: 1;
   text-overflow: ellipsis;
@@ -2050,13 +2117,47 @@ label {
 }
 
 .price-stack em {
+  --detail-discount-badge-font-size: 11px;
+  --detail-discount-badge-padding-block: 3px;
+  --detail-discount-badge-padding-inline: 7px;
   border-radius: 999px;
-  padding: 3px 7px;
+  padding: var(--detail-discount-badge-padding-block) var(--detail-discount-badge-padding-inline);
   background: var(--danger-soft);
   color: var(--danger-text);
-  font-size: 11px;
+  font-size: var(--detail-discount-badge-font-size);
   font-style: normal;
   font-weight: 900;
+  line-height: 1;
+}
+
+.price-stack em.discount-badge--tier-1 {
+  --detail-discount-badge-font-size: 10px;
+  --detail-discount-badge-padding-block: 3px;
+  --detail-discount-badge-padding-inline: 6px;
+}
+
+.price-stack em.discount-badge--tier-2 {
+  --detail-discount-badge-font-size: 11px;
+  --detail-discount-badge-padding-block: 3px;
+  --detail-discount-badge-padding-inline: 7px;
+}
+
+.price-stack em.discount-badge--tier-3 {
+  --detail-discount-badge-font-size: 12px;
+  --detail-discount-badge-padding-block: 4px;
+  --detail-discount-badge-padding-inline: 8px;
+}
+
+.price-stack em.discount-badge--tier-4 {
+  --detail-discount-badge-font-size: 13px;
+  --detail-discount-badge-padding-block: 4px;
+  --detail-discount-badge-padding-inline: 9px;
+}
+
+.price-stack em.discount-badge--tier-5 {
+  --detail-discount-badge-font-size: 14px;
+  --detail-discount-badge-padding-block: 5px;
+  --detail-discount-badge-padding-inline: 10px;
 }
 
 .price-block span,

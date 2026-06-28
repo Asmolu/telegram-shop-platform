@@ -18,7 +18,14 @@ import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
-import { formatDate, formatDiscountPercent, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
+import {
+  formatDate,
+  formatDiscountPercent,
+  formatPrice,
+  getDiscountBadgeTier,
+  getDiscountPercent,
+  getDisplayOldPrice,
+} from '../shared/utils/format';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { displaySize, sortVariants } from '../shared/utils/sizes';
 
@@ -413,7 +420,9 @@ export function ProductDetailPage() {
   }
 
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
+  const discountPercent = oldPrice ? getDiscountPercent(product.base_price, oldPrice) : null;
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
+  const discountTier = getDiscountBadgeTier(discountPercent);
   const productBrand = getVisibleProductBrand(product);
   const detailSpecs = [
     { label: 'Категория', value: product.category?.name ?? 'Не указана' },
@@ -459,7 +468,9 @@ export function ProductDetailPage() {
             {oldPrice ? (
               <span>
                 <del>{formatPrice(oldPrice)}</del>
-                {discount ? <em>{discount}</em> : null}
+                {discount && discountTier ? (
+                  <em className={`discount-badge--tier-${discountTier}`}>{discount}</em>
+                ) : null}
               </span>
             ) : null}
           </div>
