@@ -50,6 +50,8 @@ export type TelegramWebApp = {
   platform?: string;
   version?: string;
   isFullscreen?: boolean;
+  viewportHeight?: number;
+  viewportStableHeight?: number;
   safeAreaInset?: TelegramSafeAreaInset;
   contentSafeAreaInset?: TelegramSafeAreaInset;
   onEvent?: (eventType: TelegramWebAppEvent, eventHandler: () => void) => void;

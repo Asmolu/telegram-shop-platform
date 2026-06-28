@@ -98,9 +98,12 @@ describe('AppShell floating order help', () => {
     dispatchPointer(window, 'pointerup', { clientX: 30, clientY: 690, pointerId: 1 });
 
     expect(screen.queryByRole('button', { name: /Как совершить заказ/i })).toBeNull();
-    const tab = screen.getByText('>');
+    const tab = document.querySelector<HTMLButtonElement>('.floating-help-tab--left');
 
-    fireEvent.click(tab);
+    expect(tab).not.toBeNull();
+    expect(tab?.textContent).toBe('');
+    expect(tab?.querySelector('.floating-help-tab__chevron')).not.toBeNull();
+    fireEvent.click(tab!);
 
     expect(screen.getByRole('button', { name: /Как совершить заказ/i })).toBeTruthy();
   });
@@ -114,9 +117,12 @@ describe('AppShell floating order help', () => {
     dispatchPointer(window, 'pointerup', { clientX: 390, clientY: 690, pointerId: 2 });
 
     expect(screen.queryByRole('button', { name: /Как совершить заказ/i })).toBeNull();
-    const tab = screen.getByText('<');
+    const tab = document.querySelector<HTMLButtonElement>('.floating-help-tab--right');
 
-    fireEvent.click(tab);
+    expect(tab).not.toBeNull();
+    expect(tab?.textContent).toBe('');
+    expect(tab?.querySelector('.floating-help-tab__chevron')).not.toBeNull();
+    fireEvent.click(tab!);
 
     expect(screen.getByRole('button', { name: /Как совершить заказ/i })).toBeTruthy();
   });

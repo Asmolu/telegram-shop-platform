@@ -147,6 +147,13 @@ describe('CartPage compact favorites', () => {
 
     expect(promoInput.closest('.cart-layout')?.classList.contains('cart-layout--promo-focused')).toBe(true);
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    const focusScrollCalls = scrollIntoView.mock.calls.length;
+
+    fireEvent.change(promoInput, { target: { value: 'SAVE10' } });
+
+    expect((promoInput as HTMLInputElement).value).toBe('SAVE10');
+    expect(promoInput.closest('.cart-layout')?.classList.contains('cart-layout--promo-focused')).toBe(true);
+    await waitFor(() => expect(scrollIntoView.mock.calls.length).toBeGreaterThan(focusScrollCalls));
 
     fireEvent.blur(promoInput);
 

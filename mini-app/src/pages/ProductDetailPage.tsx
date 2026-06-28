@@ -476,8 +476,8 @@ export function ProductDetailPage() {
           </div>
           <span>{product.is_available ? 'В наличии' : 'Нет в наличии'}</span>
         </div>
-        {productBrand ? <span className="product-detail-brand">{productBrand}</span> : null}
-        <h1>{product.name}</h1>
+        {productBrand ? <span className="product-detail-brand product-detail-title">{productBrand}</span> : null}
+        <h1 className="product-detail-title">{product.name}</h1>
         {averageRating ? (
           <p className="rating-line">★ {averageRating.toFixed(1)} · {reviews.length} отзывов</p>
         ) : (

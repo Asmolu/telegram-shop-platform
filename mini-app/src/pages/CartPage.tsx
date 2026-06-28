@@ -20,6 +20,7 @@ import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
+import { getTelegramWebApp } from '../shared/telegram/webApp';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
@@ -380,56 +381,167 @@ function CartItemsTab({
   onRemove: (itemId: number) => Promise<void>;
   onSelectAll: (isSelected: boolean) => Promise<void>;
 }) {
+  const promoFormRef = React.useRef<HTMLFormElement | null>(null);
   const promoInputRef = React.useRef<HTMLInputElement | null>(null);
   const promoVisibilityTimers = React.useRef<number[]>([]);
+  const promoVisibilityFrame = React.useRef<number | null>(null);
   const [promoFocused, setPromoFocused] = React.useState(false);
+  const [keyboardSafeBottom, setKeyboardSafeBottom] = React.useState(0);
   const items = cart?.items ?? [];
   const selectedItems = items.filter((item) => item.is_selected);
   const allSelected = items.length > 0 && selectedItems.length === items.length;
   const selectedTotal = cart?.selected_total ?? '0';
   const selectedQuantity = cart?.selected_quantity_total ?? 0;
 
+  const getKeyboardSafeBottom = React.useCallback(() => {
+    const visualViewport = window.visualViewport;
+    const visualViewportInset = visualViewport
+      ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+      : 0;
+    const webApp = getTelegramWebApp();
+    const telegramViewportInset = webApp?.viewportStableHeight && webApp.viewportHeight
+      ? Math.max(0, webApp.viewportStableHeight - webApp.viewportHeight)
+      : 0;
+
+    return Math.round(Math.min(Math.max(visualViewportInset, telegramViewportInset), 420));
+  }, []);
+
   const clearPromoVisibilityTimers = React.useCallback(() => {
     promoVisibilityTimers.current.forEach((timer) => window.clearTimeout(timer));
     promoVisibilityTimers.current = [];
+    if (promoVisibilityFrame.current !== null) {
+      if (typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(promoVisibilityFrame.current);
+      } else {
+        window.clearTimeout(promoVisibilityFrame.current);
+      }
+      promoVisibilityFrame.current = null;
+    }
   }, []);
 
   const keepPromoInputVisible = React.useCallback(() => {
     const input = promoInputRef.current;
-    if (!input) {
+    const target = promoFormRef.current ?? input;
+    if (!input || !target) {
       return;
     }
 
-    input.scrollIntoView({
-      behavior: getMotionAwareScrollBehavior(),
-      block: 'center',
-      inline: 'nearest',
-    });
-  }, []);
+    const behavior = getMotionAwareScrollBehavior();
+    const visualViewport = window.visualViewport;
+    if (!visualViewport || visualViewport.height <= 0 || typeof window.scrollTo !== 'function') {
+      input.scrollIntoView({
+        behavior,
+        block: 'center',
+        inline: 'nearest',
+      });
+      return;
+    }
 
-  const schedulePromoVisibility = React.useCallback(() => {
+    const rect = target.getBoundingClientRect();
+    const viewportTop = visualViewport.offsetTop || 0;
+    const viewportHeight = visualViewport.height;
+    const keyboardInset = getKeyboardSafeBottom();
+    const bottomGuard = keyboardInset > 24 ? 88 : 76;
+    const visibleTop = viewportTop + 12;
+    const visibleBottom = viewportTop + viewportHeight - bottomGuard;
+    const visibleHeight = visibleBottom - visibleTop;
+
+    if (visibleHeight <= rect.height + 16) {
+      input.scrollIntoView({
+        behavior,
+        block: 'center',
+        inline: 'nearest',
+      });
+      return;
+    }
+
+    if (rect.top >= visibleTop && rect.bottom <= visibleBottom) {
+      return;
+    }
+
+    const targetTop = window.scrollY + rect.top;
+    const desiredTop = targetTop - viewportTop - Math.max((visibleHeight - rect.height) / 2, 0) + 6;
+    window.scrollTo({
+      top: Math.max(0, desiredTop),
+      behavior,
+    });
+  }, [getKeyboardSafeBottom]);
+
+  const queuePromoVisibility = React.useCallback(() => {
+    if (promoVisibilityFrame.current !== null) {
+      return;
+    }
+
+    const runVisibilityCheck = () => {
+      promoVisibilityFrame.current = null;
+      keepPromoInputVisible();
+    };
+
+    promoVisibilityFrame.current = typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame(runVisibilityCheck)
+      : window.setTimeout(runVisibilityCheck, 16);
+  }, [keepPromoInputVisible]);
+
+  const schedulePromoVisibility = React.useCallback((delays = [0, 90, 260, 520]) => {
     clearPromoVisibilityTimers();
-    promoVisibilityTimers.current = [90, 320].map((delay) =>
-      window.setTimeout(keepPromoInputVisible, delay),
+    promoVisibilityTimers.current = delays.map((delay) =>
+      window.setTimeout(queuePromoVisibility, delay),
     );
-  }, [clearPromoVisibilityTimers, keepPromoInputVisible]);
+  }, [clearPromoVisibilityTimers, queuePromoVisibility]);
+
+  React.useEffect(() => {
+    if (!promoFocused) {
+      return undefined;
+    }
+
+    const webApp = getTelegramWebApp();
+    const handleViewportChange = () => {
+      setKeyboardSafeBottom(getKeyboardSafeBottom());
+      schedulePromoVisibility([0, 80, 220]);
+    };
+
+    handleViewportChange();
+    window.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+    webApp?.onEvent?.('viewportChanged', handleViewportChange);
+
+    return () => {
+      window.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+      webApp?.offEvent?.('viewportChanged', handleViewportChange);
+    };
+  }, [getKeyboardSafeBottom, promoFocused, schedulePromoVisibility]);
+
+  React.useEffect(() => {
+    if (!promoFocused) {
+      return;
+    }
+
+    setKeyboardSafeBottom(getKeyboardSafeBottom());
+    schedulePromoVisibility([0, 80, 220]);
+  }, [getKeyboardSafeBottom, promoCode, promoFocused, promoValidation, schedulePromoVisibility]);
 
   React.useEffect(() => () => clearPromoVisibilityTimers(), [clearPromoVisibilityTimers]);
 
   function handlePromoFocus() {
     setPromoFocused(true);
+    setKeyboardSafeBottom(getKeyboardSafeBottom());
     schedulePromoVisibility();
   }
 
   function handlePromoBlur() {
     setPromoFocused(false);
+    setKeyboardSafeBottom(0);
     clearPromoVisibilityTimers();
   }
 
   function handlePromoInputChange(value: string) {
     onPromoCodeChange(value);
     if (promoFocused) {
-      schedulePromoVisibility();
+      setKeyboardSafeBottom(getKeyboardSafeBottom());
+      schedulePromoVisibility([0, 80, 220, 520, 760]);
     }
   }
 
@@ -437,8 +549,13 @@ function CartItemsTab({
     return <EmptyState title="Корзина пустая" actionLabel="Перейти к товарам" onAction={onGoShop} />;
   }
 
+  const keyboardOpen = promoFocused && keyboardSafeBottom > 24;
+
   return (
-    <div className={`cart-layout ${promoFocused ? 'cart-layout--promo-focused' : ''}`}>
+    <div
+      className={`cart-layout ${promoFocused ? 'cart-layout--promo-focused' : ''} ${keyboardOpen ? 'cart-layout--keyboard-open' : ''}`}
+      style={promoFocused ? { '--cart-keyboard-safe-bottom': `${keyboardSafeBottom}px` } as React.CSSProperties : undefined}
+    >
       <div className="cart-selection-toolbar">
         <label>
           <input
@@ -520,7 +637,7 @@ function CartItemsTab({
         })}
       </div>
 
-      <form className="promo-form" data-keyboard-keep-focus onSubmit={onApplyPromo}>
+      <form className="promo-form" data-keyboard-keep-focus ref={promoFormRef} onSubmit={onApplyPromo}>
         <input
           ref={promoInputRef}
           value={promoCode}

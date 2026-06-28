@@ -87,10 +87,15 @@ describe('ProductDetailPage description', () => {
 
     const title = await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' });
     const brand = container.querySelector('.product-detail-brand');
+    const styles = readFileSync('src/styles.css', 'utf-8');
 
     expect(brand).not.toBeNull();
     expect(brand?.textContent).toBe('MENS STYLE');
+    expect(brand?.classList.contains('product-detail-title')).toBe(true);
+    expect(title.classList.contains('product-detail-title')).toBe(true);
     expect(brand!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(styles).toMatch(/\.product-detail-title\s*{[^}]*font-size:\s*22px/s);
+    expect(styles).toMatch(/\.product-detail-title\s*{[^}]*font-weight:\s*900/s);
   });
 
   it('does not render an empty product brand row', async () => {
@@ -102,6 +107,18 @@ describe('ProductDetailPage description', () => {
     const { container } = render(<ProductDetailPage />);
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' })).toBeTruthy();
+    expect(container.querySelector('.product-detail-brand')).toBeNull();
+  });
+
+  it('does not duplicate the brand when the product title already starts with it', async () => {
+    apiMocks.getProduct.mockResolvedValue(productFixture({ name: 'MENS STYLE Line Break Hoodie' }));
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'MENS STYLE Line Break Hoodie' })).toBeTruthy();
     expect(container.querySelector('.product-detail-brand')).toBeNull();
   });
 
