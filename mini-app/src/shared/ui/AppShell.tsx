@@ -21,9 +21,191 @@ const navItems = [
 
 const AGGRESSIVE_POPUP_SESSION_KEY = 'telegram_shop_aggressive_popup_dismissed';
 const POPUP_SESSION_KEY = 'telegram_shop_popup_dismissed';
+const FLOATING_HELP_STORAGE_KEY = 'telegram_shop_order_help_widget_v1';
+const FLOATING_HELP_MARGIN = 12;
+const FLOATING_HELP_BOTTOM_GUARD = 92;
+const FLOATING_HELP_DISMISS_DISTANCE = 80;
+const FLOATING_HELP_THROW_VELOCITY = 0.45;
+const FLOATING_HELP_DEFAULT_SIZE = { width: 220, height: 46 };
+const FLOATING_HELP_TAB_SIZE = { width: 32, height: 52 };
+
+type FloatingHelpHiddenSide = 'left' | 'right';
+type FloatingHelpPosition = {
+  x: number;
+  y: number;
+};
+type FloatingHelpState = {
+  hiddenSide: FloatingHelpHiddenSide | null;
+  position: FloatingHelpPosition | null;
+};
+type FloatingHelpBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  width: number;
+};
 
 function isActive(pathname: string, item: (typeof navItems)[number]) {
   return item.match.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (max < min) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeStoredPosition(value: unknown): FloatingHelpPosition | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const maybePosition = value as Partial<FloatingHelpPosition>;
+  if (!Number.isFinite(maybePosition.x) || !Number.isFinite(maybePosition.y)) {
+    return null;
+  }
+
+  return {
+    x: Number(maybePosition.x),
+    y: Number(maybePosition.y),
+  };
+}
+
+function readFloatingHelpState(): FloatingHelpState {
+  if (typeof window === 'undefined') {
+    return { hiddenSide: null, position: null };
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(FLOATING_HELP_STORAGE_KEY);
+    if (!rawValue) {
+      return { hiddenSide: null, position: null };
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<FloatingHelpState>;
+    const hiddenSide = parsed.hiddenSide === 'left' || parsed.hiddenSide === 'right'
+      ? parsed.hiddenSide
+      : null;
+
+    return {
+      hiddenSide,
+      position: normalizeStoredPosition(parsed.position),
+    };
+  } catch {
+    return { hiddenSide: null, position: null };
+  }
+}
+
+function writeFloatingHelpState(state: FloatingHelpState) {
+  try {
+    window.localStorage.setItem(
+      FLOATING_HELP_STORAGE_KEY,
+      JSON.stringify({
+        hiddenSide: state.hiddenSide,
+        position: state.position,
+      }),
+    );
+  } catch {
+    // localStorage can be unavailable in embedded or private browsing contexts.
+  }
+}
+
+function getViewportRect() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 430;
+  const height = window.innerHeight || document.documentElement.clientHeight || 720;
+  return { left: 0, top: 0, right: width, bottom: height, width, height };
+}
+
+function getMiniAppFrameRect(element: HTMLElement | null) {
+  const viewport = getViewportRect();
+  const frame = element?.closest('.mini-app-frame') as HTMLElement | null
+    ?? document.querySelector<HTMLElement>('.mini-app-frame');
+  const rect = frame?.getBoundingClientRect();
+
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    return viewport;
+  }
+
+  return {
+    left: clampNumber(rect.left, viewport.left, viewport.right),
+    top: clampNumber(rect.top, viewport.top, viewport.bottom),
+    right: clampNumber(rect.right, viewport.left, viewport.right),
+    bottom: clampNumber(rect.bottom, viewport.top, viewport.bottom),
+    width: Math.min(rect.width, viewport.width),
+    height: Math.min(rect.height, viewport.height),
+  };
+}
+
+function getFloatingHelpBounds(
+  element: HTMLElement | null,
+  fallbackSize = FLOATING_HELP_DEFAULT_SIZE,
+): FloatingHelpBounds {
+  const rect = element?.getBoundingClientRect();
+  const width = rect && rect.width > 0 ? rect.width : fallbackSize.width;
+  const height = rect && rect.height > 0 ? rect.height : fallbackSize.height;
+  const frameRect = getMiniAppFrameRect(element);
+  const viewport = getViewportRect();
+  const bottomEdge = Math.min(frameRect.bottom || viewport.bottom, viewport.bottom);
+  const minX = frameRect.left + FLOATING_HELP_MARGIN;
+  const maxX = Math.max(minX, frameRect.right - width - FLOATING_HELP_MARGIN);
+  const minY = frameRect.top + FLOATING_HELP_MARGIN;
+  const maxY = Math.max(minY, bottomEdge - height - FLOATING_HELP_BOTTOM_GUARD);
+
+  return { minX, maxX, minY, maxY, width };
+}
+
+function getDefaultFloatingHelpPosition(element: HTMLElement | null) {
+  const bounds = getFloatingHelpBounds(element);
+  return { x: bounds.maxX, y: bounds.maxY };
+}
+
+function clampFloatingHelpPosition(
+  position: FloatingHelpPosition,
+  element: HTMLElement | null,
+) {
+  const bounds = getFloatingHelpBounds(element);
+  return {
+    x: clampNumber(position.x, bounds.minX, bounds.maxX),
+    y: clampNumber(position.y, bounds.minY, bounds.maxY),
+  };
+}
+
+function shouldShowFloatingHelp(path: string) {
+  const pathname = path.split('?')[0] || '/';
+  return pathname === '/'
+    || pathname === '/main'
+    || pathname === '/categories'
+    || pathname.startsWith('/category')
+    || pathname === '/search'
+    || pathname.startsWith('/search/');
+}
+
+function getFloatingHelpDismissSide({
+  deltaX,
+  elapsedMs,
+  position,
+  bounds,
+}: {
+  deltaX: number;
+  elapsedMs: number;
+  position: FloatingHelpPosition;
+  bounds: FloatingHelpBounds;
+}): FloatingHelpHiddenSide | null {
+  const velocityX = deltaX / Math.max(elapsedMs, 1);
+  const thrownLeft = velocityX <= -FLOATING_HELP_THROW_VELOCITY && deltaX < -36;
+  const thrownRight = velocityX >= FLOATING_HELP_THROW_VELOCITY && deltaX > 36;
+  const pushedLeft = position.x <= bounds.minX + 4 && deltaX < -FLOATING_HELP_DISMISS_DISTANCE;
+  const pushedRight = position.x >= bounds.maxX - 4 && deltaX > FLOATING_HELP_DISMISS_DISTANCE;
+
+  if (thrownLeft || pushedLeft) {
+    return 'left';
+  }
+  if (thrownRight || pushedRight) {
+    return 'right';
+  }
+  return null;
 }
 
 export function BrandMark({ className = '' }: { className?: string }) {
@@ -327,23 +509,254 @@ function FloatingOrderHelp({
   currentPath: string;
   onOpen: () => void;
 }) {
-  const hidden = currentPath.startsWith('/faq')
-    || currentPath.startsWith('/cart')
-    || currentPath.startsWith('/checkout')
-    || currentPath.startsWith('/product/')
-    || currentPath.startsWith('/order-success/')
-    || currentPath.startsWith('/profile');
+  const {
+    hiddenSide,
+    isDragging,
+    isReady,
+    onPointerDown,
+    position,
+    ref,
+    restore,
+    shouldSuppressClick,
+    tabStyle,
+  } = useDraggableFloatingHelp();
 
-  if (hidden) {
+  if (!shouldShowFloatingHelp(currentPath)) {
     return null;
   }
 
+  if (hiddenSide) {
+    return (
+      <button
+        className={`floating-help-tab floating-help-tab--${hiddenSide}`}
+        style={tabStyle}
+        type="button"
+        aria-label="Вернуть подсказку"
+        onClick={() => restore(hiddenSide)}
+      >
+        {hiddenSide === 'left' ? '>' : '<'}
+      </button>
+    );
+  }
+
   return (
-    <button className="floating-help-widget" type="button" onClick={onOpen}>
+    <button
+      className={`floating-help-widget ${isReady ? 'is-ready' : ''} ${isDragging ? 'is-dragging' : ''}`}
+      ref={ref}
+      style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}
+      type="button"
+      onClick={(event) => {
+        if (shouldSuppressClick()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        onOpen();
+      }}
+      onPointerDown={onPointerDown}
+    >
       <span aria-hidden="true">?</span>
       <strong>Как совершить заказ?</strong>
     </button>
   );
+}
+
+function useDraggableFloatingHelp() {
+  const ref = React.useRef<HTMLButtonElement | null>(null);
+  const cleanupRef = React.useRef<(() => void) | null>(null);
+  const suppressNextClickRef = React.useRef(false);
+  const [state, setState] = React.useState<FloatingHelpState>(() => readFloatingHelpState());
+  const stateRef = React.useRef(state);
+  const [isReady, setIsReady] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
+
+  const setFloatingState = React.useCallback((nextState: FloatingHelpState, persist = true) => {
+    stateRef.current = nextState;
+    setState(nextState);
+    if (persist) {
+      writeFloatingHelpState(nextState);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  React.useLayoutEffect(() => {
+    const element = ref.current;
+    const currentPosition = stateRef.current.position ?? getDefaultFloatingHelpPosition(element);
+    const nextPosition = clampFloatingHelpPosition(currentPosition, element);
+    const nextState = {
+      ...stateRef.current,
+      position: nextPosition,
+    };
+
+    setFloatingState(nextState);
+    setIsReady(true);
+  }, [setFloatingState, state.hiddenSide]);
+
+  React.useEffect(() => {
+    function handleResize() {
+      const element = ref.current;
+      const currentState = stateRef.current;
+      const currentPosition = currentState.position ?? getDefaultFloatingHelpPosition(element);
+      setFloatingState({
+        ...currentState,
+        position: clampFloatingHelpPosition(currentPosition, element),
+      });
+    }
+
+    window.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+    };
+  }, [setFloatingState]);
+
+  React.useEffect(() => () => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+  }, []);
+
+  const onPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const element = ref.current;
+    const startPosition = stateRef.current.position ?? getDefaultFloatingHelpPosition(element);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startTime = performance.now();
+    const dragState = {
+      lastPosition: startPosition,
+      moved: false,
+    };
+    const offsetX = startX - startPosition.x;
+    const offsetY = startY - startPosition.y;
+    const pointerId = event.pointerId;
+    const pointerTarget = event.currentTarget;
+
+    cleanupRef.current?.();
+    setIsDragging(true);
+    pointerTarget.setPointerCapture?.(pointerId);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      if (!dragState.moved && Math.hypot(deltaX, deltaY) > 5) {
+        dragState.moved = true;
+      }
+
+      const nextPosition = clampFloatingHelpPosition(
+        {
+          x: moveEvent.clientX - offsetX,
+          y: moveEvent.clientY - offsetY,
+        },
+        element,
+      );
+
+      dragState.lastPosition = nextPosition;
+      const nextState = {
+        hiddenSide: null,
+        position: nextPosition,
+      };
+      stateRef.current = nextState;
+      setState(nextState);
+      moveEvent.preventDefault();
+    };
+
+    const finishDrag = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+      setIsDragging(false);
+      pointerTarget.releasePointerCapture?.(pointerId);
+
+      const elapsedMs = performance.now() - startTime;
+      const deltaX = upEvent.clientX - startX;
+      const finalPosition = clampFloatingHelpPosition(dragState.lastPosition, element);
+      const dismissSide = getFloatingHelpDismissSide({
+        bounds: getFloatingHelpBounds(element),
+        deltaX,
+        elapsedMs,
+        position: finalPosition,
+      });
+
+      if (dragState.moved) {
+        suppressNextClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextClickRef.current = false;
+        }, 0);
+      }
+
+      setFloatingState({
+        hiddenSide: dismissSide,
+        position: finalPosition,
+      });
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+    cleanupRef.current = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+    };
+  }, [setFloatingState]);
+
+  const restore = React.useCallback((side: FloatingHelpHiddenSide) => {
+    const bounds = getFloatingHelpBounds(null);
+    const currentPosition = stateRef.current.position ?? getDefaultFloatingHelpPosition(null);
+    const nextPosition = clampFloatingHelpPosition(
+      {
+        x: side === 'left' ? bounds.minX : bounds.maxX,
+        y: currentPosition.y,
+      },
+      null,
+    );
+
+    setFloatingState({
+      hiddenSide: null,
+      position: nextPosition,
+    });
+  }, [setFloatingState]);
+
+  const shouldSuppressClick = React.useCallback(() => {
+    if (!suppressNextClickRef.current) {
+      return false;
+    }
+    suppressNextClickRef.current = false;
+    return true;
+  }, []);
+
+  const tabBounds = getFloatingHelpBounds(null, FLOATING_HELP_TAB_SIZE);
+  const tabY = clampNumber(
+    state.position?.y ?? tabBounds.maxY,
+    tabBounds.minY,
+    tabBounds.maxY,
+  );
+
+  return {
+    hiddenSide: state.hiddenSide,
+    isDragging,
+    isReady,
+    onPointerDown,
+    position: state.position ?? getDefaultFloatingHelpPosition(ref.current),
+    ref,
+    restore,
+    shouldSuppressClick,
+    tabStyle: { top: `${tabY}px` } satisfies React.CSSProperties,
+  };
 }
 
 function BannerPopup({

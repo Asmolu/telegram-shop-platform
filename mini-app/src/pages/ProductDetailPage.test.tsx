@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProductDetailPage } from './ProductDetailPage';
@@ -54,6 +54,7 @@ vi.mock('../shared/router/RouterProvider', () => ({
 
 describe('ProductDetailPage description', () => {
   afterEach(() => {
+    cleanup();
     vi.clearAllMocks();
   });
 
@@ -74,6 +75,34 @@ describe('ProductDetailPage description', () => {
     expect(variantCard).not.toBeNull();
     expect(productInfoCard!.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(hint.compareDocumentPosition(variantCard!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders product brand above the product title when brand exists', async () => {
+    apiMocks.getProduct.mockResolvedValue(productFixture());
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    const title = await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' });
+    const brand = container.querySelector('.product-detail-brand');
+
+    expect(brand).not.toBeNull();
+    expect(brand?.textContent).toBe('MENS STYLE');
+    expect(brand!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('does not render an empty product brand row', async () => {
+    apiMocks.getProduct.mockResolvedValue(productFixture({ brand: '   ' }));
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' })).toBeTruthy();
+    expect(container.querySelector('.product-detail-brand')).toBeNull();
   });
 
   it('preserves newline text rendering in collapsed and expanded states', async () => {

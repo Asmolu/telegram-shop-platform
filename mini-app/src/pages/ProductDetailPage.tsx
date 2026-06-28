@@ -59,6 +59,27 @@ function firstSelectableVariant(variants: ProductVariant[]) {
   return variants.find((variant) => variant.available_quantity > 0) ?? variants[0] ?? null;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeBrandText(value: string) {
+  return value.toLocaleLowerCase('ru-RU').replace(/\s+/g, ' ').trim();
+}
+
+function getVisibleProductBrand(product: Product) {
+  const brand = product.brand?.trim();
+  if (!brand) {
+    return null;
+  }
+
+  const normalizedBrand = normalizeBrandText(brand);
+  const normalizedName = normalizeBrandText(product.name);
+  const duplicateBrandPattern = new RegExp(`^${escapeRegExp(normalizedBrand)}(?:$|\\s|[-:.,/])`);
+
+  return duplicateBrandPattern.test(normalizedName) ? null : brand;
+}
+
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
@@ -393,6 +414,7 @@ export function ProductDetailPage() {
 
   const oldPrice = getDisplayOldPrice(product.base_price, product.old_price, product.compare_at_price);
   const discount = oldPrice ? formatDiscountPercent(product.base_price, oldPrice) : null;
+  const productBrand = getVisibleProductBrand(product);
   const detailSpecs = [
     { label: 'Категория', value: product.category?.name ?? 'Не указана' },
     { label: 'Артикул', value: selectedVariant?.sku ?? 'Выберите размер' },
@@ -430,7 +452,7 @@ export function ProductDetailPage() {
         <ProductImageCarousel product={product} variant="detail" />
       </section>
 
-      <section className="detail-card">
+      <section className="detail-card product-info-card">
         <div className="price-block">
           <div className="price-stack">
             <strong>{formatPrice(product.base_price)}</strong>
@@ -443,6 +465,7 @@ export function ProductDetailPage() {
           </div>
           <span>{product.is_available ? 'В наличии' : 'Нет в наличии'}</span>
         </div>
+        {productBrand ? <span className="product-detail-brand">{productBrand}</span> : null}
         <h1>{product.name}</h1>
         {averageRating ? (
           <p className="rating-line">★ {averageRating.toFixed(1)} · {reviews.length} отзывов</p>

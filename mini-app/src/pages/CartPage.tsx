@@ -22,6 +22,7 @@ import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
+import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
 
@@ -379,18 +380,65 @@ function CartItemsTab({
   onRemove: (itemId: number) => Promise<void>;
   onSelectAll: (isSelected: boolean) => Promise<void>;
 }) {
+  const promoInputRef = React.useRef<HTMLInputElement | null>(null);
+  const promoVisibilityTimers = React.useRef<number[]>([]);
+  const [promoFocused, setPromoFocused] = React.useState(false);
   const items = cart?.items ?? [];
   const selectedItems = items.filter((item) => item.is_selected);
   const allSelected = items.length > 0 && selectedItems.length === items.length;
   const selectedTotal = cart?.selected_total ?? '0';
   const selectedQuantity = cart?.selected_quantity_total ?? 0;
 
+  const clearPromoVisibilityTimers = React.useCallback(() => {
+    promoVisibilityTimers.current.forEach((timer) => window.clearTimeout(timer));
+    promoVisibilityTimers.current = [];
+  }, []);
+
+  const keepPromoInputVisible = React.useCallback(() => {
+    const input = promoInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.scrollIntoView({
+      behavior: getMotionAwareScrollBehavior(),
+      block: 'center',
+      inline: 'nearest',
+    });
+  }, []);
+
+  const schedulePromoVisibility = React.useCallback(() => {
+    clearPromoVisibilityTimers();
+    promoVisibilityTimers.current = [90, 320].map((delay) =>
+      window.setTimeout(keepPromoInputVisible, delay),
+    );
+  }, [clearPromoVisibilityTimers, keepPromoInputVisible]);
+
+  React.useEffect(() => () => clearPromoVisibilityTimers(), [clearPromoVisibilityTimers]);
+
+  function handlePromoFocus() {
+    setPromoFocused(true);
+    schedulePromoVisibility();
+  }
+
+  function handlePromoBlur() {
+    setPromoFocused(false);
+    clearPromoVisibilityTimers();
+  }
+
+  function handlePromoInputChange(value: string) {
+    onPromoCodeChange(value);
+    if (promoFocused) {
+      schedulePromoVisibility();
+    }
+  }
+
   if (!cart || items.length === 0) {
     return <EmptyState title="Корзина пустая" actionLabel="Перейти к товарам" onAction={onGoShop} />;
   }
 
   return (
-    <div className="cart-layout">
+    <div className={`cart-layout ${promoFocused ? 'cart-layout--promo-focused' : ''}`}>
       <div className="cart-selection-toolbar">
         <label>
           <input
@@ -472,8 +520,15 @@ function CartItemsTab({
         })}
       </div>
 
-      <form className="promo-form" onSubmit={onApplyPromo}>
-        <input value={promoCode} onChange={(event) => onPromoCodeChange(event.target.value)} placeholder="Введите промокод" />
+      <form className="promo-form" data-keyboard-keep-focus onSubmit={onApplyPromo}>
+        <input
+          ref={promoInputRef}
+          value={promoCode}
+          onBlur={handlePromoBlur}
+          onChange={(event) => handlePromoInputChange(event.target.value)}
+          onFocus={handlePromoFocus}
+          placeholder="Введите промокод"
+        />
         <button className="secondary-button" type="submit" disabled={!promoCode.trim()}>
           Применить
         </button>

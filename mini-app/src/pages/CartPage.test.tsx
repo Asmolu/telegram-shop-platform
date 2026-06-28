@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCart, loginWithTelegram } from '../shared/api';
@@ -129,6 +129,28 @@ describe('CartPage compact favorites', () => {
     await waitFor(() => expect(getCart).toHaveBeenCalled());
     expect(loginWithTelegram).not.toHaveBeenCalled();
     expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the promo input visible when focused for the mobile keyboard', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+    vi.mocked(getCart).mockResolvedValueOnce(cartWithSelectedItemFixture());
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    render(<CartPage />);
+
+    const promoInput = await screen.findByPlaceholderText('Введите промокод');
+    fireEvent.focus(promoInput);
+
+    expect(promoInput.closest('.cart-layout')?.classList.contains('cart-layout--promo-focused')).toBe(true);
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+
+    fireEvent.blur(promoInput);
+
+    expect(promoInput.closest('.cart-layout')?.classList.contains('cart-layout--promo-focused')).toBe(false);
   });
 });
 
