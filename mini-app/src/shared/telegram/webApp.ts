@@ -113,6 +113,26 @@ export async function waitForTelegramWebApp(timeoutMs = 1200, intervalMs = 50) {
   return getTelegramWebApp();
 }
 
+export async function waitForTelegramInitData(timeoutMs = 2000, intervalMs = 50) {
+  const initialInitData = getTelegramInitData();
+  if (initialInitData) {
+    return initialInitData;
+  }
+
+  await waitForTelegramWebApp(Math.min(timeoutMs, 1200), intervalMs);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const initData = getTelegramInitData();
+    if (initData) {
+      return initData;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+
+  return getTelegramInitData();
+}
+
 export function getTelegramInitData() {
   return getTelegramWebApp()?.initData ?? '';
 }

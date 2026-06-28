@@ -11,6 +11,7 @@ import {
   storeAccessToken,
   toApiErrorMessage,
 } from './client';
+import { registerAuthSessionRefreshHandler } from '../auth/sessionRefresh';
 import { shouldClearStoredTokenAfterAuthError } from '../auth/sessionPolicy';
 import { getNetworkState, setNetworkState } from '../network/networkState';
 import { flushTelemetry } from '../telemetry';
@@ -43,6 +44,7 @@ describe('apiRequest resilience', () => {
 
   afterEach(() => {
     clearStoredAccessToken();
+    registerAuthSessionRefreshHandler(async () => false)();
     setNetworkState('online');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -157,6 +159,44 @@ describe('apiRequest resilience', () => {
       { quantity_total: 1 },
       { quantity_total: 1 },
     ]);
+  });
+
+  it('refreshes auth once after a 401 and retries with the new JWT', async () => {
+    storeAccessToken('old-jwt');
+    const unregister = registerAuthSessionRefreshHandler(async () => {
+      storeAccessToken('new-jwt');
+      return true;
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ quantity_total: 2 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiRequest('/cart')).resolves.toEqual({ quantity_total: 2 });
+
+    unregister();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe(
+      'Bearer old-jwt',
+    );
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Authorization')).toBe(
+      'Bearer new-jwt',
+    );
+  });
+
+  it('does not enter an auth refresh loop when the retried request is still 401', async () => {
+    const refreshAuth = vi.fn(async () => true);
+    const unregister = registerAuthSessionRefreshHandler(refreshAuth);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'still expired' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiRequest('/cart')).rejects.toMatchObject({ status: 401 });
+
+    unregister();
+    expect(refreshAuth).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('preserves backend request ID in normalized errors', async () => {

@@ -11,7 +11,20 @@ MAX_AUTH_DATE_FUTURE_SECONDS = 60
 
 
 class TelegramInitDataError(ValueError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        has_init_data: bool,
+        has_user_payload: bool | None = None,
+        auth_date_age_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.has_init_data = has_init_data
+        self.has_user_payload = has_user_payload
+        self.auth_date_age_seconds = auth_date_age_seconds
 
 
 def validate_telegram_init_data(
@@ -20,10 +33,23 @@ def validate_telegram_init_data(
     max_age_seconds: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    if not init_data:
+        raise TelegramInitDataError(
+            "Telegram initData is missing",
+            error_code="missing_init_data",
+            has_init_data=False,
+        )
+
     parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+    has_user_payload = "user" in parsed
     received_hash = parsed.pop("hash", None)
     if not received_hash:
-        raise TelegramInitDataError("Telegram initData hash is missing")
+        raise TelegramInitDataError(
+            "Telegram initData hash is missing",
+            error_code="missing_hash",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+        )
 
     data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
     secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
@@ -33,22 +59,53 @@ def validate_telegram_init_data(
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(calculated_hash, received_hash):
-        raise TelegramInitDataError("Telegram initData hash is invalid")
+        raise TelegramInitDataError(
+            "Telegram initData hash is invalid",
+            error_code="invalid_signature",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+        )
 
     auth_date_raw = parsed.get("auth_date")
     if auth_date_raw is None:
-        raise TelegramInitDataError("Telegram initData auth_date is missing")
+        raise TelegramInitDataError(
+            "Telegram initData auth_date is missing",
+            error_code="missing_auth_date",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+        )
 
     try:
         auth_date = datetime.fromtimestamp(int(auth_date_raw), tz=UTC)
     except ValueError as exc:
-        raise TelegramInitDataError("Telegram initData auth_date is invalid") from exc
+        raise TelegramInitDataError(
+            "Telegram initData auth_date is invalid",
+            error_code="invalid_auth_date",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+        ) from exc
 
     current_time = now or datetime.now(UTC)
+    auth_date_age_seconds = int((current_time - auth_date).total_seconds())
     if (auth_date - current_time).total_seconds() > MAX_AUTH_DATE_FUTURE_SECONDS:
-        raise TelegramInitDataError("Telegram initData auth_date is in the future")
-    if max_age_seconds is not None and (current_time - auth_date).total_seconds() > max_age_seconds:
-        raise TelegramInitDataError("Telegram initData is expired")
+        raise TelegramInitDataError(
+            "Telegram initData auth_date is in the future",
+            error_code="future_auth_date",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+            auth_date_age_seconds=auth_date_age_seconds,
+        )
+    if (
+        max_age_seconds is not None
+        and (current_time - auth_date).total_seconds() > max_age_seconds
+    ):
+        raise TelegramInitDataError(
+            "Telegram initData is expired",
+            error_code="expired_auth_date",
+            has_init_data=True,
+            has_user_payload=has_user_payload,
+            auth_date_age_seconds=auth_date_age_seconds,
+        )
 
     payload: dict[str, Any] = dict(parsed)
     payload["auth_date"] = auth_date
@@ -56,6 +113,12 @@ def validate_telegram_init_data(
         try:
             payload["user"] = json.loads(str(payload["user"]))
         except json.JSONDecodeError as exc:
-            raise TelegramInitDataError("Telegram initData user payload is invalid") from exc
+            raise TelegramInitDataError(
+                "Telegram initData user payload is invalid",
+                error_code="malformed_user_payload",
+                has_init_data=True,
+                has_user_payload=True,
+                auth_date_age_seconds=auth_date_age_seconds,
+            ) from exc
 
     return payload

@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import status
@@ -23,9 +24,24 @@ class AuthService:
         self.users_repository = UsersRepository(session)
         self.customer_notifications_repository = CustomerNotificationsRepository(session)
 
-    async def login_with_telegram(self, init_data: str) -> TokenResponse:
+    async def login_with_telegram(
+        self,
+        init_data: str,
+        *,
+        request_id: str | None = None,
+    ) -> TokenResponse:
         bot_token = settings.telegram_webapp_bot_token or settings.telegram_bot_token
         if not bot_token:
+            logger.error(
+                "telegram auth login rejected",
+                extra={
+                    "error_code": "bot_token_missing",
+                    "has_init_data": bool(init_data),
+                    "has_user_payload": None,
+                    "auth_date_age_seconds": None,
+                    "request_id": request_id,
+                },
+            )
             raise AppError(
                 "Telegram authentication is not configured",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -38,6 +54,7 @@ class AuthService:
                 max_age_seconds=settings.telegram_auth_max_age_seconds,
             )
         except TelegramInitDataError as exc:
+            _log_telegram_auth_failure(exc, request_id=request_id)
             raise AppError(
                 "Invalid Telegram authentication data",
                 status.HTTP_401_UNAUTHORIZED,
@@ -45,7 +62,22 @@ class AuthService:
 
         user_payload = telegram_payload.get("user")
         if not isinstance(user_payload, dict):
-            raise AppError("Telegram user payload is missing", status.HTTP_401_UNAUTHORIZED)
+            logger.warning(
+                "telegram auth login rejected",
+                extra={
+                    "error_code": "missing_user_payload",
+                    "has_init_data": True,
+                    "has_user_payload": False,
+                    "auth_date_age_seconds": _auth_date_age_seconds(
+                        telegram_payload.get("auth_date")
+                    ),
+                    "request_id": request_id,
+                },
+            )
+            raise AppError(
+                "Telegram user payload is missing",
+                status.HTTP_401_UNAUTHORIZED,
+            )
 
         user = await self._upsert_user_from_telegram(user_payload)
         await self._link_customer_subscription(user)
@@ -109,3 +141,26 @@ class AuthService:
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _log_telegram_auth_failure(
+    exc: TelegramInitDataError,
+    *,
+    request_id: str | None,
+) -> None:
+    logger.warning(
+        "telegram auth login rejected",
+        extra={
+            "error_code": exc.error_code,
+            "has_init_data": exc.has_init_data,
+            "has_user_payload": exc.has_user_payload,
+            "auth_date_age_seconds": exc.auth_date_age_seconds,
+            "request_id": request_id,
+        },
+    )
+
+
+def _auth_date_age_seconds(value: object) -> int | None:
+    if not isinstance(value, datetime):
+        return None
+    return int((datetime.now(UTC) - value).total_seconds())

@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getCart } from '../shared/api';
+import { getCart, loginWithTelegram } from '../shared/api';
 import { CartPage } from './CartPage';
 
 const getProductMock = vi.hoisted(() => vi.fn());
@@ -79,6 +79,7 @@ vi.mock('../shared/api', () => ({
   }),
   getOrders: vi.fn().mockResolvedValue({ items: [] }),
   getProduct: getProductMock,
+  loginWithTelegram: vi.fn(),
   removeCartItem: vi.fn(),
   removeFavorite: vi.fn(),
   toApiErrorMessage: (error: unknown) => String(error),
@@ -92,6 +93,9 @@ describe('CartPage compact favorites', () => {
   afterEach(() => {
     cleanup();
     routerMocks.searchParams = new URLSearchParams('tab=favorites');
+    routerMocks.navigate.mockClear();
+    vi.mocked(getCart).mockClear();
+    vi.mocked(loginWithTelegram).mockClear();
     getProductMock.mockClear();
   });
 
@@ -115,6 +119,16 @@ describe('CartPage compact favorites', () => {
     await waitFor(() => expect(screen.getByText('Compact Hoodie')).toBeTruthy());
 
     expect(getProductMock).not.toHaveBeenCalled();
+  });
+
+  it('loads authenticated cart data without requesting fresh Telegram initData', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+
+    render(<CartPage />);
+
+    await waitFor(() => expect(getCart).toHaveBeenCalled());
+    expect(loginWithTelegram).not.toHaveBeenCalled();
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
   });
 });
 

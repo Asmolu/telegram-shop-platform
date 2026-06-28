@@ -8,6 +8,7 @@ import {
   normalizeEndpointScope,
   trackTelemetry,
 } from '../telemetry';
+import { requestAuthSessionRefresh } from '../auth/sessionRefresh';
 import { getStoredAccessToken } from '../auth/tokenStorage';
 import { buildApiUrl, getApiOriginFromBase, normalizeApiBaseUrl } from '../utils/urls';
 export { clearStoredAccessToken, getStoredAccessToken, storeAccessToken } from '../auth/tokenStorage';
@@ -78,6 +79,7 @@ export type ApiRequestOptions = RequestInit & {
   query?: Record<string, QueryValue>;
   timeoutMs?: number;
   retry?: boolean;
+  authRetry?: boolean;
   dedupe?: boolean;
   idempotencyKey?: string;
   networkImpact?: 'global' | 'local';
@@ -138,6 +140,7 @@ export async function apiRequest<T>(
     body,
     timeoutMs,
     retry = true,
+    authRetry = true,
     dedupe = true,
     idempotencyKey,
     networkImpact = 'global',
@@ -159,6 +162,7 @@ export async function apiRequest<T>(
   const request = requestWithRetry<T>({
     body,
     canRetry,
+    authRetry,
     headers,
     idempotencyKey,
     method,
@@ -182,6 +186,7 @@ export async function apiRequest<T>(
 async function requestWithRetry<T>({
   body,
   canRetry,
+  authRetry,
   headers,
   idempotencyKey,
   method,
@@ -192,6 +197,7 @@ async function requestWithRetry<T>({
 }: {
   body?: BodyInit | null;
   canRetry: boolean;
+  authRetry: boolean;
   headers?: HeadersInit;
   idempotencyKey?: string;
   method: string;
@@ -207,6 +213,7 @@ async function requestWithRetry<T>({
     try {
       return await executeRequest<T>({
         body,
+        authRetry,
         headers,
         idempotencyKey,
         method,
@@ -251,6 +258,7 @@ async function requestWithRetry<T>({
 
 async function executeRequest<T>({
   body,
+  authRetry,
   headers,
   idempotencyKey,
   method,
@@ -261,6 +269,7 @@ async function executeRequest<T>({
   retryCount,
 }: {
   body?: BodyInit | null;
+  authRetry: boolean;
   headers?: HeadersInit;
   idempotencyKey?: string;
   method: string;
@@ -270,32 +279,34 @@ async function executeRequest<T>({
   url: string;
   retryCount: number;
 }) {
-  const token = getStoredAccessToken();
-  const requestHeaders = new Headers(headers);
   const requestTimeoutMs = timeoutMs ?? getDefaultTimeoutMs(method, body);
   const abort = createTimeoutSignal(rest.signal, requestTimeoutMs);
   const startedAt = Date.now();
 
-  if (body !== undefined && !(body instanceof FormData) && !requestHeaders.has('Content-Type')) {
-    requestHeaders.set('Content-Type', 'application/json');
-  }
-
-  if (token && !requestHeaders.has('Authorization')) {
-    requestHeaders.set('Authorization', `Bearer ${token}`);
-  }
-
-  if (idempotencyKey && !requestHeaders.has('Idempotency-Key')) {
-    requestHeaders.set('Idempotency-Key', idempotencyKey);
-  }
-
   try {
-    const response = await fetch(url, {
+    let authRetryAttempted = false;
+    let response = await fetch(url, {
       ...rest,
       method,
       body,
-      headers: requestHeaders,
+      headers: createRequestHeaders({ body, headers, idempotencyKey }),
       signal: abort.signal,
     });
+
+    if (shouldAttemptAuthSessionRefresh(response.status, url, authRetry)) {
+      const refreshed = await requestAuthSessionRefresh();
+      if (refreshed) {
+        authRetryAttempted = true;
+        response = await fetch(url, {
+          ...rest,
+          method,
+          body,
+          headers: createRequestHeaders({ body, headers, idempotencyKey }),
+          signal: abort.signal,
+        });
+      }
+    }
+
     const durationMs = Date.now() - startedAt;
     const requestId = response.headers.get('x-request-id') ?? undefined;
     const responseSizeBucket = byteBucket(response.headers.get('content-length'));
@@ -309,7 +320,7 @@ async function executeRequest<T>({
         endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
         status: response.status,
         duration_ms: durationMs,
-        retry_count: retryCount,
+        retry_count: retryCount + (authRetryAttempted ? 1 : 0),
         request_id: requestId,
         response_size_bucket: responseSizeBucket,
         success: true,
@@ -333,7 +344,7 @@ async function executeRequest<T>({
         endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
         status: response.status,
         duration_ms: durationMs,
-        retry_count: retryCount,
+        retry_count: retryCount + (authRetryAttempted ? 1 : 0),
         request_id: requestId,
         response_size_bucket: responseSizeBucket,
         error_category: apiError.kind,
@@ -351,7 +362,7 @@ async function executeRequest<T>({
       endpoint_scope: normalizeEndpointScope(new URL(url).pathname),
       status: response.status,
       duration_ms: durationMs,
-      retry_count: retryCount,
+      retry_count: retryCount + (authRetryAttempted ? 1 : 0),
       request_id: requestId,
       response_size_bucket: responseSizeBucket,
       success: true,
@@ -379,6 +390,42 @@ async function executeRequest<T>({
   } finally {
     abort.cleanup();
   }
+}
+
+function createRequestHeaders({
+  body,
+  headers,
+  idempotencyKey,
+}: {
+  body?: BodyInit | null;
+  headers?: HeadersInit;
+  idempotencyKey?: string;
+}) {
+  const token = getStoredAccessToken();
+  const requestHeaders = new Headers(headers);
+
+  if (body !== undefined && !(body instanceof FormData) && !requestHeaders.has('Content-Type')) {
+    requestHeaders.set('Content-Type', 'application/json');
+  }
+
+  if (token && !requestHeaders.has('Authorization')) {
+    requestHeaders.set('Authorization', `Bearer ${token}`);
+  }
+
+  if (idempotencyKey && !requestHeaders.has('Idempotency-Key')) {
+    requestHeaders.set('Idempotency-Key', idempotencyKey);
+  }
+
+  return requestHeaders;
+}
+
+function shouldAttemptAuthSessionRefresh(status: number, url: string, authRetry: boolean) {
+  if (!authRetry || status !== 401) {
+    return false;
+  }
+
+  const pathname = new URL(url).pathname;
+  return !pathname.endsWith('/auth/telegram/login');
 }
 
 function createHttpError(response: Response, payload: unknown, requestId?: string) {
@@ -610,7 +657,7 @@ const TECHNICAL_MESSAGE_PATTERN =
   /\b(jwt|token|bearer|request|response|fetch|network|backend|api|unauthorized|forbidden|validation|internal|failed|error|dev)\b/i;
 
 const KIND_ERROR_MESSAGES: Record<ApiErrorKind, string> = {
-  authentication: 'Войдите через Telegram, чтобы продолжить.',
+  authentication: 'Не удалось подтвердить Telegram-сессию. Закройте и откройте приложение заново.',
   validation: 'Проверьте данные и попробуйте снова.',
   network_unavailable: 'Связь с сервером пропала. Проверьте интернет и попробуйте снова.',
   timeout: 'Сервер отвечает слишком долго. Попробуйте еще раз.',

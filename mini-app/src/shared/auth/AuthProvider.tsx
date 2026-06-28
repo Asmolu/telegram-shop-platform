@@ -9,9 +9,9 @@ import {
   type User,
 } from '../api';
 import { shouldClearStoredTokenAfterAuthError } from './sessionPolicy';
+import { registerAuthSessionRefreshHandler } from './sessionRefresh';
 import {
   applyTelegramTheme,
-  getTelegramInitData,
   getTelegramRuntimeDiagnostics,
   getTelegramThemeMode,
   getTelegramUser,
@@ -19,6 +19,7 @@ import {
   initTelegramApp,
   isTelegramWebView,
   subscribeTelegramThemeChanges,
+  waitForTelegramInitData,
   waitForTelegramWebApp,
   type TelegramUser,
 } from '../telegram/webApp';
@@ -26,6 +27,10 @@ import { getConnectionTelemetry, getViewportTelemetry, trackTelemetry } from '..
 import React from 'react';
 
 type AuthStatus = 'booting' | 'authenticated' | 'development' | 'error';
+
+type TelegramAuthOptions = {
+  silent?: boolean;
+};
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -40,6 +45,7 @@ type AuthContextValue = {
 };
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
+const TELEGRAM_SESSION_ERROR_MESSAGE = 'Не удалось подтвердить Telegram-сессию. Закройте и откройте приложение заново.';
 
 function logTelegramDiagnostics() {
   if (!import.meta.env.DEV) {
@@ -56,61 +62,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = React.useState<string | null>(null);
   const [isTelegram, setIsTelegram] = React.useState(false);
   const bootstrapCompletedRef = React.useRef(false);
+  const telegramAuthInFlightRef = React.useRef<Promise<boolean> | null>(null);
 
   const authenticateWithToken = React.useCallback(async (token: string) => {
     storeAccessToken(token);
-    const currentUser = await getCurrentUser();
+    const currentUser = await getCurrentUser({ authRetry: false });
     setUser(currentUser);
     setStatus('authenticated');
     setError(null);
   }, []);
 
-  const runTelegramAuth = React.useCallback(async () => {
-    const diagnostics = getTelegramRuntimeDiagnostics();
-    setIsTelegram(diagnostics.hasWebApp);
-    setTelegramUser(getTelegramUser());
-    logTelegramDiagnostics();
-
-    const initData = getTelegramInitData();
-
-    if (!initData) {
-      setStatus('development');
-      setError(null);
-      return;
+  const runTelegramAuth = React.useCallback((options: TelegramAuthOptions = {}) => {
+    if (telegramAuthInFlightRef.current) {
+      return telegramAuthInFlightRef.current;
     }
 
-    try {
-      trackTelemetry('auth.started', {
-        route: window.location.pathname,
-        ...getConnectionTelemetry(),
-      });
-      setStatus('booting');
-      const result = await loginWithTelegram(initData);
-      storeAccessToken(result.access_token);
-      setUser(result.user);
-      setStatus('authenticated');
-      setError(null);
-      trackTelemetry('auth.completed', {
-        route: window.location.pathname,
-        ...getConnectionTelemetry(),
-      });
-    } catch (authError) {
-      if (shouldClearStoredTokenAfterAuthError(authError)) {
-        clearStoredAccessToken();
+    const request = (async () => {
+      const diagnostics = getTelegramRuntimeDiagnostics();
+      setIsTelegram(diagnostics.hasWebApp);
+      setTelegramUser(getTelegramUser());
+      logTelegramDiagnostics();
+
+      if (!diagnostics.hasWebApp) {
+        setStatus('development');
+        setError(null);
+        return false;
       }
-      setUser(null);
-      setStatus('error');
-      setError(toApiErrorMessage(authError));
-      trackTelemetry('auth.failed', {
-        route: window.location.pathname,
-        error_category: getApiErrorTelemetryCategory(authError),
-        ...getConnectionTelemetry(),
-      }, { priority: 'critical' });
-      if (import.meta.env.DEV) {
-        console.warn(toApiErrorMessage(authError));
+
+      const initData = await waitForTelegramInitData();
+      const latestDiagnostics = getTelegramRuntimeDiagnostics();
+      setIsTelegram(latestDiagnostics.hasWebApp);
+      setTelegramUser(getTelegramUser());
+
+      if (!initData) {
+        setUser(null);
+        setStatus(latestDiagnostics.hasWebApp ? 'error' : 'development');
+        setError(latestDiagnostics.hasWebApp ? TELEGRAM_SESSION_ERROR_MESSAGE : null);
+        trackTelemetry('auth.failed', {
+          route: window.location.pathname,
+          error_category: 'unknown',
+          ...getConnectionTelemetry(),
+        }, { priority: 'critical' });
+        return false;
       }
-    }
+
+      try {
+        trackTelemetry('auth.started', {
+          route: window.location.pathname,
+          ...getConnectionTelemetry(),
+        });
+        if (!options.silent) {
+          setStatus('booting');
+        }
+        const result = await loginWithTelegram(initData);
+        storeAccessToken(result.access_token);
+        setUser(result.user);
+        setStatus('authenticated');
+        setError(null);
+        trackTelemetry('auth.completed', {
+          route: window.location.pathname,
+          ...getConnectionTelemetry(),
+        });
+        return true;
+      } catch (authError) {
+        if (shouldClearStoredTokenAfterAuthError(authError)) {
+          clearStoredAccessToken();
+        }
+        setUser(null);
+        setStatus('error');
+        setError(toApiErrorMessage(authError));
+        trackTelemetry('auth.failed', {
+          route: window.location.pathname,
+          error_category: getApiErrorTelemetryCategory(authError),
+          ...getConnectionTelemetry(),
+        }, { priority: 'critical' });
+        if (import.meta.env.DEV) {
+          console.warn(toApiErrorMessage(authError));
+        }
+        return false;
+      }
+    })().finally(() => {
+      telegramAuthInFlightRef.current = null;
+    });
+
+    telegramAuthInFlightRef.current = request;
+    return request;
   }, []);
+
+  React.useEffect(() => (
+    registerAuthSessionRefreshHandler(() => runTelegramAuth({ silent: true }))
+  ), [runTelegramAuth]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -139,7 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             route: window.location.pathname,
             ...getConnectionTelemetry(),
           });
-          const currentUser = await getCurrentUser();
+          const currentUser = await getCurrentUser({ authRetry: false });
           if (!cancelled) {
             setUser(currentUser);
             setStatus('authenticated');
@@ -219,7 +260,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isTelegram,
       loginWithToken: authenticateWithToken,
       clearToken,
-      retryTelegramAuth: runTelegramAuth,
+      retryTelegramAuth: async () => {
+        await runTelegramAuth();
+      },
     }),
     [
       authenticateWithToken,
