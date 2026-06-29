@@ -37,10 +37,10 @@ export function LaunchPage() {
 
   return (
     <div className="launch-screen">
-      <TopBar title="MENS STYLE" />
+      <TopBar title="ICON STORE" />
       <div className="launch-brand">
         <BrandMark className="logo-mark" />
-        <strong>MENS STYLE</strong>
+        <strong>ICON STORE</strong>
         <span>Загружаем магазин...</span>
       </div>
 

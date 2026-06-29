@@ -40,6 +40,10 @@ vi.mock('../shared/auth/AuthProvider', () => ({
 vi.mock('../shared/router/RouterProvider', () => ({
   getAuthPath: (path: string) => `/auth?returnTo=${encodeURIComponent(path)}`,
   getNumericRouteParam: (pathname: string, prefix: string) => Number(pathname.slice(prefix.length)),
+  isFirstLevelRoutePath: (path: string) => {
+    const url = new URL(path, window.location.origin);
+    return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
+  },
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
     <a href={to} {...props}>{children}</a>
   ),
@@ -90,7 +94,7 @@ describe('ProductDetailPage description', () => {
     const styles = readFileSync('src/styles.css', 'utf-8');
 
     expect(brand).not.toBeNull();
-    expect(brand?.textContent).toBe('MENS STYLE');
+    expect(brand?.textContent).toBe('ICON STORE');
     expect(brand?.classList.contains('product-detail-title')).toBe(true);
     expect(title.classList.contains('product-detail-title')).toBe(true);
     expect(brand!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -111,14 +115,14 @@ describe('ProductDetailPage description', () => {
   });
 
   it('does not duplicate the brand when the product title already starts with it', async () => {
-    apiMocks.getProduct.mockResolvedValue(productFixture({ name: 'MENS STYLE Line Break Hoodie' }));
+    apiMocks.getProduct.mockResolvedValue(productFixture({ name: 'ICON STORE Line Break Hoodie' }));
     apiMocks.getProductReviews.mockResolvedValue({ items: [] });
     apiMocks.getFavorites.mockResolvedValue({ items: [] });
     apiMocks.getCart.mockResolvedValue(cartFixture());
 
     const { container } = render(<ProductDetailPage />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'MENS STYLE Line Break Hoodie' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 1, name: 'ICON STORE Line Break Hoodie' })).toBeTruthy();
     expect(container.querySelector('.product-detail-brand')).toBeNull();
   });
 
@@ -159,7 +163,7 @@ function productFixture(overrides: Partial<Product> = {}): Product {
     id: 10,
     name: 'Line Break Hoodie',
     slug: 'line-break-hoodie',
-    brand: 'MENS STYLE',
+    brand: 'ICON STORE',
     description: null,
     base_price: '1000.00',
     old_price: null,

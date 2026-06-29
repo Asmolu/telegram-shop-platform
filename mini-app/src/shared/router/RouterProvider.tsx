@@ -47,6 +47,59 @@ function getCurrentPath() {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+function getParsedPath(path: string) {
+  return new URL(path, window.location.origin);
+}
+
+export function isFirstLevelRoutePath(path: string) {
+  const { pathname } = getParsedPath(path);
+  return pathname === '/'
+    || pathname === '/main'
+    || pathname === '/categories'
+    || pathname === '/search'
+    || pathname === '/cart'
+    || pathname === '/profile';
+}
+
+export function getLogicalBackPath(path: string, fallback = '/main') {
+  const url = getParsedPath(path);
+  const { pathname } = url;
+
+  if (isFirstLevelRoutePath(path)) {
+    return null;
+  }
+
+  if (pathname.startsWith('/category/')) {
+    return '/categories';
+  }
+  if (pathname === '/search/results') {
+    return url.searchParams.get('from') === 'categories' ? '/categories' : '/search';
+  }
+  if (pathname === '/checkout') {
+    return '/cart?tab=cart';
+  }
+  if (pathname.startsWith('/order-success/') || pathname.startsWith('/payment/')) {
+    return '/cart?tab=orders';
+  }
+  if (pathname === '/profile/personal-data') {
+    return '/profile';
+  }
+
+  const returnTo = getSafeReturnTo(url.searchParams.get('returnTo'), '');
+  if (returnTo && returnTo !== `${pathname}${url.search}`) {
+    return returnTo;
+  }
+
+  if (pathname.startsWith('/product/')) {
+    return fallback;
+  }
+  if (pathname === '/faq') {
+    return fallback;
+  }
+
+  return fallback;
+}
+
 function getHistoryIndex() {
   const index = window.history.state?.[HISTORY_INDEX_KEY];
   return typeof index === 'number' && Number.isFinite(index) ? index : 0;
@@ -139,21 +192,18 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const goBack = React.useCallback((fallback = '/main') => {
-    if (historyIndexRef.current > 0) {
-      window.history.back();
+    const target = getLogicalBackPath(getCurrentPath(), fallback);
+    if (!target || target === getCurrentPath()) {
       return;
     }
 
-    if (getCurrentPath() !== fallback) {
-      window.history.replaceState(
-        { ...(window.history.state ?? {}), [HISTORY_INDEX_KEY]: 0 },
-        '',
-        fallback,
-      );
-      historyIndexRef.current = 0;
-      setLocation(getCurrentPath());
-      window.scrollTo({ top: 0, behavior: getMotionAwareScrollBehavior() });
-    }
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), [HISTORY_INDEX_KEY]: historyIndexRef.current },
+      '',
+      target,
+    );
+    setLocation(getCurrentPath());
+    window.scrollTo({ top: 0, behavior: getMotionAwareScrollBehavior() });
   }, []);
 
   React.useEffect(() => {
@@ -215,7 +265,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
         event.touches.length !== 1
         || !touch
         || touch.clientX > SWIPE_EDGE_WIDTH
-        || (historyIndexRef.current <= 0 && (currentPath === '/' || currentPath === '/main'))
+        || isFirstLevelRoutePath(currentPath)
         || target?.closest(SWIPE_BACK_IGNORE_SELECTOR)
         || document.querySelector('[role="dialog"][aria-modal="true"]')
       ) {

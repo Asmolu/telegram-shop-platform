@@ -8,7 +8,7 @@ import {
   type CustomerNotificationSubscription,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
+import { getAuthPath, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { SUPPORT_TELEGRAM_URL, openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
 import { useTheme } from '../shared/theme/ThemeProvider';
 import { EmptyState, TopBar } from '../shared/ui';
@@ -200,7 +200,7 @@ export function ProfilePage() {
         <button type="button" onClick={() => navigate('/cart?tab=cart')}>
           Промокоды<span>›</span>
         </button>
-        <button type="button" onClick={() => navigate('/faq')}>
+        <button type="button" onClick={() => navigate(withReturnTo('/faq', currentPath))}>
           FAQ<span>›</span>
         </button>
         <button type="button" onClick={() => openTelegramLink(SUPPORT_TELEGRAM_URL)}>

@@ -46,7 +46,7 @@ function getLazyRouteId(pathname: string): LazyRouteId {
 
 function getFallbackTitle(routeId: LazyRouteId) {
   if (routeId === 'main' || routeId === 'launch') {
-    return 'MENS STYLE';
+    return 'ICON STORE';
   }
   if (routeId === 'categories' || routeId === 'category-detail') {
     return 'Категории';
@@ -76,7 +76,7 @@ function RouteFallback({ routeId }: { routeId: LazyRouteId }) {
   if (routeId === 'launch') {
     return (
       <div className="launch-screen route-fallback route-fallback--launch" role="status" aria-live="polite">
-        <TopBar title="MENS STYLE" variant="feed" hideBack />
+        <TopBar title="ICON STORE" variant="feed" hideBack />
         <div className="route-fallback__block">
           <span className="skeleton route-fallback__logo" />
           <span className="skeleton route-fallback__line route-fallback__line--wide" />

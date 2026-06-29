@@ -130,7 +130,7 @@ function productFixture(overrides: Partial<Product> = {}): Product {
     id: 1,
     name: 'Hoodie',
     slug: 'hoodie',
-    brand: 'MENS STYLE',
+    brand: 'ICON STORE',
     description: 'Warm',
     base_price: '100.00',
     old_price: null,

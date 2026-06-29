@@ -423,7 +423,7 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
                     "items": [
                         {
                             **_product_response(),
-                            "brand": "Gadji",
+                            "brand": "ICON STORE",
                             "image_badge_color": "green",
                             "image_badge_position": "bottom-right",
                             "variants": [_variant_response()],
@@ -446,7 +446,7 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
 
     assert response.status_code == 200
     assert response.json()["items"][0]["is_available"] is True
-    assert response.json()["items"][0]["brand"] == "Gadji"
+    assert response.json()["items"][0]["brand"] == "ICON STORE"
     assert response.json()["items"][0]["size_grid"] == "clothing_alpha"
     assert response.json()["items"][0]["image_badge_color"] == "green"
     assert response.json()["items"][0]["image_badge_position"] == "bottom-right"

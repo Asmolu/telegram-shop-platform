@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Product } from '../api';
-import { Link } from '../router/RouterProvider';
+import { Link, useRouter, withReturnTo } from '../router/RouterProvider';
 import { trackTelemetry } from '../telemetry';
 import { runLockedAction } from '../utils/actionLock';
 import {
@@ -86,6 +86,7 @@ function ProductCardComponent({
   imageLoading?: 'eager' | 'lazy';
   imageFetchPriority?: 'high' | 'low' | 'auto';
 }) {
+  const { currentPath } = useRouter();
   const [busyAction, setBusyAction] = React.useState<'favorite' | 'cart' | null>(null);
   const actionLock = React.useRef({ current: false });
   const badge = getProductBadge(product);
@@ -105,6 +106,7 @@ function ProductCardComponent({
   const hasConfiguredBadge = product.image_badge_type !== 'none' && Boolean(badge);
   const brand = product.brand?.trim() || 'Без бренда';
   const reviewLine = getReviewLine(product);
+  const productPath = withReturnTo(`/product/${product.id}`, currentPath);
 
   React.useEffect(() => {
     if (firstProductCardReported) {
@@ -134,7 +136,7 @@ function ProductCardComponent({
   return (
     <article className="product-card">
       <div className="product-card__media-shell">
-        <Link className="product-card__media" to={`/product/${product.id}`}>
+        <Link className="product-card__media" to={productPath}>
           <ProductImageCarousel
             product={product}
             variant="card"
@@ -188,7 +190,7 @@ function ProductCardComponent({
         ) : null}
       </div>
       <div className={`product-card__body ${onAddToCart ? '' : 'product-card__body--no-action'}`}>
-        <Link className="product-card__info" to={`/product/${product.id}`}>
+        <Link className="product-card__info" to={productPath}>
           <span className="product-card__brand">{brand}</span>
           <span className="product-card__title">{product.name}</span>
           <span className="product-card__review-line">{reviewLine}</span>

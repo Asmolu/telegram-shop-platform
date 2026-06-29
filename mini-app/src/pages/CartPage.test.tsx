@@ -17,6 +17,10 @@ vi.mock('../shared/auth/AuthProvider', () => ({
 vi.mock('../shared/router/RouterProvider', () => ({
   getAuthPath: (path: string) => `/auth?returnTo=${encodeURIComponent(path)}`,
   getSafeReturnTo: () => '/main',
+  isFirstLevelRoutePath: (path: string) => {
+    const url = new URL(path, window.location.origin);
+    return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
+  },
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
     <a href={to} {...props}>{children}</a>
   ),
@@ -61,7 +65,7 @@ vi.mock('../shared/api', () => ({
         id: 10,
         name: 'Compact Hoodie',
         slug: 'compact-hoodie',
-        brand: 'MENS STYLE',
+        brand: 'ICON STORE',
         base_price: '100.00',
         old_price: null,
         size_grid: 'clothing_alpha',
@@ -171,7 +175,7 @@ function cartWithSelectedItemFixture() {
         id: 20,
         name: 'Compact Hoodie',
         slug: 'compact-hoodie',
-        brand: 'MENS STYLE',
+        brand: 'ICON STORE',
         base_price: '100.00',
         old_price: null,
         compare_at_price: null,

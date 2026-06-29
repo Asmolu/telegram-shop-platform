@@ -38,6 +38,14 @@ type TelegramWebAppEvent =
   | 'safeAreaChanged'
   | 'contentSafeAreaChanged';
 
+type TelegramBackButton = {
+  isVisible?: boolean;
+  show?: () => void;
+  hide?: () => void;
+  onClick?: (callback: () => void) => void;
+  offClick?: (callback: () => void) => void;
+};
+
 export const SUPPORT_TELEGRAM_URL = 'https://t.me/stylexas';
 
 export type TelegramWebApp = {
@@ -64,6 +72,7 @@ export type TelegramWebApp = {
   requestWriteAccess?: (
     callback?: (result: TelegramWriteAccessCallbackValue) => void,
   ) => void | Promise<TelegramWriteAccessCallbackValue>;
+  BackButton?: TelegramBackButton;
   close?: () => void;
   openTelegramLink?: (url: string) => void;
 };
@@ -454,4 +463,33 @@ export function openTelegramLink(url: string) {
   }
 
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+export function syncTelegramBackButton(visible: boolean, onClick: () => void) {
+  const backButton = getTelegramWebApp()?.BackButton;
+
+  if (!backButton) {
+    return () => undefined;
+  }
+
+  try {
+    if (!visible) {
+      backButton.hide?.();
+      return () => undefined;
+    }
+
+    backButton.show?.();
+    backButton.onClick?.(onClick);
+  } catch {
+    return () => undefined;
+  }
+
+  return () => {
+    try {
+      backButton.offClick?.(onClick);
+      backButton.hide?.();
+    } catch {
+      // Telegram BackButton cleanup should never block route transitions.
+    }
+  };
 }

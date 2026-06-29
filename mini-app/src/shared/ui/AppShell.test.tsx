@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppShell } from './AppShell';
+import { AppShell, TopBar } from './AppShell';
 
 const routerMocks = vi.hoisted(() => ({
   currentPath: '/main',
@@ -33,6 +33,10 @@ vi.mock('../network/NetworkProvider', () => ({
 }));
 
 vi.mock('../router/RouterProvider', () => ({
+  isFirstLevelRoutePath: (path: string) => {
+    const url = new URL(path, window.location.origin);
+    return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
+  },
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
     <a href={to} {...props}>{children}</a>
   ),
@@ -42,7 +46,39 @@ vi.mock('../router/RouterProvider', () => ({
     navigate: routerMocks.navigate,
     pathname: routerMocks.pathname,
   }),
+  withReturnTo: (to: string, returnTo: string) => `${to}${to.includes('?') ? '&' : '?'}returnTo=${encodeURIComponent(returnTo)}`,
 }));
+
+type TestBackButton = {
+  show: ReturnType<typeof vi.fn>;
+  hide: ReturnType<typeof vi.fn>;
+  onClick: ReturnType<typeof vi.fn>;
+  offClick: ReturnType<typeof vi.fn>;
+};
+
+function setRoute(path: string) {
+  const url = new URL(path, window.location.origin);
+  routerMocks.currentPath = `${url.pathname}${url.search}`;
+  routerMocks.pathname = url.pathname;
+}
+
+function installTelegramBackButton(): TestBackButton {
+  const backButton = {
+    show: vi.fn(),
+    hide: vi.fn(),
+    onClick: vi.fn(),
+    offClick: vi.fn(),
+  };
+
+  window.Telegram = {
+    WebApp: {
+      initData: '',
+      BackButton: backButton,
+    },
+  };
+
+  return backButton;
+}
 
 class TestPointerEvent extends MouseEvent {
   pointerId: number;
@@ -76,6 +112,7 @@ describe('AppShell floating order help', () => {
 
   afterEach(() => {
     cleanup();
+    delete window.Telegram;
     vi.clearAllMocks();
     window.localStorage.clear();
   });
@@ -125,5 +162,67 @@ describe('AppShell floating order help', () => {
     fireEvent.click(tab!);
 
     expect(screen.getByRole('button', { name: /Как совершить заказ/i })).toBeTruthy();
+  });
+});
+
+describe('TopBar back behavior', () => {
+  beforeEach(() => {
+    setRoute('/main');
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete window.Telegram;
+    vi.clearAllMocks();
+  });
+
+  it.each(['/main', '/categories', '/search', '/cart?tab=cart', '/profile'])(
+    'hides the custom back button on first-level route %s',
+    (path) => {
+      setRoute(path);
+
+      const { container } = render(<TopBar title="ICON STORE" />);
+
+      expect(container.querySelector('.top-bar__back-button')).toBeNull();
+    },
+  );
+
+  it('renders the custom back button on nested routes and delegates to the logical router back', () => {
+    setRoute('/product/10?returnTo=%2Fsearch%2Fresults%3Fq%3Dhoodie');
+
+    const { container } = render(<TopBar title="Product" backFallback="/main" />);
+    const backButton = container.querySelector<HTMLButtonElement>('.top-bar__back-button');
+
+    expect(backButton).not.toBeNull();
+    fireEvent.click(backButton!);
+    expect(routerMocks.goBack).toHaveBeenCalledWith('/main');
+  });
+
+  it('syncs Telegram BackButton visibility and click handling with route depth', () => {
+    setRoute('/checkout');
+    const backButton = installTelegramBackButton();
+
+    const { unmount } = render(<TopBar title="Checkout" backFallback="/cart?tab=cart" />);
+
+    expect(backButton.show).toHaveBeenCalledTimes(1);
+    expect(backButton.onClick).toHaveBeenCalledWith(expect.any(Function));
+
+    const nativeClick = backButton.onClick.mock.calls[0][0] as () => void;
+    nativeClick();
+
+    expect(routerMocks.goBack).toHaveBeenCalledWith('/cart?tab=cart');
+    unmount();
+    expect(backButton.offClick).toHaveBeenCalledWith(nativeClick);
+    expect(backButton.hide).toHaveBeenCalled();
+  });
+
+  it('hides Telegram BackButton on first-level routes', () => {
+    setRoute('/categories');
+    const backButton = installTelegramBackButton();
+
+    render(<TopBar title="Categories" />);
+
+    expect(backButton.hide).toHaveBeenCalledTimes(1);
+    expect(backButton.show).not.toHaveBeenCalled();
   });
 });

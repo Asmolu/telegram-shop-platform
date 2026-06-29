@@ -3,7 +3,8 @@ import { getBanners, getCart, trackBannerClick, type Banner } from '../api';
 import { useAuth } from '../auth/AuthProvider';
 import { NetworkBanner } from '../network/NetworkBanner';
 import { useNetworkState } from '../network/NetworkProvider';
-import { Link, useRouter } from '../router/RouterProvider';
+import { isFirstLevelRoutePath, Link, useRouter, withReturnTo } from '../router/RouterProvider';
+import { syncTelegramBackButton } from '../telegram/webApp';
 import { getUserDisplayName } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { getMotionAwareScrollBehavior } from '../utils/motion';
@@ -234,11 +235,22 @@ export function TopBar({
   children?: React.ReactNode;
   variant?: 'marketplace' | 'feed';
 }) {
-  const { pathname, goBack } = useRouter();
-  const showBack = !hideBack && pathname !== '/' && pathname !== '/main';
-  const handleBack = onBack ?? (() => goBack(backFallback));
+  const { currentPath, goBack } = useRouter();
+  const showBack = !hideBack && !isFirstLevelRoutePath(currentPath);
+  const handleBack = React.useCallback(() => {
+    if (onBack) {
+      onBack();
+      return;
+    }
+    goBack(backFallback);
+  }, [backFallback, goBack, onBack]);
   const isFeed = variant === 'feed';
   const className = `top-bar top-bar--marketplace${isFeed ? ' top-bar--feed' : ''}`;
+
+  React.useEffect(
+    () => syncTelegramBackButton(showBack, handleBack),
+    [handleBack, showBack],
+  );
 
   return (
     <header className={className}>
@@ -289,6 +301,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [showAggressivePopup, setShowAggressivePopup] = React.useState(false);
   const [showPopup, setShowPopup] = React.useState(false);
   const previousNetworkState = React.useRef(networkState);
+  const addReturnToForSourceAwareRoute = React.useCallback(
+    (to: string) => to.startsWith('/product/') || to.startsWith('/faq')
+      ? withReturnTo(to, currentPath)
+      : to,
+    [currentPath],
+  );
 
   React.useEffect(() => {
     const previous = previousNetworkState.current;
@@ -454,7 +472,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="mini-app-frame">
       <NetworkBanner state={networkState} onRetry={retryNetwork} />
       <main className="app-content">{children}</main>
-      <FloatingOrderHelp currentPath={currentPath} onOpen={() => navigate('/faq?topic=order')} />
+      <FloatingOrderHelp currentPath={currentPath} onOpen={() => navigate(withReturnTo('/faq?topic=order', currentPath))} />
       {showAggressivePopup && aggressiveBanners.length > 0 ? (
         <BannerPopup
           banners={aggressiveBanners}
@@ -462,7 +480,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClose={closeAggressivePopup}
           onNavigate={(to) => {
             closeAggressivePopup();
-            navigate(to);
+            navigate(addReturnToForSourceAwareRoute(to));
           }}
         />
       ) : null}
@@ -473,7 +491,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClose={closePopup}
           onNavigate={(to) => {
             closePopup();
-            navigate(to);
+            navigate(addReturnToForSourceAwareRoute(to));
           }}
         />
       ) : null}

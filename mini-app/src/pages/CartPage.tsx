@@ -572,7 +572,7 @@ function CartItemsTab({
         {items.map((item) => {
           const imageUrl = normalizeAssetUrl(item.product.thumbnail_image_url ?? item.product.image_url);
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
-          const brand = item.product.brand?.trim() || 'MENS STYLE';
+          const brand = item.product.brand?.trim() || 'ICON STORE';
           const sizeLabel = displaySize(item.product.size_grid, item.product_variant.size, true);
           const variantInfo = [
             sizeLabel,
@@ -672,7 +672,7 @@ function CartItemsTab({
 }
 
 function OrdersTab({ orders }: { orders: Order[] }) {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
 
   if (orders.length === 0) {
     return <EmptyState title="Заказов пока нет" message="Оформленные покупки появятся здесь." />;
@@ -715,6 +715,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
             <div className="order-item-list">
               {order.items.map((item) => {
                 const thumbnailUrl = normalizeAssetUrl(item.product_thumbnail_url || item.product_thumbnail_path);
+                const productPath = withReturnTo(`/product/${item.product_id}`, currentPath);
                 const variant = [
                   displaySize(item.variant_size_grid, item.variant_size, true),
                   item.variant_color,
@@ -723,7 +724,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
 
                 return (
                   <div className="order-item-row" key={item.id}>
-                    <Link className="order-item-row__image" to={`/product/${item.product_id}`}>
+                    <Link className="order-item-row__image" to={productPath}>
                       {thumbnailUrl ? (
                         <img
                           src={thumbnailUrl}
@@ -736,7 +737,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                       ) : <span>{item.product_name.slice(0, 1)}</span>}
                     </Link>
                     <div>
-                      <Link to={`/product/${item.product_id}`}>{item.product_title ?? item.product_name}</Link>
+                      <Link to={productPath}>{item.product_title ?? item.product_name}</Link>
                       <small>{variant}</small>
                       <small>{item.quantity} × {formatPrice(item.unit_price)}</small>
                     </div>

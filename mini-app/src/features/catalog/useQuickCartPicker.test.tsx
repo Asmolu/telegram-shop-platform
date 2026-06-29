@@ -104,7 +104,7 @@ function productFixture(overrides: Partial<Product> = {}): Product {
     id: 10,
     name: 'Quick Cart Hoodie',
     slug: 'quick-cart-hoodie',
-    brand: 'MENS STYLE',
+    brand: 'ICON STORE',
     description: null,
     base_price: '1000.00',
     old_price: null,

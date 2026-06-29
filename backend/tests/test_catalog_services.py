@@ -396,7 +396,7 @@ async def test_product_service_creates_updates_and_reads_brand() -> None:
         ProductCreate(
             name="Hoodie",
             slug="hoodie-brand",
-            brand="  Gadji  ",
+            brand="  ICON STORE  ",
             base_price=Decimal("59.90"),
         )
     )
@@ -404,7 +404,7 @@ async def test_product_service_creates_updates_and_reads_brand() -> None:
     updated = await service.update_product(1, ProductUpdate(brand="  Atelier  "))
     read_model = ProductRead.model_validate(updated)
 
-    assert created_brand == "Gadji"
+    assert created_brand == "ICON STORE"
     assert updated.brand == "Atelier"
     assert read_model.brand == "Atelier"
 
@@ -530,13 +530,13 @@ async def test_product_search_suggestions_sanitize_limit_and_skip_analytics() ->
     service.repository.list_search_suggestions = AsyncMock(
         return_value=[
             SearchSuggestionCandidate(value="Hoodie", kind="product", score=0),
-            SearchSuggestionCandidate(value="Gadji", kind="brand", score=20),
+            SearchSuggestionCandidate(value="ICON STORE", kind="brand", score=20),
         ]
     )
 
     result = await service.list_search_suggestions(query=" \n Hoodie \t ", limit=99)
 
-    assert [item.value for item in result.items] == ["Hoodie", "Gadji"]
+    assert [item.value for item in result.items] == ["Hoodie", "ICON STORE"]
     assert [item.kind for item in result.items] == ["product", "brand"]
     service.repository.list_search_suggestions.assert_awaited_once_with(
         query="Hoodie",
@@ -882,12 +882,12 @@ def test_product_brand_is_optional_and_normalized() -> None:
     product = ProductCreate(
         name="Hoodie",
         slug="hoodie",
-        brand="  Gadji  ",
+        brand="  ICON STORE  ",
         base_price=Decimal("59.90"),
     )
     update = ProductUpdate(brand="  ")
 
-    assert product.brand == "Gadji"
+    assert product.brand == "ICON STORE"
     assert update.brand is None
 
 
@@ -1085,7 +1085,7 @@ async def test_product_create_accepts_full_seller_panel_payload() -> None:
         ProductCreate(
             name="Seller Panel Coat",
             slug="seller-panel-coat",
-            brand="Gadji",
+            brand="ICON STORE",
             description="Warm dashboard-created item",
             base_price=Decimal("129.90"),
             old_price=Decimal("159.90"),

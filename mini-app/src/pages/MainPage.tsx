@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
 import { scheduleRoutePrefetch } from '../shared/router/routePrefetch';
-import { useRouter } from '../shared/router/RouterProvider';
+import { useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
@@ -92,7 +92,7 @@ export function MainPage() {
   return (
     <div className="page page--feed">
       <TopBar
-        title="MENS STYLE"
+        title="ICON STORE"
         variant="feed"
       >
         <form onSubmit={submitFeedSearch}>
@@ -163,7 +163,7 @@ function MainBanner({
   loading?: 'eager' | 'lazy';
   onNotice: (message: string) => void;
 }) {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
   const action = getBannerAction(banner);
   const ctaLabel = getBannerCtaLabel(action);
@@ -173,7 +173,7 @@ function MainBanner({
       className="native-banner"
       type="button"
       aria-disabled={!action}
-      onClick={() => void activateBanner(banner, navigate, onNotice)}
+      onClick={() => void activateBanner(banner, navigate, onNotice, currentPath)}
     >
       {imageUrl ? (
         <span className="native-banner__image" aria-hidden="true">
@@ -196,7 +196,7 @@ function VerticalBannerGrid({ banners, onNotice }: { banners: Banner[]; onNotice
 }
 
 function VerticalBannerCard({ banner, onNotice }: { banner: Banner; onNotice: (message: string) => void }) {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const imageUrl = normalizeAssetUrl(banner.image_url || banner.image_path);
   const action = getBannerAction(banner);
   const ctaLabel = getBannerCtaLabel(action);
@@ -206,7 +206,7 @@ function VerticalBannerCard({ banner, onNotice }: { banner: Banner; onNotice: (m
       className="vertical-banner-card"
       type="button"
       aria-disabled={!action}
-      onClick={() => void activateBanner(banner, navigate, onNotice)}
+      onClick={() => void activateBanner(banner, navigate, onNotice, currentPath)}
     >
       <span className="vertical-banner-card__media" aria-hidden="true">
         {imageUrl ? (
@@ -299,6 +299,7 @@ async function activateBanner(
   banner: Banner,
   navigate: (to: string) => void,
   onNotice: (message: string) => void,
+  currentPath: string,
 ) {
   const action = getBannerAction(banner);
   if (!action) {
@@ -317,7 +318,7 @@ async function activateBanner(
   }
 
   if (action.kind === 'internal') {
-    navigate(action.value);
+    navigate(action.value.startsWith('/product/') ? withReturnTo(action.value, currentPath) : action.value);
     return;
   }
 

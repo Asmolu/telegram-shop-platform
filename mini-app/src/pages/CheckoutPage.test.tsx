@@ -26,6 +26,10 @@ vi.mock('../shared/auth/AuthProvider', () => ({
 vi.mock('../shared/router/RouterProvider', () => ({
   getAuthPath: (path: string) => `/auth?returnTo=${encodeURIComponent(path)}`,
   getSafeReturnTo: () => '/main',
+  isFirstLevelRoutePath: (path: string) => {
+    const url = new URL(path, window.location.origin);
+    return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
+  },
   useRouter: () => ({
     currentPath: '/checkout',
     navigate: routerMocks.navigate,
@@ -42,6 +46,7 @@ vi.mock('../shared/telemetry', () => ({
 vi.mock('../shared/telegram/webApp', () => ({
   openTelegramLink: vi.fn(),
   requestTelegramWriteAccess: vi.fn(),
+  syncTelegramBackButton: vi.fn(() => () => undefined),
 }));
 
 vi.mock('../shared/api', () => ({
@@ -177,7 +182,7 @@ function cartFixture() {
           id: 20,
           name: 'Compact Hoodie',
           slug: 'compact-hoodie',
-          brand: 'MENS STYLE',
+          brand: 'ICON STORE',
           base_price: '100.00',
           old_price: null,
           compare_at_price: null,

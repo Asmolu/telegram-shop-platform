@@ -96,7 +96,7 @@ function productFixture(): Product {
     id: 10,
     name: 'Favorite Hoodie',
     slug: 'favorite-hoodie',
-    brand: 'MENS STYLE',
+    brand: 'ICON STORE',
     description: null,
     base_price: '1000.00',
     old_price: null,

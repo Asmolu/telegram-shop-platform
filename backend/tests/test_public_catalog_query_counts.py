@@ -90,7 +90,7 @@ async def _seed_products(session: AsyncSession) -> None:
         Product(
             name=f"Prompt3A Product {index}",
             slug=f"prompt3a-{prefix}-{index}",
-            brand="MENS STYLE",
+            brand="ICON STORE",
             description="Hidden from card DTO",
             base_price=Decimal("1000.00") + Decimal(index),
             size_grid=ProductSizeGrid.CLOTHING_ALPHA,
