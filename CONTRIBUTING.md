@@ -1,44 +1,58 @@
 # Contributing
 
-## Development workflow
+This repository is the StyleXac Telegram commerce platform. Contributions must preserve the current FastAPI/React architecture and production safety rules.
 
-1. Create a feature branch from `main`.
-2. Make a focused change.
-3. Run relevant checks.
-4. Update documentation if behavior, commands, architecture, or environment variables changed.
-5. Open a pull request.
+## Before You Start
 
-## Branch naming
-
-Use short descriptive names:
-
-```text
-feature/product-catalog
-feature/order-checkout
-fix/auth-validation
-chore/github-ci
+```bash
+git status --short
+git fetch origin
+git pull --ff-only origin main
 ```
 
-## Commit messages
+Read the relevant docs:
 
-Use imperative style:
+- `README.md`
+- `AGENTS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/LOCAL_DEVELOPMENT.md`
+- `docs/TESTING.md`
+- `UI_DESIGN_SPEC.README.md` for Mini App or Seller Panel UI work
 
-```text
-Add product catalog models
-Implement checkout transaction
-Fix upload path validation
-```
+## Architecture Rules
 
-## Backend conventions
+- Backend runtime is Python/FastAPI.
+- Do not add NestJS, Prisma, or Node.js backend runtime.
+- Keep business logic out of routers.
+- Put business rules and transactions in services.
+- Put SQLAlchemy queries in repositories.
+- Add Alembic migrations for database schema changes.
+- PostgreSQL is the source of truth.
+- Redis is used for cache, rate limiting, and temporary state where implemented.
 
-- FastAPI routers must stay thin.
-- Services contain business logic.
-- Repositories contain database queries.
-- Pydantic schemas define API DTOs.
-- SQLAlchemy models + Alembic migrations define schema changes.
-- Do not add Prisma or NestJS.
+## Bot Rules
+
+Bot 1:
+
+- customer `/start`
+- customer `/stop`
+- service notifications
+- customer campaigns
+- channel entry publish/pin
+
+Bot 2:
+
+- seller/admin/auth-related flows
+
+Do not mix these responsibilities.
 
 ## Checks
+
+Always:
+
+```bash
+git diff --check
+```
 
 Backend:
 
@@ -49,12 +63,66 @@ ruff check .
 pytest
 ```
 
-Frontend:
+Mini App:
 
 ```bash
 cd mini-app
+npm test -- --run
 npm run build
+npm run verify:bundle
+```
 
-cd ../seller-panel
+Seller Panel:
+
+```bash
+cd seller-panel
+npm run lint
+npm run typecheck
+npm test -- --run
 npm run build
 ```
+
+## Documentation
+
+Update docs when changing:
+
+- architecture
+- commands
+- environment variables
+- domains
+- production deployment
+- backup/restore flow
+- customer notifications
+- channel entry
+- bot responsibilities
+- UI behavior
+- sprint scope
+
+## Security
+
+Never commit or document real:
+
+- `.env`
+- `backend/.env.production`
+- bot tokens
+- DB passwords
+- JWT secrets
+- Yandex Disk tokens
+- private keys
+- uploaded user files
+- database dumps
+- production credentials
+
+Use placeholders in examples: `<SECRET>`, `<BOT_TOKEN>`, `<DATABASE_URL>`, `<JWT_SECRET>`.
+
+## Pull Requests
+
+PR description should include:
+
+- summary of changes
+- affected areas
+- migrations, if any
+- docs updated, if applicable
+- checks run
+- checks not run and why
+- production risks, if any

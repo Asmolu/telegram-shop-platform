@@ -1,42 +1,168 @@
 # Security Review
 
-Sprint 14 production hardening reviewed authentication, authorization, uploads, secrets, CORS, rate limiting, and public data exposure.
+This document summarizes current security posture and areas that require continued attention.
 
-## Implemented
+## Current Production Context
 
-- Production settings reject the default `JWT_SECRET_KEY` when `APP_ENV` is `production`, `prod`, or `staging`.
-- Production settings reject wildcard `CORS_ORIGINS`.
-- `.gitignore` excludes `.env`, `.env.*`, secrets, logs, dumps, and uploaded user files while preserving `.env.example`.
-- Upload validation continues to enforce size, extension, MIME type, safe filenames, and path containment.
-- Seller/admin routes remain protected through role dependencies.
-- Analytics, audit logs, notifications, uploads, promo management, review moderation, order management, and product management keep protected endpoints.
-- Public endpoints expose only public catalog, taxonomy, active banners, and approved reviews.
-- Rate limiting now covers Telegram login, Seller Portal registration/login/verification,
-  uploads, checkout, promo validation, review creation, and a global API limit.
-- Seller Portal passwords, Bot 2 start tokens, and verification codes are stored hashed.
-- Seller Bot management routes are SELLER/ADMIN-only and record audit entries for test
-  messages and seller-chat broadcasts.
-- Structured request logging avoids Authorization headers and does not log `.env` values or tokens.
-- Redis cache failures are non-fatal for public catalog endpoints.
+| Area | Value |
+| --- | --- |
+| Production server | Aeza Frankfurt |
+| Main domain | `https://stylexac.ru` |
+| Mini App | `https://mini.stylexac.ru` |
+| API | `https://api.stylexac.ru` |
+| Seller Panel | `https://seller.stylexac.ru` |
+| Production env | `backend/.env.production` |
+| Current migration head | `20260628_0039` |
 
-## Known Limitations
+## Authentication
 
-- Error monitoring is configured through environment placeholders only; no Sentry SDK is installed for MVP.
-- Admin review listing still uses its pre-existing response shape without pagination metadata.
-- The production Compose profile is a single-node MVP deployment profile, not a high-availability architecture.
-- Redis-backed rate limiting falls back to in-memory limits if Redis is unavailable; this fallback is per-process.
-- Bot 2 webhook/polling is not yet hosted by the app; the MVP exposes a manual HTTP callback
-  boundary for `/start seller_<token>` handling until production wiring is added.
+Implemented:
 
-## Pre-launch Checklist
+- Telegram Mini App `initData` validation server-side.
+- Auth date age checks.
+- Backend JWT issuance after Telegram auth.
+- User upsert by Telegram user payload.
+- Role model: `USER`, `SELLER`, `ADMIN`.
+- Mini App login waits for `Telegram.WebApp.initData`.
+- In-flight Telegram login is deduplicated.
+- API `401` refresh is coordinated and retried once.
+- Auth diagnostics are sanitized.
 
-- Replace every placeholder in `backend/.env.production`.
-- Use a long random `JWT_SECRET_KEY`.
-- Set explicit HTTPS origins in `CORS_ORIGINS`.
-- Keep Telegram bot tokens only in backend env files.
-- Configure Bot 2 through `TELEGRAM_BOT_TOKEN`, `TELEGRAM_SELLER_CHAT_ID`, and optionally
-  `TELEGRAM_SELLER_BOT_USERNAME`; never add these values to frontend env files.
-- Run `alembic upgrade head` against staging from a clean database.
-- Run backend tests and frontend builds.
-- Take and restore-test a PostgreSQL backup.
-- Archive and restore-test uploads.
+Required controls:
+
+- Raw `initData` must not be logged or stored.
+- Production JWT secret must not use the local default.
+- CORS must not contain `*` in production.
+- Seller/admin endpoints must require the appropriate role.
+
+## Bot Separation
+
+Bot 1:
+
+- customer `/start`
+- customer `/stop`
+- service notifications
+- customer campaigns
+- channel entry publish/pin
+
+Bot 2:
+
+- seller/admin/auth-related flows
+
+Risks:
+
+- Using Bot 2 for customer sends would mix trust boundaries.
+- Using Bot 1 for seller/admin auth flows would expose buyer-facing bot behavior to admin workflows.
+
+Control: keep tokens, webhook secrets, code paths, docs, and operational checks separate.
+
+## Secrets
+
+Never commit or document:
+
+- `.env`
+- `backend/.env.production`
+- bot tokens
+- DB passwords
+- JWT secrets
+- Yandex Disk tokens
+- private keys
+- uploaded user files
+- database dumps
+- production credentials
+
+Use placeholders only:
+
+```text
+<SECRET>
+<BOT_TOKEN>
+<DATABASE_URL>
+<JWT_SECRET>
+```
+
+## Uploads
+
+Implemented controls:
+
+- allowed extensions and MIME validation
+- image decoding validation
+- size limits
+- safe filenames
+- path containment
+- profile-specific aspect-ratio validation where configured
+- file paths/URLs stored in PostgreSQL instead of file bytes
+
+Sensitive upload class: manual payment receipts. Receipts should not be cached publicly and should not be reused in analytics payloads.
+
+## Customer Notifications
+
+Security-sensitive behavior:
+
+- Write access is requested only after user action.
+- Write access enables service notifications, not marketing consent.
+- `/stop` disables service and marketing eligibility.
+- Service delivery prefers real private-chat `telegram_chat_id`.
+- Current service fallback can use `telegram_user_id` only when write access is granted.
+- Campaign delivery requires real private Bot 1 chat and opt-in eligibility.
+- Telegram delivery errors are sanitized.
+
+Privacy risks:
+
+- Telegram ids are personal data.
+- Campaign reports may reveal customer eligibility and delivery status.
+- Logs must not contain raw bot tokens or raw request payloads with secrets.
+
+## Channel Entry
+
+Implemented:
+
+- Seller Panel route `/channel-entry`.
+- Bot 1 publishes and optionally pins a channel message.
+- Channel button is a URL button to Mini App `startapp`.
+- History stores Telegram `message_id` and pin status.
+
+Important security point: channel-entry auth can create/update a `User`, but it does not create real private Bot 1 chat state. Notification eligibility must come from write access or Bot 1 `/start`.
+
+## Production Infrastructure
+
+Controls:
+
+- TLS terminated by host Caddy.
+- HTTP/3/QUIC intentionally disabled.
+- `tsplatform-mss-clamp.service` intentionally enabled for ports `80` and `443`.
+- Production compose uses `backend/.env.production`.
+- PostgreSQL and Redis are internal Docker services.
+
+Operational checks:
+
+```bash
+curl -sS -D - https://api.stylexac.ru/health -o /dev/null
+curl -I https://mini.stylexac.ru/
+curl -I https://seller.stylexac.ru/
+sudo systemctl status tsplatform-mss-clamp.service --no-pager
+```
+
+## Required Review Before High-Risk Changes
+
+Review security impact when changing:
+
+- auth/session logic
+- Telegram `initData` validation
+- bot token ownership
+- webhook secrets
+- customer notification target resolution
+- campaign eligibility
+- checkout transactions
+- order status notifications
+- upload validation
+- public URL generation
+- CORS
+- production reverse proxy
+- Alembic migrations that touch customer/order/subscription data
+
+## Current Residual Risks
+
+- Campaign delivery and service notification behavior depend on Telegram API availability and rate limits.
+- Local filesystem uploads require reliable volume backup and restore.
+- Seller/admin role assignment must be controlled operationally.
+- Any direct database repair can bypass service-level audit rules and must be backed up and documented.

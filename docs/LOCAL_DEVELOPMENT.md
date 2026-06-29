@@ -1,285 +1,144 @@
 # Local Development
 
-## Requirements
+This guide covers local development for StyleXac.
 
-- Git
-- Docker Desktop
+## Repository Layout
+
+| Path | Purpose |
+| --- | --- |
+| `backend/` | FastAPI backend, Alembic migrations, tests |
+| `mini-app/` | Customer Telegram Mini App |
+| `seller-panel/` | Seller/admin dashboard |
+| `docs/` | Operational and architecture documentation |
+| `deploy/` | Deployment and reverse-proxy support files if present |
+| `docker-compose.yml` | Local compose stack when used |
+| `docker-compose.prod.yml` | Production compose stack |
+
+## Environment Files
+
+| File | Use |
+| --- | --- |
+| `backend/.env` | Local backend development and checks |
+| `backend/.env.production` | VDS/server work and production-domain checks only |
+| `mini-app/.env.local` | Optional local Mini App overrides |
+| `seller-panel/.env.local` | Optional local Seller Panel overrides |
+
+Never copy real production secrets into local docs, screenshots, or commits.
+
+## Backend Setup
+
+Backend stack:
+
 - Python 3.12+
-- Node.js 20+
-- npm
+- FastAPI
+- SQLAlchemy 2.0 async ORM
+- Alembic
+- PostgreSQL 16
+- Redis 7
+- Pytest
+- Ruff
 
-Backend image dimension validation uses Pillow, installed through `backend/requirements.txt`.
-
-## Start infrastructure
-
-From repository root:
-
-```bash
-cp backend/.env.example backend/.env
-```
-
-Windows PowerShell:
-
-```powershell
-Copy-Item backend/.env.example backend/.env
-```
-
-Start Docker services:
-
-```bash
-docker compose up -d --build
-```
-
-Check containers:
-
-```bash
-docker compose ps
-```
-
-Apply migrations:
-
-```bash
-docker compose exec backend alembic upgrade head
-```
-
-Check backend:
-
-```bash
-curl http://localhost:8000/health
-```
-
-## Backend development without Docker backend container
-
-You can still use Docker for PostgreSQL and Redis, but run FastAPI locally.
-
-1. Start database services:
-
-```bash
-docker compose up -d postgres redis
-```
-
-2. Create env file for local host access. In `backend/.env`, use:
-
-```text
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/telegram_shop
-REDIS_URL=redis://localhost:6379/0
-TELEGRAM_WEBAPP_BOT_TOKEN=<your bot token>
-TELEGRAM_BOT_TOKEN=<seller notification bot token>
-TELEGRAM_SELLER_CHAT_ID=<seller group or chat id>
-TELEGRAM_SELLER_BOT_USERNAME=<seller bot username without token>
-TELEGRAM_SELLER_WEBHOOK_SECRET=<random local webhook secret>
-TELEGRAM_CUSTOMER_BOT_TOKEN=<customer Bot 1 token>
-TELEGRAM_CUSTOMER_BOT_USERNAME=<customer Bot 1 username without token>
-TELEGRAM_CUSTOMER_WEBHOOK_SECRET=<random local customer webhook secret>
-JWT_SECRET_KEY=<local development secret>
-```
-
-`TELEGRAM_WEBAPP_BOT_TOKEN` is for Mini App auth. Seller verification,
-notifications, and seller-chat broadcast use Bot 2 through `TELEGRAM_BOT_TOKEN`
-and `TELEGRAM_SELLER_CHAT_ID`; the bot token is never exposed to the frontend.
-`TELEGRAM_SELLER_BOT_USERNAME` only enables a direct `t.me` start link in the
-Seller Panel. `TELEGRAM_SELLER_WEBHOOK_SECRET` protects the Bot 2 webhook
-through Telegram's `X-Telegram-Bot-Api-Secret-Token` header. The legacy
-path-secret webhook remains accepted for compatibility, but new webhook setup
-uses the header-only path.
-
-Customer notification settings use Bot 1 through `TELEGRAM_CUSTOMER_BOT_TOKEN`.
-Bot 1 remains separate from Bot 2 and receives webhook updates at
-`POST /api/v1/telegram/customer-bot/webhook`, protected by
-`TELEGRAM_CUSTOMER_WEBHOOK_SECRET` through Telegram's
-`X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_CUSTOMER_BOT_USERNAME`
-enables the Mini App Profile to return a `t.me` start link. Customer service
-order notifications are sent through Bot 1 after successful order persistence
-when a linked private chat has service consent.
-
-Customer campaign Phase 2 also uses Bot 1 through
-`TELEGRAM_CUSTOMER_BOT_TOKEN`. Seller Panel campaign tools never expose bot
-tokens and never use Bot 2 `TELEGRAM_BOT_TOKEN` for customer campaigns.
-Useful local campaign throttles:
-
-```text
-RATE_LIMIT_CUSTOMER_CAMPAIGN_REQUESTS=30
-RATE_LIMIT_CUSTOMER_CAMPAIGN_WINDOW_SECONDS=60
-CUSTOMER_CAMPAIGN_BATCH_SIZE=20
-CUSTOMER_CAMPAIGN_MAX_ATTEMPTS=3
-CUSTOMER_CAMPAIGN_RETRY_BASE_SECONDS=60
-CUSTOMER_CAMPAIGN_WORKER_ENABLED=true
-CUSTOMER_CAMPAIGN_WORKER_POLL_SECONDS=5
-CUSTOMER_CAMPAIGN_SENDING_TIMEOUT_SECONDS=300
-MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED=true
-MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60
-```
-
-Manual SBP checkout remains unavailable until a seller or administrator saves
-and enables payment settings in Seller Panel. Receipt images are written to
-`backend/uploads/payment_receipts/`; the application creates the directory, but
-the backend process must have write access. Changing settings affects only new
-payments because each payment stores its own phone, bank, recipient, and comment
-snapshot. Bot 2 uses `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` for
-seller-group approve/reject actions. Bot 1 is needed only when customer payment
-notifications are enabled.
-
-Safe local/staging campaign flow:
-
-1. Open Bot 1 from one internal Telegram account and send `/start`.
-2. Confirm that the Seller Panel Customer Notifications recipient registry
-   shows the internal account with a masked chat id.
-3. Create a template or draft campaign.
-4. Run preview and verify the eligible count excludes opted-out or blocked
-   subscriptions.
-5. Send a test message to the current seller/admin Bot 1 subscription.
-6. Enable a tiny campaign and confirm that the backend worker sends it through
-   Bot 1 and updates the persisted counters. `Sent` means accepted by Telegram,
-   not read by the customer.
-7. Use the protected `process-batch` endpoint only for controlled recovery or
-   support; normal campaigns are processed automatically.
-
-3. Run backend:
+Typical local commands:
 
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+. .venv/Scripts/activate
+pip install -e ".[dev]"
+python -m compileall app tests
+ruff check .
+pytest
 ```
 
-Sprint 14 adds Redis-backed caching and rate limiting. Local development can keep the defaults from
-`backend/.env.example`; if Redis is stopped, public catalog reads still work and rate limiting uses
-the isolated in-memory fallback.
+On Windows PowerShell, activate the venv with:
 
-Mini App telemetry can be tested locally without external analytics services.
-It writes privacy-safe events to the existing `analytics_events` table through
-`POST /api/v1/analytics/telemetry`. To disable it during local UI work:
-
-```text
-VITE_TELEMETRY_DISABLED=true
-TELEMETRY_ENABLED=false
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
 ```
 
-Safe local ingestion smoke:
+Run migrations against the configured local database:
 
 ```bash
-curl -i http://localhost:8000/api/v1/analytics/telemetry \
-  -H "Content-Type: application/json" \
-  -d '{"events":[{"name":"mini_app.bootstrap_started","version":1,"session_id":"550e8400-e29b-41d4-a716-446655440000","client_event_id":"event-0001","route":"/main"}]}'
+cd backend
+alembic upgrade head
+alembic current
 ```
 
-Invalid payloads with unknown fields such as `initData`, `Authorization`,
-`user_id`, or raw endpoint IDs should return `422`. See
-`docs/ANALYTICS_TELEMETRY.md` for the full allowlist, sampling, and retention
-policy.
+If the host lacks Python, Ruff, or Pytest, run backend checks in the backend Docker container.
 
-Image upload validation checks decoded dimensions in addition to extension, MIME, and byte size:
-product images use 4:5 at 1200x1500 recommended, native banners use 400:207 at 2000x1035 recommended,
-category and tag cards use 4:3 at 1200x900 recommended, and aggressive popup banners use 9:16 at
-900x1600 recommended.
-
-Product search uses PostgreSQL `pg_trgm` for typo-tolerant catalog matching. The Alembic head
-migration enables the extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then adds product
-search indexes for name, slug, description, and seller-managed search aliases.
-
-Public product list endpoints now return compact card DTOs for Mini App feed,
-category, search, favorites, and related-product cards. Use the product detail
-endpoint when a screen needs description, full gallery variants, SKU display, or
-taxonomy summaries. Public products, product detail, banners, categories, and
-tags support `ETag`/`If-None-Match`; favorites and cart are personalized and
-use `Cache-Control: private, no-store`.
-
-Useful local toggles:
-
-```text
-CACHE_ENABLED=true
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REDIS_ENABLED=true
-RATE_LIMIT_IN_MEMORY_FALLBACK_ENABLED=true
-LOG_FORMAT=json
-ERROR_MONITORING_ENABLED=false
-```
-
-## Mini App
+## Mini App Setup
 
 ```bash
 cd mini-app
 npm install
-npm run dev
+npm test -- --run
+npm run build
+npm run verify:bundle
 ```
 
-Default URL:
+The Mini App uses Telegram WebApp APIs only at the UI boundary. For browser development outside Telegram, the app must handle missing `Telegram.WebApp` gracefully.
 
-```text
-http://localhost:5173
-```
+Important implemented behavior:
 
-Mini App unit tests cover the shared API retry/error layer, network state, and
-duplicate-action guard:
+- waits for `Telegram.WebApp.initData` before login
+- deduplicates in-flight Telegram login
+- coordinates API `401` refresh with one retry
+- supports feed, category, search, product detail, cart, profile, and checkout
+- uses a draggable help widget on feed/category/search
+- persists write-access results only after user action
 
-```bash
-cd mini-app
-npm test
-```
-
-## Seller Panel
+## Seller Panel Setup
 
 ```bash
 cd seller-panel
 npm install
-npm run dev
+npm run lint
+npm run typecheck
+npm test -- --run
+npm run build
 ```
 
-Default URL:
+Implemented areas include product management, variants, uploads, banners, promo codes, customer notifications, channel entry publishing, and seller/admin auth-related flows.
+
+## Local API URLs
+
+Use environment variables:
 
 ```text
-http://localhost:5174
+VITE_API_BASE_URL=/api/v1
 ```
 
-Seller registration uses the Bot 2 start-token flow. The Bot 2 webhook uses:
+For direct local backend access:
 
 ```text
-POST /api/v1/telegram/seller-bot/webhook
+VITE_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-Local Telegram webhook testing requires a public tunnel to the backend. Once the
-tunnel URL is available, set Bot 2 webhook with:
+Do not hardcode `https://api.stylexac.ru` in frontend source.
+
+## Backend Architecture Rules
+
+- Keep business logic out of routers.
+- Put business rules and transactions in services.
+- Put SQLAlchemy queries in repositories.
+- Keep SQLAlchemy models in `backend/app/db/models.py` until a deliberate model-layer split is made.
+- Add Alembic migrations for schema changes.
+- Use async SQLAlchemy sessions.
+- PostgreSQL is the source of truth.
+- Redis is used only for cache, rate limiting, and temporary state where implemented.
+
+## Useful Local Checks
 
 ```bash
-cd backend
-python scripts/set_seller_bot_webhook.py set --base-url https://your-public-tunnel.example
-python scripts/set_seller_bot_webhook.py info
+git diff --check
 ```
 
-Set Bot 1 customer webhook with the same tunnel:
+Documentation consistency searches:
 
 ```bash
-cd backend
-python scripts/set_customer_bot_webhook.py set --base-url https://your-public-tunnel.example
-python scripts/set_customer_bot_webhook.py info
+rg -n "tsplatform\.ru|mini\.tsplatform\.ru|api\.tsplatform\.ru|seller\.tsplatform\.ru" .
+rg -n "20260628_0039" .
 ```
 
-The older manual callback remains available for backend-only service tests:
-`POST /api/v1/seller-auth/register/telegram-start`.
-
-After `/start seller_<token>`, Bot 2 posts an approval request to
-`TELEGRAM_SELLER_CHAT_ID`. Confirming the inline button sends the seller's
-private verification code. Approval expires after 2 minutes and is enforced on
-the next callback/resend/confirmation check, so a local worker is not required.
-Seller group commands `/sellers`, `/block_seller <Seller ID>`, and
-`/unblock_seller <Seller ID>` are rejected outside that configured chat.
-`/sellers` labels the internal `Seller ID for commands`; do not use the
-Telegram user id or chat id.
-
-## API documentation
-
-```text
-http://localhost:8000/docs
-http://localhost:8000/api/v1/openapi.json
-```
-
-## Production profile docs
-
-Production/staging deployment, backups, and security review are documented in:
-
-- `docs/PRODUCTION_DEPLOYMENT.md`
-- `docs/BACKUP_AND_RESTORE.md`
-- `docs/SECURITY_REVIEW.md`
+`20260628_0039` is expected in current production docs. Older ids should appear only as clearly historical notes.

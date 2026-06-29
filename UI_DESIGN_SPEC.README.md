@@ -1,1344 +1,189 @@
-# UI DESIGN SPEC — Telegram Shop Platform
+# UI Design Specification - StyleXac
 
-## 1. Общая дизайн-концепция
+This document defines current UI behavior and visual direction for the customer Mini App and Seller Panel.
 
-Проект делится на два разных интерфейса:
+## Product Surfaces
 
-1. **Telegram Mini App** — мобильный покупательский интерфейс внутри Telegram.
-2. **Seller Portal** — desktop web-панель продавца/администратора.
+| Surface | Domain | Design posture |
+| --- | --- | --- |
+| Mini App | `https://mini.stylexac.ru` and `https://stylexac.ru` | Mobile-first, marketplace-like, Telegram WebView friendly |
+| Seller Panel | `https://seller.stylexac.ru` | Desktop-first, dense dashboard for repeated operations |
 
-Они должны использовать одну визуальную систему: одинаковые основные цвета, одинаковую логику скруглений, одинаковую типографику и единые статусы. Но характер интерфейсов должен отличаться:
+The Mini App and Seller Panel must not look identical. They share product data and backend contracts, but they serve different users and usage patterns.
 
-- **Mini App** — мягкий, маркетплейсный, визуально приятный, ориентированный на быстрое пролистывание товаров. По ощущению ближе к Ozon, Wildberries, Яндекс Маркет.
-- **Seller Portal** — технический, плотный, табличный, рабочий. Больше похож на dashboard/admin-panel, а не на витрину магазина.
+## Mini App Principles
 
----
+- Mobile-first layout.
+- Fast product discovery.
+- Clear product imagery.
+- Bottom navigation suited for Telegram WebView.
+- Safe behavior when Telegram APIs are unavailable in local browser development.
+- Telegram SDK/WebApp calls only at the UI boundary.
+- No hardcoded production API URLs.
 
-# 2. Общая палитра
+## Mini App Routes and Flows
 
-## Основные цвета
+Implemented customer flows:
 
-- **Primary violet**: `#7C3AED`
-- **Primary light violet**: `#A855F7`
-- **Accent pink/magenta**: `#EC4899`
-- **Sale red**: `#EF4444`
-- **Background light**: `#F3F4F6`
-- **Card background**: `#FFFFFF`
-- **Text main**: `#111827`
-- **Text secondary**: `#6B7280`
-- **Border**: `#E5E7EB`
-- **Success**: `#16A34A`
-- **Warning**: `#F59E0B`
-- **Danger**: `#DC2626`
+- feed
+- category
+- search
+- product detail
+- cart
+- profile
+- checkout
 
-## Mini App mood
+### Feed, Category, and Search
 
-Mini App использует больше воздуха, мягкие карточки, яркие баннеры, крупные изображения товаров, заметные скидочные бейджи.
+- Product cards must prioritize image, title, brand/metadata where available, price, discount state, and add/cart action.
+- Floating help widget `Как совершить заказ?` appears on feed/category/search.
+- The help widget is draggable.
+- The help widget can be hidden or swiped to the screen side.
+- A side tab remains visible after hiding.
+- Tapping the side tab restores the widget.
 
-## Seller Portal mood
+### Product Detail
 
-Seller Portal использует те же фиолетовые акценты, но в более строгом виде:
+- Product brand appears above the product title.
+- If brand duplicates title text, UI should avoid awkward duplicate presentation.
+- Size helper copy is: `Мы подбираем размер по росту и весу.`
+- Product images, variants, price, old price, badges, and stock state should remain readable on mobile.
 
-- меньше градиентов;
-- больше таблиц;
-- больше серых фонов;
-- больше compact layout;
-- больше статусов, фильтров, KPI и служебных элементов.
+### Cart
 
----
+- Promo code input must be keyboard-safe in Telegram WebView.
+- Delivery price note is: `Цена сформирована без учёта стоимости доставки.`
+- Totals, discounts, and checkout action must remain visible and understandable on narrow screens.
 
-# 3. Общие правила Telegram Mini App
+### Checkout
 
-## 3.1. Базовый экран
+- Checkout must clearly preserve order totals, promo code result, customer fields, and manual payment state where applicable.
+- Notification write-access prompts must be triggered only after user action.
 
-Целевой экран проектировать под мобильный viewport:
+### Profile
 
-- минимальная ширина: `360px`;
-- комфортная ширина: `390–430px`;
-- основная высота: `800–932px`;
-- интерфейс должен корректно работать на iOS и Android внутри Telegram WebView.
+- Profile notification state should distinguish service notification availability from marketing subscription.
+- Write access enables service notifications and does not imply marketing consent.
 
-## 3.2. Структура каждого Mini App экрана
+## Discount Badge Tiers
 
-Каждый экран Mini App состоит из:
+Discount badge visual sizing is tiered by discount percentage:
 
-1. Верхняя шапка.
-2. Основной контент.
-3. Фиксированная нижняя навигация на 5 кнопок.
+| Tier | Discount range |
+| --- | --- |
+| Tier 1 | `1-20%` |
+| Tier 2 | `21-40%` |
+| Tier 3 | `41-60%` |
+| Tier 4 | `61-80%` |
+| Tier 5 | `81-99%` |
 
-## 3.3. Нижняя навигация
+Custom badge visual sizing should preserve legibility and avoid covering critical product image content.
 
-На каждой странице Mini App внизу должна быть одинаковая строка навигации.
+## Banner UI
 
-Кнопки:
+Implemented banner display types:
 
-1. **Main** / Лента
-2. **Категории**
-3. **Расширенный поиск**
-4. **Корзина**
-5. **Личный кабинет**
+- `horizontal`
+- `vertical`
+- `popup`
+- `aggressive_popup`
 
-Высота нижней панели: `64–72px` + safe-area padding снизу.
+Current crop profiles:
 
-Визуально:
+| Banner type | Ratio |
+| --- | --- |
+| Horizontal native banner | `400:207` |
+| Vertical banner | `9:16` |
+| Popup banner | `3:4` |
+| Aggressive popup | `9:16` |
 
-- белый фон;
-- верхняя граница `1px #E5E7EB`;
-- активный пункт — фиолетовая иконка + фиолетовый текст;
-- неактивные пункты — серые;
-- у корзины должен быть badge с количеством товаров;
-- у личного кабинета можно показывать маленькую аватарку Telegram.
+Aggressive popup is an entry overlay pattern. It must remain dismissible and must not permanently block core navigation.
 
----
+## Seller Panel Principles
 
-# 4. Mini App: общие компоненты
+- Desktop-first layout.
+- Dashboard-like density.
+- Clear navigation for repeated seller/admin work.
+- Tables, forms, filters, previews, and status chips should be optimized for scanning.
+- Avoid marketplace-style mobile composition in the Seller Panel.
+- Avoid decorative landing-page hero sections for operational screens.
 
-## 4.1. Header
+## Seller Panel Routes and Areas
 
-Высота: `48–56px`.
+Implemented operational areas:
 
-Содержимое:
+- product management
+- product variant matrix
+- product image uploads
+- badge preview where product-image badges are edited
+- category/tag related catalog data through backend-supported flows
+- banners
+- promo codes
+- customer notifications
+- channel entry publishing
+- seller/admin auth-related flows
+- settings where implemented
 
-- слева: название магазина / логотип `Gadji` или текущий раздел;
-- справа: иконка уведомлений или компактный avatar Telegram;
-- на странице main header не должен занимать много места, потому что приоритет — лента товаров.
+### Product Management
 
-Визуально:
+- Product forms must support brand, title, description, price, old price, visibility/status, categories, tags, search aliases, images, variants, and inventory fields exposed by the backend.
+- Variant matrix should make size/color/stock/SKU state easy to scan.
+- Product image uploads should use the current crop/validation expectations.
 
-- фон белый или очень светлый;
-- лёгкая тень или border-bottom;
-- текст жирный, но не крупнее `18–20px`.
+### Banners
 
-## 4.2. Product Card
+- Seller Panel must expose banner display type and matching crop behavior.
+- Preview should help the seller understand how horizontal, vertical, popup, and aggressive popup banners will appear.
 
-Карточка товара должна быть ориентирована на Ozon, Wildberries и Яндекс Маркет.
+### Promo Codes
 
-Карточка должна содержать:
+- Promo code UI must expose discount type, discount amount, usage limit, per-user limit, active state, and date windows where supported.
 
-- изображение товара;
-- бейдж `NEW`, `SALE`, `-20%`, если применимо;
-- кнопку избранного в правом верхнем углу изображения;
-- название товара в 2 строки максимум;
-- цену крупно;
-- старую цену мелко и зачёркнуто, если есть скидка;
-- рейтинг и количество отзывов;
-- короткий тег/атрибут: `oversize`, `new`, `premium`, `cotton`;
-- доступные размеры: `S`, `M`, `L`, `XL`;
-- компактную кнопку добавления в корзину.
+### Customer Notifications
 
-Размер карточки на main:
+- Seller Panel should represent Bot 1 as the customer notification bot.
+- Customer notifications should distinguish service notification eligibility from marketing eligibility.
+- Campaign flows should expose image support, preview/test send, status, and delivery reports where implemented.
+- Backend template tables and endpoints exist; current UI is simplified and does not expose every backend template-management capability as a full template editor.
 
-- сетка: 2 колонки;
-- одинаковая ширина и высота;
-- карточка должна быть достаточно компактной, чтобы на видимом пространстве помещались 2x2 товара;
-- рекомендуемая высота карточки: `210–240px`;
-- изображение: около `125–150px` по высоте;
-- gap между карточками: `8–10px`.
+### Channel Entry
 
-Product image upload standard:
+- Route: `/channel-entry`.
+- The UI publishes through Bot 1.
+- It must explain channel target, message, button, pin state, and history clearly.
+- Channel button uses URL link to Mini App `startapp`.
+- Do not present a Telegram `web_app` button as the channel-post mechanism.
 
-- aspect ratio: `4:5`;
-- recommended crop output: `1200x1500`;
-- minimum source/output size: `600x750`;
-- maximum accepted upload: `1600x2000`;
-- card and detail/gallery rendering must reserve a stable `4 / 5` media box with `object-fit: cover`.
+## Accessibility and Responsiveness
 
-Визуально:
+- Text must fit inside controls on narrow screens.
+- Buttons and interactive targets must be large enough for touch in the Mini App.
+- Seller Panel controls can be denser, but labels and validation errors must remain readable.
+- Do not overlap text, controls, product images, banners, or sticky navigation.
 
-- фон белый;
-- border-radius `16–18px`;
-- изображение с radius сверху;
-- лёгкая тень;
-- цена выделяется сильнее названия.
+## Visual Asset Rules
 
----
+- Product, banner, and campaign visuals should show the actual product or message subject.
+- Avoid dark, blurred, stock-like, or purely atmospheric imagery when the user needs to inspect the real product.
+- Static uploads are served through backend/reverse proxy paths.
 
-# 5. Mini App страницы
+## Current Checks
 
----
+Mini App:
 
-## 5.1. Страница запуска / скрытой авторизации
+```bash
+cd mini-app
+npm test -- --run
+npm run build
+npm run verify:bundle
+```
 
-### Назначение
+Seller Panel:
 
-Пользователь открывает Mini App из Telegram bot. Авторизация происходит скрыто через Telegram user id / initData. Отдельный экран логина для покупателя не нужен.
-
-### Дизайн
-
-Экран короткого loading/skeleton состояния:
-
-- логотип магазина по центру;
-- подпись: `Загружаем магазин...`;
-- skeleton-карточки товаров внизу или shimmer-заглушка;
-- если Telegram initData невалиден — показать ошибку: `Не удалось открыть приложение через Telegram`.
-
-### Поведение
-
-После успешной авторизации пользователь попадает на main.
-
----
-
-## 5.2. Main / Лента товаров
-
-### Назначение
-
-Главная страница должна быть в первую очередь лентой товаров. Товары отображаются от новых к старым.
-
-### Структура сверху вниз
-
-1. Header.
-2. Строка поиска.
-3. Маленькая кнопка FAQ слева от поиска.
-4. Нативный рекламный баннер.
-5. Сетка товаров 2x2 на первом видимом экране.
-6. Нижняя навигация.
-
-### Header
-
-Содержимое:
-
-- название магазина;
-- справа avatar/иконка профиля или уведомления.
-
-Высота: `48–52px`.
-
-### FAQ + Search Row
-
-Под шапкой располагается строка:
-
-- слева маленькая кнопка **FAQ**;
-- справа большая строка поиска.
-
-FAQ:
-
-- размер примерно `44x44px`;
-- круглая или rounded-square;
-- иконка `?`;
-- при клике открывает FAQ page или bottom-sheet.
-
-Search:
-
-- placeholder: `Найти одежду, бренд, размер...`;
-- высота `44px`;
-- скругление `14–16px`;
-- иконка лупы слева;
-- при фокусе ведёт на страницу расширенного поиска или search results.
-
-### Нативный рекламный баннер
-
-Располагается перед товарами.
-
-Тип баннера:
-
-- горизонтальный;
-- высота `97–127px`;
-- скругление `18–22px`;
-- может вести на товар, категорию, подборку или промо.
-
-Содержимое:
-
-- крупный заголовок: `Новая коллекция`;
-- подзаголовок: `Скидки на свежие поступления`;
-- справа изображение товара/модели;
-- CTA: `Смотреть`.
-
-Баннер должен выглядеть как часть интерфейса, а не как чужая реклама.
-
-Native banner image upload standard:
-
-- aspect ratio: `400:207`;
-- recommended crop output: `2000x1035`;
-- minimum source/output size: `1200x621`;
-- maximum accepted upload: `2400x1242`;
-- Mini App rendering must reserve a stable `400 / 207` image box with `object-fit: cover`.
-
-### Product Grid
-
-Сетка:
-
-- 2 колонки;
-- одинаковые карточки;
-- первый экран должен показывать 4 товара;
-- карточки сортируются по newest по умолчанию.
-
-Над сеткой можно добавить компактные chips:
-
-- `Новинки`;
-- `Популярное`;
-- `Скидки`;
-- `Premium`.
-
-Но они не должны ломать требование 2x2 на первом экране.
-
----
-
-## 5.3. Категории
-
-### Назначение
-
-Быстрый переход к категориям товаров: джинсы, футболки, худи, куртки, аксессуары и т.д.
-
-### Структура
-
-1. Header: `Категории`.
-2. Поисковая строка по категориям.
-3. Сетка категорий.
-4. Нижняя навигация.
-
-### Дизайн категорий
-
-Категория — это карточка:
-
-- изображение или иконка;
-- название;
-- количество товаров;
-- optional badge: `new`, `sale`.
-
-Сетка:
-
-- 2 колонки;
-- карточки крупнее товарных;
-- высота `110–140px`.
-
-Визуально категории должны быть ярче, чем в seller portal. Можно использовать градиенты и фотографии.
-
-### При клике
-
-Пользователь переходит на страницу результатов категории:
-
-- header: название категории;
-- сверху фильтры и сортировка;
-- дальше товарная сетка.
-
----
-
-## 5.4. Расширенный поиск
-
-### Назначение
-
-Страница для точной фильтрации по категориям, атрибутам, тегам, цене, бренду, размеру и популярности.
-
-### Структура
-
-1. Header: `Расширенный поиск`.
-2. Основная строка поиска.
-3. Блок быстрых фильтров.
-4. Раскрываемые секции фильтров.
-5. Кнопка применения.
-6. Нижняя навигация.
-
-### Фильтры
-
-Нужно предусмотреть:
-
-- категория;
-- бренд;
-- размер;
-- цена от/до;
-- цвет;
-- теги;
-- сортировка:
-  - `Сначала новые`;
-  - `Цена ↑`;
-  - `Цена ↓`;
-  - `Популярные`;
-  - `По рейтингу`.
-
-### Дизайн
-
-Фильтры оформляются как chips и bottom-sheet элементы:
-
-- активный chip — фиолетовый фон;
-- неактивный — белый фон + border;
-- price range — два input поля;
-- размер — chips для одежды `XS`, `S`, `M`, `L`, `XL` и для обуви EU `35`–`46`.
-
-### CTA
-
-Внизу над navigation bar:
-
-- кнопка `Показать товары`;
-- рядом можно показать количество найденных товаров.
-
----
-
-## 5.5. Search Results / Результаты поиска
-
-### Назначение
-
-Показывает товары после поиска или фильтрации.
-
-### Структура
-
-1. Header с back button.
-2. Search input с текущим запросом.
-3. Горизонтальная строка сортировок.
-4. Product grid.
-5. Нижняя навигация.
-
-### Empty state
-
-Если товаров нет:
-
-- иконка пустого поиска;
-- текст: `Ничего не найдено`;
-- кнопка: `Сбросить фильтры`.
-
----
-
-## 5.6. Product Detail / Карточка товара
-
-### Назначение
-
-Подробный экран товара, похожий по логике на карточки Ozon/Wildberries/Яндекс Маркет.
-
-### Структура
-
-1. Header с back button и кнопкой избранного.
-2. Галерея изображений.
-3. Цена и скидка.
-4. Название товара.
-5. Рейтинг и отзывы.
-6. Выбор размера/варианта.
-7. Описание.
-8. Характеристики.
-9. Блок доставки/наличия.
-10. Отзывы.
-11. Sticky CTA.
-12. Нижняя навигация.
-
-### Галерея
-
-- крупное изображение сверху;
-- carousel/swiper;
-- индикатор `1 / 5`;
-- изображения должны занимать значительную часть первого экрана.
-
-### Цена
-
-- текущая цена крупно;
-- старая цена зачёркнута;
-- скидка в красном badge;
-- если товар новый — badge `NEW`.
-
-### Размеры
-
-Размеры показываются одной горизонтально прокручиваемой строкой, без многострочной сетки.
-Кнопки размеров:
-
-- `S`, `M`, `L`, `XL`;
-- недоступный размер серый и disabled;
-- выбранный размер — фиолетовый border/fill.
-
-После основной информации может отображаться горизонтальная карусель `Похожие товары`.
-Она использует компактные product cards, сохраняет порядок Seller Panel и скрывается при
-отсутствии настроенных активных товаров.
-
-Настроенный image badge (`NEW`, `Распродажа`, `Хит`, `Эксклюзив` или custom) располагается
-в нижней левой части галереи и не дублирует старый sale label.
-
-### CTA
-
-Внизу sticky-блок:
-
-- цена;
-- кнопка `В корзину`;
-- если товар уже в корзине — `Перейти в корзину`.
-
----
-
-## 5.7. Корзина / Cart Section
-
-### Назначение
-
-Раздел корзины должен иметь 3 верхние вкладки: Избранное, Корзина, Заказы.
-
-### Структура
-
-1. Header: `Покупки`.
-2. Под шапкой в одну строку 3 кнопки:
-   - `Избранное`;
-   - `Корзина`;
-   - `Заказы`.
-
-3. Контент активной вкладки.
-4. Нижняя навигация.
-
-### Вкладки
-
-Кнопки располагаются в одну строку сразу под header.
-
-Визуально:
-
-- segmented control;
-- активная вкладка — фиолетовый фон;
-- неактивные — белый фон с border;
-- высота `40–44px`.
-
----
-
-## 5.8. Вкладка Избранное
-
-### Назначение
-
-Список товаров, которые пользователь сохранил.
-
-### Структура
-
-- product grid 2 колонки;
-- у каждой карточки активное сердечко;
-- кнопка удаления из избранного;
-- если список пуст — empty state.
-
-### Empty state
-
-Текст:
-
-`В избранном пока пусто`
-
-Кнопка:
-
-`Перейти к товарам`
-
----
-
-## 5.9. Вкладка Корзина
-
-### Назначение
-
-Список товаров, подготовленных к заказу.
-
-### Структура
-
-1. Список cart items.
-2. Поле промокода.
-3. Блок суммы.
-4. CTA `Оформить заказ`.
-
-### Cart Item
-
-Каждый товар в корзине:
-
-- миниатюра;
-- название;
-- размер/вариант;
-- цена;
-- quantity stepper `- 1 +`;
-- кнопка удаления.
-
-### Promo Code
-
-Поле:
-
-- placeholder: `Введите промокод`;
-- кнопка `Применить`;
-- если промокод успешен — зелёный статус;
-- если ошибка — красный текст.
-
-### Summary
-
-Показывать:
-
-- товары;
-- скидка;
-- итог;
-- предупреждение, если какие-то товары закончились.
-
----
-
-## 5.10. Вкладка Заказы
-
-### Назначение
-
-История заказов пользователя.
-
-### Структура
-
-Список заказов:
-
-- номер заказа;
-- дата;
-- статус;
-- сумма;
-- количество товаров;
-- кнопка `Подробнее`.
-
-### Статусы
-
-Использовать статусы:
-
-- `NEW`;
-- `PROCESSING`;
-- `SHIPPED`;
-- `DELIVERED`;
-- `CANCELLED`.
-
-Визуальное кодирование:
-
-- NEW — синий/фиолетовый;
-- PROCESSING — жёлтый;
-- SHIPPED — голубой;
-- DELIVERED — зелёный;
-- CANCELLED — красный/серый.
-
----
-
-## 5.11. Checkout / Оформление заказа
-
-### Назначение
-
-Финальная форма заказа.
-
-### Структура
-
-1. Header с back button.
-2. Сводка товаров.
-3. Промокод.
-4. Контактные данные.
-5. Итоговая сумма.
-6. CTA `Подтвердить заказ`.
-
-### Контактные данные
-
-По схеме нужно собирать:
-
-- рост;
-- вес;
-- город;
-- контактный номер телефона;
-- комментарий к заказу.
-
-Дополнительно можно предусмотреть:
-
-- Telegram username из профиля;
-- имя получателя.
-
-### Дизайн
-
-Форма должна быть короткой и не перегруженной.
-
-Поля:
-
-- высота `44–48px`;
-- radius `14px`;
-- label сверху;
-- ошибки под полем.
-
-### После подтверждения
-
-После создания заказа:
-
-- показать success screen;
-- отправить seller notification через Telegram;
-- сформировать сообщение-чек для seller.
-
----
-
-## 5.12. Order Success / Заказ создан
-
-### Назначение
-
-Подтверждение, что заказ отправлен продавцу.
-
-### Структура
-
-- success icon;
-- текст: `Заказ создан`;
-- номер заказа;
-- сумма;
-- статус `NEW`;
-- кнопка `Перейти к заказам`;
-- кнопка `Вернуться в магазин`.
-
-### Визуально
-
-Экран должен быть спокойным, без лишней рекламы.
-
----
-
-## 5.13. Личный кабинет
-
-### Назначение
-
-Профиль пользователя и быстрый доступ к истории действий.
-
-### Структура
-
-1. Header: `Личный кабинет`.
-2. Блок Telegram-профиля.
-3. Быстрые ссылки.
-4. Настройки.
-5. Нижняя навигация.
-
-### Telegram profile block
-
-Показывать:
-
-- avatar;
-- имя;
-- username;
-- Telegram ID можно не показывать обычному пользователю.
-
-### Быстрые ссылки
-
-- Мои заказы;
-- Избранное;
-- Промокоды;
-- FAQ;
-- Поддержка.
-
-### Настройки
-
-- тема: системная / светлая / тёмная;
-- уведомления;
-- политика обработки данных.
-
----
-
-## 5.14. FAQ
-
-### Назначение
-
-FAQ должен быть доступен с main слева от поиска.
-
-### Структура
-
-1. Header: `FAQ`.
-2. Accordion list.
-3. Кнопка связи с продавцом.
-4. Нижняя навигация.
-
-### Вопросы
-
-Минимальный набор:
-
-- Как оформить заказ?
-- Как применить промокод?
-- Как узнать статус заказа?
-- Как подобрать размер?
-- Как связаться с продавцом?
-- Как оставить отзыв?
-
----
-
-## 5.15. Reviews / Отзывы
-
-### Назначение
-
-Отзывы видны на карточке товара. Оставить отзыв можно только после подтверждённой покупки.
-
-### Структура публичного блока
-
-- средняя оценка;
-- количество отзывов;
-- список approved отзывов;
-- фото из отзывов, если есть;
-- кнопка `Оставить отзыв`, если пользователь имеет право.
-
-### Форма отзыва
-
-- рейтинг 1–5;
-- текст;
-- фото optional;
-- статус после отправки: `На модерации`.
-
----
-
-# 6. Seller Portal: общие правила
-
-## 6.1. Формат
-
-Seller Portal ориентирован на desktop.
-
-Минимальная рабочая ширина: `1280px`.
-
-Основной layout:
-
-- левая sidebar;
-- верхняя topbar;
-- main content area;
-- таблицы, виджеты, формы.
-
-## 6.2. Визуальный стиль
-
-Те же цвета, что в Mini App, но характер другой:
-
-- фон: `#F3F4F6`;
-- sidebar: белая или тёмно-серая;
-- active menu item: violet;
-- cards: белые;
-- border: `#E5E7EB`;
-- таблицы: плотные, с hover-строками;
-- действия: через кнопки, dropdown, kebab menu.
-
-## 6.3. Sidebar
-
-Пункты:
-
-1. Dashboard
-2. Заказы
-3. Товары
-4. Добавить товар
-5. Баннеры
-6. Промокоды
-7. Отзывы
-8. Статистика
-9. Настройки
-
-Внизу sidebar:
-
-- аккаунт seller/admin;
-- logout.
-
----
-
-# 7. Seller Portal страницы
-
----
-
-## 7.1. Seller Login
-
-### Назначение
-
-Отдельный вход для sellers по логину/паролю. Вход должен быть доступен на отдельном домене или route, например `sellers.gadji...`.
-
-### Дизайн
-
-Центральная login-card:
-
-- логотип;
-- title: `Seller Portal`;
-- input login/email;
-- input password;
-- кнопка `Войти`;
-- error message при ошибке.
-
-Фон:
-
-- светло-серый;
-- лёгкий violet gradient element сбоку.
-
----
-
-## 7.2. Seller Dashboard / Основная страница
-
-### Назначение
-
-Главная страница seller portal должна содержать виджеты-переходы.
-
-### Обязательные виджеты
-
-1. **Страница статусов заказа**
-2. **Страница просмотра всех товаров**
-3. **Страница редактирования товаров**
-4. **Страница конфигурации баннеров**
-5. **Страница промокодов**
-6. **Страница отслеживания статистики**
-
-### Структура
-
-1. Topbar:
-   - title: `Dashboard`;
-   - справа seller profile.
-
-2. KPI row:
-   - новые заказы;
-   - товары активны;
-   - товары out of stock;
-   - промокоды активны;
-   - выручка/заказы за период.
-
-3. Widget grid:
-   - карточки-переходы.
-
-4. Recent activity:
-   - последние заказы;
-   - последние изменения товаров;
-   - последние события.
-
-### Визуально
-
-Виджеты:
-
-- белые карточки;
-- icon;
-- title;
-- короткое описание;
-- CTA `Открыть`;
-- hover effect.
-
----
-
-## 7.3. Orders Status Page / Статусы заказов
-
-### Назначение
-
-Ручное управление статусами заказов.
-
-### Структура
-
-1. Header: `Заказы`.
-2. Фильтры:
-   - статус;
-   - дата;
-   - поиск по номеру заказа;
-   - поиск по пользователю.
-
-3. Таблица заказов.
-4. Правая drawer-панель деталей заказа.
-
-### Таблица
-
-Колонки:
-
-- order number;
-- customer;
-- Telegram username;
-- город;
-- сумма;
-- промокод;
-- статус;
-- дата;
-- действия.
-
-### Статусы
-
-- NEW
-- PROCESSING
-- SHIPPED
-- DELIVERED
-- CANCELLED
-
-Изменение статуса:
-
-- dropdown в таблице;
-- подтверждение для CANCELLED;
-- запись в AuditLog.
-
----
-
-## 7.4. Products List / Все товары
-
-### Назначение
-
-Просмотр всех товаров с переходом в редактирование.
-
-### Структура
-
-1. Header: `Товары`.
-2. Кнопка `Добавить товар`.
-3. Фильтры:
-   - статус;
-   - категория;
-   - тег;
-   - наличие;
-   - поиск.
-
-4. Таблица товаров.
-
-### Таблица
-
-Колонки:
-
-- image;
-- product name;
-- category;
-- price;
-- variants/stock;
-- status;
-- tags;
-- updated_at;
-- actions.
-
-Actions:
-
-- `Редактировать`;
-- `Скрыть`;
-- `Архивировать`;
-- `Открыть в Mini App`.
-
----
-
-## 7.5. Product Create / Add Product
-
-### Назначение
-
-Страница добавления нового товара.
-
-### Структура
-
-Форма разбивается на секции:
-
-1. Основная информация.
-2. Цена.
-3. Категория и теги.
-4. Изображения.
-5. Варианты/размеры.
-6. SEO/slug optional.
-7. Статус публикации.
-
-### Поля
-
-Основная информация:
-
-- название;
-- slug;
-- описание.
-
-Цена:
-
-- base price;
-- old price optional;
-- discount optional.
-
-Категории/теги:
-
-- category select;
-- tags multi-select.
-
-Изображения:
-
-- drag and drop;
-- главное изображение;
-- порядок изображений.
-
-Варианты:
-
-- SKU;
-- size;
-- stock;
-- reserved stock optional.
-
-Дополнительные merchandising-поля:
-
-- image badge preset или custom-текст до 20 символов;
-- упорядоченный список ID похожих товаров с удалением и изменением порядка.
-
-CTA:
-
-- `Сохранить как черновик`;
-- `Опубликовать`.
-
----
-
-## 7.6. Product Edit
-
-### Назначение
-
-Редактирование существующего товара.
-
-### Отличие от create
-
-Дополнительно показывать:
-
-- текущий статус;
-- дата создания;
-- дата обновления;
-- история изменений;
-- preview карточки товара как она будет выглядеть в Mini App.
-
-### Важный блок
-
-Справа можно добавить sticky preview:
-
-- мини-карточка товара;
-- как выглядит цена;
-- как выглядит скидка;
-- как выглядит badge.
-
----
-
-## 7.7. Banner Configuration Page
-
-### Назначение
-
-Управление нативными рекламными баннерами.
-
-### Структура
-
-1. Header: `Баннеры`.
-2. Список баннеров.
-3. Создание/редактирование баннера.
-4. Preview для Mini App.
-
-### Поля баннера
-
-- ID;
-- title;
-- subtitle;
-- image;
-- target type:
-  - product;
-  - category;
-  - promo;
-  - external URL;
-
-- target id;
-- active/inactive;
-- position;
-- start date;
-- end date.
-
-### Важное правило
-
-По схеме баннеры могут редактироваться по ID товара. Поэтому в форме должен быть input/select `Product ID` или product picker.
-
-### Preview
-
-Показывать баннер в мобильной рамке:
-
-- как он будет выглядеть на main;
-- как будет выглядеть aggressive banner, если этот формат будет добавлен позже.
-
-Banner image upload standards:
-
-- native banner: `400:207`, recommended `2000x1035`, minimum `1200x621`, maximum `2400x1242`;
-- aggressive popup banner: `9:16`, recommended `900x1600`, minimum `450x800`, maximum `1350x2400`;
-- Seller Portal must show the matching recommended and minimum dimensions before upload.
-
----
-
-## 7.8. Promo Codes Page
-
-### Назначение
-
-Создание и управление промокодами.
-
-### Структура
-
-1. Header: `Промокоды`.
-2. Кнопка `Создать промокод`.
-3. Таблица промокодов.
-4. Форма create/edit в drawer или отдельной странице.
-
-### Таблица
-
-Колонки:
-
-- code;
-- discount type;
-- discount value;
-- active;
-- starts_at;
-- ends_at;
-- usage_limit;
-- used count;
-- per_user_limit;
-- actions.
-
-### Формы
-
-Поля:
-
-- code;
-- discount_type:
-  - percentage;
-  - fixed;
-
-- discount_value;
-- is_active;
-- starts_at;
-- ends_at;
-- usage_limit;
-- per_user_limit.
-
-Actions:
-
-- `Сохранить`;
-- `Деактивировать`;
-- `Удалить`, если безопасно поддерживается.
-
----
-
-## 7.9. Statistics Page
-
-### Назначение
-
-Отслеживание статистики по нажатиям и пользовательским действиям.
-
-### Структура
-
-1. Header: `Статистика`.
-2. Date range picker.
-3. KPI cards.
-4. Графики.
-5. Таблица событий.
-
-### KPI
-
-- просмотры товаров;
-- добавления в корзину;
-- checkout started;
-- orders created;
-- promo used;
-- conversion rate;
-- top products;
-- banner clicks.
-
-### Графики
-
-- line chart по дням;
-- bar chart по популярным товарам;
-- pie/donut по статусам заказов.
-
-### Event table
-
-Колонки:
-
-- event name;
-- user;
-- product/order/promo reference;
-- timestamp.
-
----
-
-## 7.10. Reviews Moderation Page
-
-### Назначение
-
-Модерация отзывов.
-
-### Структура
-
-1. Header: `Отзывы`.
-2. Tabs:
-   - Pending;
-   - Approved;
-   - Rejected.
-
-3. Review cards/table.
-4. Actions.
-
-### Review item
-
-Показывать:
-
-- товар;
-- пользователь;
-- рейтинг;
-- текст;
-- фото;
-- дата;
-- статус.
-
-Actions:
-
-- `Approve`;
-- `Reject`;
-- `Open order`;
-- `Open product`.
-
----
-
-## 7.11. Seller Settings
-
-### Назначение
-
-Служебные настройки seller/admin.
-
-### Секции
-
-- профиль продавца;
-- Telegram notification settings;
-- магазин;
-- роли и доступы;
-- API/OpenAPI info;
-- storage info;
-- logout.
-
----
-
-# 8. Навигационная карта Mini App
-
-Основные routes:
-
-- `/` или `/main` — лента товаров;
-- `/categories` — категории;
-- `/search` — расширенный поиск;
-- `/search/results` — результаты поиска;
-- `/product/:id` — карточка товара;
-- `/cart` — покупки с вкладками;
-- `/cart?tab=favorites` — избранное;
-- `/cart?tab=cart` — корзина;
-- `/cart?tab=orders` — заказы;
-- `/checkout` — оформление заказа;
-- `/order-success/:id` — заказ создан;
-- `/profile` — личный кабинет;
-- `/faq` — FAQ.
-
----
-
-# 9. Навигационная карта Seller Portal
-
-Основные routes:
-
-- `/login` — вход seller/admin;
-- `/dashboard` — главная seller page;
-- `/orders` — статусы заказов;
-- `/products` — все товары;
-- `/products/new` — добавление товара;
-- `/products/:id/edit` — редактирование товара;
-- `/banners` — конфигурация баннеров;
-- `/promo-codes` — промокоды;
-- `/reviews` — модерация отзывов;
-- `/statistics` — статистика;
-- `/settings` — настройки.
-
----
-
-# 10. Ключевые требования для разработчика
-
-1. Mini App и Seller Portal не должны выглядеть одинаково.
-2. Mini App — mobile-first, marketplace-like, мягкий визуальный стиль.
-3. Seller Portal — desktop-first, dashboard-like, технический стиль.
-4. На всех Mini App страницах должна быть нижняя навигация из 5 кнопок.
-5. На main обязательны:
-   - header;
-   - FAQ слева от поиска;
-   - search row между header и товарами;
-   - native рекламный баннер перед товарами;
-   - товарная сетка 2x2 на первом видимом экране.
-
-6. В cart section под header обязательны 3 кнопки:
-   - Избранное;
-   - Корзина;
-   - Заказы.
-
-7. Карточка товара должна брать логику маркетплейсов:
-   - фото;
-   - цена;
-   - старая цена;
-   - скидка;
-   - рейтинг;
-   - отзывы;
-   - размеры;
-   - избранное;
-   - add to cart.
-
-8. Seller dashboard должен иметь виджеты-переходы на:
-   - статусы заказов;
-   - товары;
-   - редактирование товаров;
-   - баннеры;
-   - промокоды;
-   - статистику.
-
-9. Все формы seller portal должны быть связаны с backend сущностями:
-   - Product;
-   - ProductVariant;
-   - ProductImage;
-   - Category;
-   - Tag;
-   - Banner;
-   - PromoCode;
-   - CouponUsage;
-   - Cart;
-   - Order;
-   - OrderItem;
-   - Review;
-   - Favorite;
-   - Notification;
-   - AuditLog;
-   - AnalyticsEvent.
-
-10. Интерфейс должен быть готов к дальнейшей генерации дизайна или реализации через Codex.
+```bash
+cd seller-panel
+npm run lint
+npm run typecheck
+npm test -- --run
+npm run build
+```

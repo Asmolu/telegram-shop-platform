@@ -1,60 +1,108 @@
 # Security Policy
 
-## Secrets
+This project handles customer data, Telegram identities, seller/admin access, uploads, orders, and production infrastructure. Treat secrets and operational data carefully.
 
-Never commit:
+## Supported Production Surface
 
-- `.env` files
-- Telegram bot tokens
+| Surface | Domain |
+| --- | --- |
+| Main domain and Mini App entry | `https://stylexac.ru` |
+| Mini App | `https://mini.stylexac.ru` |
+| API | `https://api.stylexac.ru` |
+| Seller Panel | `https://seller.stylexac.ru` |
+
+Production server: Aeza Frankfurt. Production path: `/opt/telegram-shop`.
+
+## Reporting a Vulnerability
+
+Report security issues privately to the project maintainer. Do not open a public issue containing exploit details, real secrets, customer data, bot tokens, database credentials, JWTs, private keys, or production env values.
+
+Include:
+
+- affected component
+- impact
+- reproduction steps without real secrets
+- suspected commit or release window
+- logs with secrets removed
+- whether customer data or order data may be affected
+
+## Secret Handling
+
+Never commit or document:
+
+- `.env`
+- `backend/.env.production`
+- bot tokens
+- DB passwords
 - JWT secrets
-- database credentials
+- Yandex Disk tokens
 - private keys
-- production dumps
 - uploaded user files
+- database dumps
+- production credentials
 
-Use `.env.example` files for placeholders only.
+Use placeholders:
 
-## Authentication
+```text
+<SECRET>
+<BOT_TOKEN>
+<DATABASE_URL>
+<JWT_SECRET>
+```
 
-The planned authentication model is:
+## Authentication Requirements
 
-- Telegram Mini App `initData` validation for Telegram users
-- JWT for API session authorization
-- RBAC for USER / SELLER / ADMIN access separation
+- Telegram Mini App `initData` must be validated server-side.
+- Raw `initData` must not be logged or stored.
+- JWT secret must be strong in production.
+- CORS must not use `*` in production.
+- Seller/admin endpoints must enforce roles.
+- Auth diagnostics must be sanitized.
 
-## Reporting security issues
+## Bot Separation
 
-Create a private issue or contact the repository owner directly. Do not disclose exploitable vulnerabilities publicly before a fix exists.
+Bot 1 handles customer flows:
 
-## High-risk areas
+- `/start`
+- `/stop`
+- service notifications
+- campaigns
+- channel entry publish/pin
 
-- Telegram `initData` validation
-- JWT signing and expiration
-- upload path handling
-- order checkout transaction
-- stock deduction race conditions
-- promo code abuse / replay
-- seller/admin RBAC boundaries
-- analytics/telemetry payload allowlists
+Bot 2 handles seller/admin/auth-related flows.
 
-## Sprint 14 hardening
+Do not use Bot 2 for customer/channel buyer notification flows.
 
-- Production/staging startup rejects the default development `JWT_SECRET_KEY`.
-- Production/staging startup rejects wildcard `CORS_ORIGINS`.
-- API rate limiting is configurable and applied to login, uploads, checkout, promo validation, review creation, and global API traffic.
-- Public catalog, taxonomy, banner, and approved review cache reads must fail open to PostgreSQL when Redis is unavailable.
-- Structured request logs include request metadata but never Authorization headers or env values.
+## Upload Security
 
-## Telemetry privacy
+Uploads must keep:
 
-Mini App telemetry must stay privacy-safe. The ingestion endpoint rejects
-unknown fields and must not accept Telegram `initData`, JWTs, cookies,
-Authorization headers, full URLs with query strings, search text, checkout
-personal data, payment recipient details, receipt paths/content, raw stack
-traces, raw user agents, or frontend-supplied user identifiers. Telemetry
-session IDs are random, short-lived, and not derived from IP, user agent,
-Telegram ID, or device properties. Telemetry must not be used for IP
-geolocation, fraud detection, authentication, pricing, or catalog business
-logic.
+- size validation
+- extension validation
+- MIME validation
+- image decoding validation
+- safe filenames
+- path containment
+- profile-specific aspect ratio validation where implemented
 
-See `docs/SECURITY_REVIEW.md` for the current MVP security review and known limitations.
+PostgreSQL stores paths/URLs only, not file bytes.
+
+## Production Operations
+
+Before migrations:
+
+```bash
+ssh tsplatform-frankfurt
+sudo systemctl start telegram-shop-backup.service
+sudo systemctl status telegram-shop-backup.service --no-pager
+```
+
+Smoke checks:
+
+```bash
+curl -sS -D - https://api.stylexac.ru/health -o /dev/null
+curl -I https://mini.stylexac.ru/
+curl -I https://seller.stylexac.ru/
+```
+
+Do not paste production logs publicly if they contain customer data, Telegram ids, stack traces with request metadata, or env values.

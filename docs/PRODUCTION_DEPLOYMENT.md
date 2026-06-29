@@ -1,402 +1,215 @@
 # Production Deployment
 
-Sprint 14 adds a small Docker Compose production profile for MVP staging or single-node production.
+This document is the current production deploy runbook for StyleXac.
 
-Production domain map:
+## Current Production Context
 
-- `https://stylexac.ru` and `https://www.stylexac.ru`: Mini App
-- `https://mini.stylexac.ru`: Mini App
-- `https://api.stylexac.ru`: backend API
-- `https://seller.stylexac.ru`: Seller Panel
+| Area | Value |
+| --- | --- |
+| Server | Aeza Frankfurt |
+| SSH alias | `tsplatform-frankfurt` |
+| Project path | `/opt/telegram-shop` |
+| Compose file | `docker-compose.prod.yml` |
+| Env file | `backend/.env.production` |
+| Main domain and Mini App entry | `https://stylexac.ru` |
+| Mini App direct domain | `https://mini.stylexac.ru` |
+| API domain | `https://api.stylexac.ru` |
+| Seller Panel domain | `https://seller.stylexac.ru` |
+| Current migration head | `20260628_0039` |
+| Recent production commit | `6245489 Add Bot 1 write access flow for order notifications` |
 
-## Required files
+The production stack contains `backend`, `postgres`, `redis`, `mini-app`, and `seller-panel`. Host Caddy terminates TLS and reverse-proxies to the containers.
 
-Create these files from examples and replace every placeholder before starting services:
+## Environment Convention
 
-```bash
-cp backend/.env.production.example backend/.env.production
-cp mini-app/.env.production.example mini-app/.env.production
-cp seller-panel/.env.production.example seller-panel/.env.production
-```
+- `.env` is for local development and local checks.
+- `backend/.env.production` is for VDS/server work and production-domain checks.
+- Do not copy real production env values into documentation.
+- Use placeholders only: `<SECRET>`, `<BOT_TOKEN>`, `<DATABASE_URL>`, `<JWT_SECRET>`.
 
-Do not commit the generated `.env.production` files.
+## Before Deploying
 
-## Required environment
+1. Confirm the target commit and changed services.
+2. Confirm whether Alembic migrations are present.
+3. Run a backup before any migration.
+4. Avoid deploys while a customer campaign is actively sending unless the campaign can be paused.
+5. Confirm Bot 1 and Bot 2 tokens remain assigned to their correct responsibilities.
 
-Backend:
-
-- `APP_ENV=production`
-- `DEBUG=false`
-- `DATABASE_URL`
-- `REDIS_URL`
-- `JWT_SECRET_KEY`
-- `CORS_ORIGINS`
-- `PUBLIC_API_BASE_URL=https://api.stylexac.ru`
-- `PUBLIC_UPLOADS_URL=/uploads` for same-origin Frankfurt routing, or
-  `https://api.stylexac.ru/uploads` when absolute upload URLs are required
-- `PUBLIC_MINI_APP_BASE_URL=https://mini.stylexac.ru`
-- `PUBLIC_SELLER_PANEL_BASE_URL=https://seller.stylexac.ru`
-- `TELEGRAM_WEBAPP_BOT_TOKEN`
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SELLER_CHAT_ID` for Bot 2 seller verification,
-  seller notifications, and seller-chat broadcast
-- `TELEGRAM_SELLER_BOT_USERNAME` if the Seller Panel should show a direct `t.me`
-  start link during registration
-- `TELEGRAM_SELLER_WEBHOOK_SECRET` for the protected Bot 2 webhook
-  `X-Telegram-Bot-Api-Secret-Token` header
-- `TELEGRAM_CUSTOMER_BOT_TOKEN` for Bot 1 customer notification registry
-  webhook setup, service notification delivery, and customer campaigns
-- `TELEGRAM_CUSTOMER_BOT_USERNAME` for Mini App customer notification start
-  links and Seller Panel channel-entry direct links
-- `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` for the protected Bot 1 webhook
-  `X-Telegram-Bot-Api-Secret-Token` header
-- `TELEGRAM_MINI_APP_SHORT_NAME=` empty when BotFather does not offer a Mini App
-  short name
-- `TELEGRAM_CHANNEL_ENTRY_START_PARAM=channel_pin` for Seller Panel channel
-  pinned entry messages
-- `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED=true`
-- `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS=60` (or another positive polling interval)
-- cache, rate limit, and customer campaign batch settings from
-  `backend/.env.production.example`
-- telemetry settings from `backend/.env.production.example` or defaults:
-  `TELEMETRY_ENABLED`, `TELEMETRY_MAX_EVENTS_PER_BATCH`,
-  `TELEMETRY_MAX_BODY_BYTES`, `TELEMETRY_*_SAMPLE_RATE`,
-  `TELEMETRY_RETENTION_DAYS`, and telemetry rate-limit settings
-
-Frontend:
-
-- `VITE_API_BASE_URL=/api/v1` for same-origin Mini App and Seller Panel builds,
-  or `https://api.stylexac.ru/api/v1` for the legacy separate API domain mode
-- `VITE_TELEGRAM_BOT_USERNAME` for Mini App UI links only, not bot tokens
-- `VITE_TELEMETRY_DISABLED=true` can disable Mini App telemetry in an emergency
-
-## Start
-
-Before deploying this migration, create and verify a PostgreSQL plus uploads
-backup. The release requires rebuilding the backend, Mini App, and Seller Panel,
-then applying Alembic head `20260614_0027`. The persistent uploads volume must
-allow the backend to create and write `/app/uploads/payment_receipts/`.
-
-Privacy-safe telemetry requires a coordinated backend + Mini App release:
-
-- backend migration `20260625_0036` adds nullable telemetry columns to
-  `analytics_events`;
-- Mini App sends bounded batches to `POST /api/v1/analytics/telemetry`;
-- no production telemetry cleanup is run automatically;
-- same-origin API routing is documented in
-  `docs/FRANKFURT_DEPLOYMENT_READINESS.md` and
-  `deploy/caddy/Caddyfile.frankfurt.example`.
-
-Validate the compose file syntax:
+## Deploy Flow
 
 ```bash
-docker compose -f docker-compose.prod.yml config
+ssh tsplatform-frankfurt
+cd /opt/telegram-shop
+git status --short
+git fetch origin
+git pull --ff-only origin main
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml config >/tmp/telegram-shop-compose-check.yml
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml build backend mini-app seller-panel
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic upgrade head
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d backend mini-app seller-panel
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 ```
 
-Build and start:
+If only a subset of services changed, build and restart only that subset after confirming the dependency impact. When a migration exists, run the migration before restarting traffic-facing services.
+
+## Mandatory Backup Before Migration
+
+Production backups are managed through systemd:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d --build
+sudo systemctl start telegram-shop-backup.service
+sudo systemctl status telegram-shop-backup.service --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
 ```
 
-Run migrations:
+Use the systemd service on production. Do not use a bare Python backup command on the host for normal production deploys.
 
-```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend alembic upgrade head
-```
+## Migration Checks
 
-Manual SBP payments require migration head `20260614_0027`. Seller Portal
-email/password auth, seller approval, and Customer Notifications Phase 2 remain
-included in that migration chain. Bot 2 is connected through:
+Current production head after the latest deploy is:
 
 ```text
-POST /api/v1/telegram/seller-bot/webhook
+20260628_0039
 ```
 
-Set the webhook after deployment:
+Check the current database revision after migration:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_seller_bot_webhook.py set --base-url https://api.stylexac.ru
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
 ```
 
-Verify Telegram webhook state without printing the bot token:
+If the host does not have a `python` command, use the backend Docker container or the project virtual environment for checks.
+
+## Smoke Checks
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_seller_bot_webhook.py info
+curl -sS -D - https://api.stylexac.ru/health -o /dev/null
+curl -I https://mini.stylexac.ru/
+curl -I https://seller.stylexac.ru/
 ```
 
-The webhook URL should be:
+Expected result:
 
-```text
-https://api.stylexac.ru/api/v1/telegram/seller-bot/webhook
-```
+- API health returns `2xx`.
+- Mini App returns a browser-loadable HTML response.
+- Seller Panel returns a browser-loadable HTML response.
 
-Bot 1 customer notification registry is connected through:
-
-```text
-POST /api/v1/telegram/customer-bot/webhook
-```
-
-Set the Bot 1 webhook after deployment:
+## Log Checks
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_customer_bot_webhook.py set --base-url https://api.stylexac.ru
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
 ```
 
-Verify Bot 1 webhook state without printing the bot token or webhook secret:
+Check for:
+
+- backend startup errors
+- migration errors
+- Telegram webhook errors
+- upload path errors
+- Redis connectivity errors
+- frontend asset serving errors
+- customer notification delivery failures after checkout tests
+
+Do not paste logs containing real secrets or raw production env values.
+
+## Service Map
+
+| Compose service | Purpose | Public exposure |
+| --- | --- | --- |
+| `backend` | FastAPI API, uploads, bot webhooks, background workers | Through `https://api.stylexac.ru` |
+| `postgres` | PostgreSQL 16 database | Internal Docker network |
+| `redis` | Redis 7 cache/rate-limit/temporary state store | Internal Docker network |
+| `mini-app` | Built Mini App static service | Through `https://mini.stylexac.ru` and `https://stylexac.ru` |
+| `seller-panel` | Built Seller Panel static service | Through `https://seller.stylexac.ru` |
+
+## Telegram Bot Checks
+
+Bot 1:
+
+- customer `/start`
+- customer `/stop`
+- service notifications
+- customer campaigns
+- channel entry publish/pin
+
+Bot 2:
+
+- seller/admin/auth-related flows
+
+After deploy, verify Bot 1 and Bot 2 webhooks only through safe operational checks. Do not print bot tokens.
+
+## Customer Notification Checks
+
+For notification-related deploys, verify:
+
+- Bot 1 `/start` creates or updates `CustomerTelegramSubscription`.
+- Bot 1 `/stop` disables service and marketing eligibility.
+- Mini App write-access action calls `requestWriteAccess()` only after a user action.
+- `POST /api/v1/customer-notifications/me/write-access` persists grant or denial.
+- Service notification send prefers `telegram_chat_id` and can use `telegram_user_id` when write access is granted and no private chat exists.
+- Campaign delivery reports remain accessible in Seller Panel.
+
+## Channel Entry Checks
+
+For channel-entry deploys, verify:
+
+- Seller Panel `/channel-entry` loads.
+- Publish uses Bot 1.
+- Channel button is a URL button.
+- Link uses `startapp=channel_pin` unless overridden by `TELEGRAM_CHANNEL_ENTRY_START_PARAM`.
+- History stores Telegram `message_id` and pin status.
+
+Do not test publish/pin in a production customer channel unless that channel is approved for operational tests.
+
+## Caddy and MTU Checks
+
+Caddy uses TCP `:443`; HTTP/3/QUIC is intentionally disabled. The MSS clamp service is intentionally enabled.
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml exec backend \
-  python scripts/set_customer_bot_webhook.py info
+sudo ss -tulpn | grep ':443' || true
+sudo systemctl status tsplatform-mss-clamp.service --no-pager
+sudo iptables -t mangle -S OUTPUT | grep TCPMSS || true
+sudo ip6tables -t mangle -S OUTPUT | grep TCPMSS || true
 ```
 
-The Bot 1 webhook URL should be:
+Expected rule: TCPMSS `set-mss 1120` for ports `80` and `443`.
 
-```text
-https://api.stylexac.ru/api/v1/telegram/customer-bot/webhook
-```
+## Rollback
 
-Seller Panel can publish a pinned Telegram channel entry message through Bot 1:
+Rollback depends on whether a migration was applied.
 
-- Open `https://seller.stylexac.ru/channel-entry`.
-- Bot 1 must be an administrator in the target channel with rights to publish
-  messages and pin/edit messages.
-- Public channels can use `@username`; the current manual test channel example
-  is `@checktsplatform`.
-- Private channels must use a numeric `-100...` chat id.
-- The inline button must use the Telegram Mini App direct link, not the web URL:
-  `https://t.me/CheckYouStyleBot?startapp=channel_pin`.
-- Do not use `https://mini.stylexac.ru/` as the channel button URL. It opens the
-  website directly and Telegram will not provide Mini App `initData`.
-
-Required production values:
-
-```text
-TELEGRAM_CUSTOMER_BOT_USERNAME=CheckYouStyleBot
-TELEGRAM_MINI_APP_SHORT_NAME=
-TELEGRAM_CHANNEL_ENTRY_START_PARAM=channel_pin
-```
-
-Customer campaign staging flow before production enablement:
-
-1. Use one internal Telegram account and open Bot 1 with `/start`.
-2. In `https://seller.stylexac.ru`, verify Customer Notifications shows the
-   internal recipient as connected with service and marketing enabled. Raw chat
-   ids must not appear in the Seller Panel.
-3. Create a text-only draft campaign, then a draft campaign with one JPEG/PNG/WebP
-   image. The image campaign text is sent as the Telegram photo caption.
-4. Run preview and confirm marketing counts exclude non-opted-in recipients.
-5. Send a test message; this uses the current seller/admin Bot 1 subscription,
-   not Bot 2 seller chat metadata.
-6. Start or schedule a tiny internal campaign and let the backend lifespan
-   worker send it automatically. The protected process-batch endpoint is
-   support/recovery-only.
-7. Confirm delivery report counts and sanitized errors before enabling larger
-   production campaigns.
-
-Seller registration verification:
-
-1. Open `https://seller.stylexac.ru`.
-2. Start seller registration and copy the `/start seller_<token>` command.
-3. Open Bot 2 and send the command.
-4. Confirm Bot 2 posts an approval request in `TELEGRAM_SELLER_CHAT_ID`.
-5. Click Confirm in the seller group within 2 minutes.
-6. Confirm Bot 2 sends the private verification code to the seller.
-7. Enter the code in Seller Panel and confirm that seller login works.
-8. In the seller group, verify `/sellers` shows `Seller ID for commands`.
-9. Verify `/block_seller 6902459394` returns guidance to use Seller ID and does
-   not produce a webhook 503.
-10. On a test seller only, verify `/block_seller <Seller ID>` prevents
-   login/current-user access without deleting seller history.
-
-Manual SBP payment verification:
-
-1. In Seller Panel settings, save the SBP phone and enable manual payment.
-2. Create a Mini App order and confirm the 30-minute payment page shows the
-   snapshotted phone, amount, bank/recipient when configured, and order comment.
-3. Upload a receipt and click `Я оплатил`.
-4. Confirm Bot 2 posts only to `TELEGRAM_SELLER_CHAT_ID`, then approve or reject
-   with an active seller/admin account.
-5. Confirm the original Bot 2 review message loses its inline buttons and shows
-   the final approval/rejection result. If Telegram cannot edit it, confirm a
-   final-state follow-up appears.
-6. Confirm approval moves the order to processing without returning stock.
-7. Confirm rejection or expiry cancels the order and returns stock exactly once.
-8. Change seller payment settings and confirm the existing payment snapshot is
-   unchanged while a new checkout uses the new values.
-
-Order customer messaging:
-
-1. Apply Alembic revision `20260615_0029`.
-2. Open an order in Seller Panel and use `Отправить сообщение`.
-3. Verify text-only and photo-only sends arrive in the customer's Bot 1 chat.
-4. Verify a customer without an active Bot 1 private chat returns a clear seller
-   error and no Bot 2 customer message is attempted.
-
-Bot 2 token and seller group configuration are required for Telegram review
-buttons. Seller Panel review remains available without Telegram delivery. Bot 1
-token is required only when customer payment notifications are enabled, and Bot
-2 must never send customer messages.
-
-Smoke checks:
+If no migration was applied:
 
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/api/v1/products
-curl http://localhost:8000/api/v1/categories
-curl http://localhost:8000/api/v1/tags
+cd /opt/telegram-shop
+git log --oneline -5
+git checkout <PREVIOUS_SAFE_COMMIT>
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml build backend mini-app seller-panel
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d backend mini-app seller-panel
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 ```
 
-Public production smoke checks:
+If a migration was applied:
 
-```bash
-curl -i https://api.stylexac.ru/health
-curl -i https://stylexac.ru
-curl -i https://www.stylexac.ru
-curl -i https://mini.stylexac.ru
-curl -i https://seller.stylexac.ru
-```
+1. Stop and assess before downgrading.
+2. Confirm the backup created before migration is usable.
+3. Determine whether Alembic downgrade is safe for the specific migration.
+4. Prefer forward-fix when customer data would be lost by downgrade.
+5. Restore from backup only after explicit operational approval.
 
-Same-origin reverse-proxy smoke checks:
+Do not run destructive database commands without an approved rollback plan.
 
-```bash
-curl -i https://mini.stylexac.ru/api/v1/products
-curl -i https://mini.stylexac.ru/api/v1/unknown
-curl -i https://mini.stylexac.ru/uploads/missing.webp
-curl -i https://seller.stylexac.ru/api/v1/products
-```
+## Post-Deploy Record
 
-`/api/*` and `/uploads/*` responses must come from the backend, not SPA
-`index.html`.
+Record:
 
-Synthetic readiness checker:
-
-```bash
-cd backend
-python scripts/check_production_connectivity.py \
-  --api-base-url https://api.stylexac.ru/api/v1 \
-  --mini-app-url https://mini.stylexac.ru \
-  --seller-panel-url https://seller.stylexac.ru \
-  --telegram-public
-```
-
-For the full Frankfurt checklist, provider preflight, webhook cutover, ADMIN
-bootstrap, and backup readiness, see
-`docs/FRANKFURT_DEPLOYMENT_READINESS.md`.
-
-## Services
-
-- Backend API: `http://localhost:8000`
-- Seller Panel: `http://localhost:8080`
-- Mini App static bundle: `http://localhost:8081`
-- PostgreSQL: private compose network, persistent `postgres_prod_data` volume
-- Redis: private compose network, persistent `redis_prod_data` volume
-- Uploads: persistent `uploads_data` volume mounted at `/app/uploads`
-- Manual payment receipts: writable `/app/uploads/payment_receipts/` inside that volume
-
-## Cache Headers
-
-- Frontend `index.html` must use revalidation (`Cache-Control: no-cache`) so Telegram WebView does not keep stale entry HTML after a deployment.
-- Vite hashed files under `/assets/`, including logo and fonts emitted by Vite, may use `Cache-Control: public, max-age=31536000, immutable`.
-- Product image derivatives with UUID-based paths ending in `.thumbnail.webp`, `.card.webp`, or `.detail.webp` may use immutable public cache.
-- Legacy upload originals and payment receipts must not be marked public immutable. Payment receipts should use private/no-store caching.
-- Public catalog API responses use conditional requests: products, product detail, and banners return `ETag` with `Cache-Control: no-cache`; categories and tags return `ETag` with `Cache-Control: public, max-age=60, stale-while-revalidate=300`.
-- Personalized API responses such as auth, profile, cart, favorites, checkout, orders, payments, receipts, and seller/admin routes must not be cached publicly. Cart and favorites explicitly return `Cache-Control: private, no-store`.
-- Deploy the compact public product DTO as a coordinated backend and Mini App release. Seller Panel remains on `/api/v1/products/admin`; do not point it at compact public list responses.
-
-## Migrations
-
-- Add new Alembic migrations for schema changes.
-- Do not edit old migrations after they have been shared.
-- Review generated migrations before running them in staging or production.
-- Run `alembic upgrade head` during deployment before routing traffic to a new backend build.
-- Keep downgrade functions when the existing migration style supports them.
-
-## Observability
-
-Application logs are JSON by default and include request id, method, path, status, and duration.
-Error monitoring is prepared through `ERROR_MONITORING_ENABLED` and `SENTRY_DSN`, but no external SDK is required for MVP.
-
-## Production Backups
-
-Production backups run from the VDS host and target the production Compose
-services. PostgreSQL is dumped in custom format, uploads are archived
-separately, Redis is not backed up as durable data, and `.env.production` is
-not included in normal backup archives.
-
-Required backup variables in `backend/.env.production`:
-
-```text
-BACKUP_ENABLED=true
-BACKUP_ENVIRONMENT=production
-BACKUP_LOCAL_DIR=backups
-BACKUP_REMOTE_DIR=/TelegramShopPlatform/storage
-BACKUP_INTERVAL_HOURS=6
-BACKUP_RETENTION_DAYS=5
-BACKUP_RETENTION_MAX_COUNT=20
-BACKUP_RESTORE_VERIFY_ENABLED=true
-YANDEX_CLIENT_ID=<placeholder>
-YANDEX_CLIENT_SECRET=<placeholder>
-YANDEX_REFRESH_TOKEN=<placeholder>
-BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true
-```
-
-The script also uses existing Bot 2 variables:
-
-```text
-TELEGRAM_BOT_TOKEN
-TELEGRAM_SELLER_CHAT_ID
-```
-
-Validate on the VDS:
-
-```bash
-python backend/scripts/backup_production.py validate-config --strict-yandex
-```
-
-Run a manual production backup:
-
-```bash
-python backend/scripts/backup_production.py run
-```
-
-Every successful run restore-verifies the PostgreSQL dump in a temporary
-database, verifies the uploads archive is readable, uploads the final archive to
-Yandex Disk under `/TelegramShopPlatform/storage/`, checks remote file size,
-applies 5-day / 20-archive local and remote retention, and sends a sanitized
-Bot 2 notification.
-
-Systemd templates are provided but not enabled automatically:
-
-```text
-scripts/systemd/telegram-shop-backup.service
-scripts/systemd/telegram-shop-backup.timer
-```
-
-Install manually, adjusting `/opt/TelegramShopPlatform` if the VDS uses another
-path:
-
-```bash
-sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.service /etc/systemd/system/
-sudo cp /opt/TelegramShopPlatform/scripts/systemd/telegram-shop-backup.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now telegram-shop-backup.timer
-systemctl list-timers telegram-shop-backup.timer
-```
-
-See `docs/BACKUP_AND_RESTORE.md` and `docs/BACKUP_STRATEGY.md` for restore
-drill steps, failure behavior, and notification contents.
-
-## Known MVP Limits
-
-- Compose is intended for MVP staging or a single-node deployment, not high availability.
-- Public review and seller moderation lists keep their current response shape; review admin pagination is documented as a later compatibility-safe improvement.
-- Redis is a cache and rate-limit accelerator. Public endpoints fall back to PostgreSQL if Redis is unavailable.
-- Customer Notifications supports controlled Bot 1 campaigns with materialized
-  delivery rows, one optional campaign image, and automatic lifespan-worker
-  processing when `TELEGRAM_CUSTOMER_BOT_TOKEN` is configured. Backend template
-  APIs remain available, but Seller Panel template UI is hidden. Recipient
-  exports, arbitrary database interpolation, non-plain parse modes, and
-  per-recipient image copies remain out of scope.
+- deployed commit
+- services rebuilt
+- Alembic revision after deploy
+- backup job status
+- smoke check results
+- relevant log status
+- any Telegram/customer notification verification performed

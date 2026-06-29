@@ -1,18 +1,27 @@
 # Changelog
 
+All notable project changes are tracked here. Dates use ISO format.
+
 ## Unreleased
 
-- Simplified Seller Panel Customer Notifications by hiding template UI and manual batch sending.
-- Added one optional image per customer campaign, sent by Bot 1 as Telegram `sendPhoto` with caption text.
-- Made Bot 1 `/start` enable service and marketing notifications, with a migration backfill for active chats that did not explicitly opt out.
-- Added automatic linking of existing Bot 1 subscriptions after Mini App Telegram auth and subscription reads.
-- Added the `connected` campaign audience for all active Bot 1 chats, including unlinked subscriptions.
+- Rewrote project documentation for the current StyleXac production state.
+- Documented current domains: `stylexac.ru`, `mini.stylexac.ru`, `api.stylexac.ru`, `seller.stylexac.ru`.
+- Documented Aeza Frankfurt production operations at `/opt/telegram-shop`.
+- Documented current migration head `20260628_0039`.
+- Documented Bot 1 write-access flow for order/service notifications.
+- Documented customer campaign delivery eligibility and reports.
+- Documented Seller Panel `/channel-entry` flow.
+- Documented Mini App draggable help widget, cart delivery-price note, product detail size note, brand display, and discount badge tiers.
+- Documented Caddy HTTP/3/QUIC disabled state and MSS clamp service.
 
-## 0.1.0 — Initial scaffold
+## 2026-06-28
 
-- Prepared repository for GitHub and Codex workflow.
-- Switched backend architecture to Python/FastAPI.
-- Added SQLAlchemy/Alembic/PostgreSQL backend baseline.
-- Added React/Vite/TypeScript frontend placeholders for Mini App and Seller Panel.
-- Added Docker Compose local development stack.
-- Added GitHub CI workflow and project documentation.
+- Deployed production commit `6245489 Add Bot 1 write access flow for order notifications`.
+- Added Mini App write-access persistence for customer service notifications.
+- Updated service notification target resolution to support Bot 1 write-access users without silently enabling marketing.
+- Kept Bot 1 customer responsibilities separated from Bot 2 seller/admin responsibilities.
+
+## Historical
+
+- Initialized the FastAPI backend scaffold.
+- Added product catalog models, category/tag/product APIs, uploads, cart, orders, promo codes, reviews, seller/admin flows, analytics, manual payments, banners, customer notifications, and production deployment support over multiple implementation increments.

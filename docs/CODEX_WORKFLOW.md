@@ -1,78 +1,162 @@
 # Codex Workflow
 
-## Goal
+This repository can be edited by Codex or another AI coding agent, but changes must follow the same engineering and security rules as human changes.
 
-Use GitHub as the source of truth so Codex can work against repository state, produce diffs, and help implement sprint tasks.
+## Current Context
 
-## Repository preparation
+| Area | Current value |
+| --- | --- |
+| Product | StyleXac / TelegramShopPlatform |
+| Production domains | `stylexac.ru`, `mini.stylexac.ru`, `api.stylexac.ru`, `seller.stylexac.ru` |
+| Production server | Aeza Frankfurt |
+| Production path | `/opt/telegram-shop` |
+| Current migration head | `20260628_0039` |
 
-This repository includes `AGENTS.md` in the root. Keep it updated because Codex reads it before working and uses it as durable project guidance.
+## Before Editing
 
-## Recommended task format for Codex
+1. Inspect repository structure.
+2. Read relevant docs.
+3. Read the implementation before changing it.
+4. Check `git status --short`.
+5. Identify whether the task is backend, Mini App, Seller Panel, docs, operations, or cross-cutting.
+6. Keep changes scoped to the requested area.
 
-Use small, focused tasks.
+For Mini App or Seller Panel UI work, read `UI_DESIGN_SPEC.README.md`.
 
-Good:
+## Documentation-Only Tasks
 
-```text
-Implement Sprint 1 auth foundation in backend only.
-Follow AGENTS.md. Add Telegram initData validation service, JWT creation, User repository methods, and tests. Do not implement frontend yet.
+Allowed:
+
+- edit Markdown documentation
+- update examples that do not change runtime behavior
+- run searches and docs checks
+
+Not allowed:
+
+- source code changes
+- backend logic changes
+- frontend logic changes
+- database model changes
+- Alembic migration changes
+- Docker Compose behavior changes
+- real secret disclosure
+
+Always run:
+
+```bash
+git diff --check
 ```
 
-Bad:
+Run markdown lint only if already available locally.
+
+## Backend Tasks
+
+Follow the module structure:
 
 ```text
-Build the whole shop.
+backend/app/modules/<feature>/
+├── router.py
+├── schemas.py
+├── service.py
+└── repository.py
 ```
 
-## Suggested first Codex tasks
+Rules:
 
-1. Validate current scaffold and fix import/config issues.
-2. Create initial Alembic migration from SQLAlchemy models.
-3. Implement auth module: Telegram initData validation + JWT.
-4. Implement user repository/service.
-5. Implement product catalog CRUD.
-6. Implement upload validation and local file storage.
-7. Implement cart module.
-8. Implement order checkout transaction.
+- Routers stay thin.
+- Services own business logic and transactions.
+- Repositories own SQLAlchemy queries.
+- SQLAlchemy models live in `backend/app/db/models.py` until intentionally split.
+- Add Alembic migrations for schema changes.
+- Use async SQLAlchemy sessions.
 
-## Review checklist for Codex changes
+Relevant checks:
 
-Before merging Codex-generated changes, check:
-
-- No secrets were added.
-- No `.env` file was committed.
-- No NestJS/Prisma backend code was added.
-- New DB fields have Alembic migrations.
-- Business logic is not inside routers.
-- Seller Portal auth uses the protected Bot 2 webhook start-token verification
-  flow, requires seller group approval before code delivery, and never exposes
-  bot tokens.
-- Bot 2 seller security commands are restricted to the configured seller group
-  and audit critical actions.
-- Customer notification changes keep Bot 1 separate from Bot 2, use
-  `POST /api/v1/telegram/customer-bot/webhook` protected by
-  `TELEGRAM_CUSTOMER_WEBHOOK_SECRET`, and never expose bot tokens or raw
-  Telegram chat IDs in frontend responses.
-- Mini App customer notification settings must use backend APIs and the
-  Telegram WebApp UI boundary only; do not store or forward raw `initData`.
-- Seller Panel customer notification views are registry and service-delivery
-  listing only for MVP Phase 1.5. Do not add customer campaigns, mass sending,
-  broadcast deliveries, scheduling, or campaign UI unless a later sprint
-  explicitly asks for them.
-- Tests or smoke checks were added for important behavior.
-- README/SRS/Sprint Plan were updated if architecture changed.
-
-## Useful prompts
-
-```text
-Read AGENTS.md, SRS.README.md, and SPRINT_PLAN.md. Summarize the current architecture and identify the next safest implementation task. Do not modify files yet.
+```bash
+cd backend
+python -m compileall app tests
+ruff check .
+pytest
 ```
 
-```text
-Implement the next task from Sprint 0 only. Keep the diff small. Run backend checks and report what passed or failed.
+## Frontend Tasks
+
+Mini App:
+
+```bash
+cd mini-app
+npm test -- --run
+npm run build
+npm run verify:bundle
 ```
 
-```text
-Review the current diff for architecture violations against AGENTS.md. Do not modify files. Return a prioritized list of issues.
+Seller Panel:
+
+```bash
+cd seller-panel
+npm run lint
+npm run typecheck
+npm test -- --run
+npm run build
 ```
+
+Do not hardcode production API URLs. Use `VITE_API_BASE_URL` or compose build args.
+
+## Bot and Telegram Rules
+
+Bot 1:
+
+- customer `/start`
+- customer `/stop`
+- service notifications
+- customer campaigns
+- channel entry publish/pin
+
+Bot 2:
+
+- seller/admin/auth-related flows
+
+Telegram Mini App `initData` must always be validated server-side. Raw `initData` must not be logged or stored.
+
+## Customer Notification Rules
+
+- Write access is requested only after a user action.
+- Write access enables service notifications only.
+- Write access does not silently enable marketing campaigns.
+- Service notifications prefer real private-chat `telegram_chat_id`.
+- Current service notification fallback can use `telegram_user_id` when write access is granted.
+- Campaign delivery requires real Bot 1 private-chat state.
+- Delivery failures must be sanitized.
+
+## Channel Entry Rules
+
+- Seller Panel route is `/channel-entry`.
+- Bot 1 publishes and pins channel messages.
+- Channel button uses a URL to Mini App `startapp`.
+- Do not use Telegram `web_app` button for channel posts.
+- Channel-entry auth does not create real private Bot 1 chat state.
+
+## Secrets
+
+Never commit or document real:
+
+- bot tokens
+- DB passwords
+- JWT secrets
+- Yandex Disk tokens
+- private keys
+- production `.env` content
+- uploaded user files
+- database dumps
+
+Use placeholders: `<SECRET>`, `<BOT_TOKEN>`, `<DATABASE_URL>`, `<JWT_SECRET>`.
+
+## Final Response Checklist
+
+When work is complete, report:
+
+- what changed
+- files changed
+- checks run and results
+- checks not run and why
+- safety notes for secrets, migrations, and source-code scope
