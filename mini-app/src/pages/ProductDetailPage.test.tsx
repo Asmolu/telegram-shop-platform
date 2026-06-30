@@ -14,11 +14,16 @@ const apiMocks = vi.hoisted(() => ({
   getProduct: vi.fn(),
   getProductReviews: vi.fn(),
   removeFavorite: vi.fn(),
+  resolveProduct: vi.fn(),
 }));
 
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   goBack: vi.fn(),
+  route: {
+    currentPath: '/product/10',
+    pathname: '/product/10',
+  },
 }));
 
 vi.mock('../shared/api', () => ({
@@ -30,6 +35,7 @@ vi.mock('../shared/api', () => ({
   getProduct: apiMocks.getProduct,
   getProductReviews: apiMocks.getProductReviews,
   removeFavorite: apiMocks.removeFavorite,
+  resolveProduct: apiMocks.resolveProduct,
   toApiErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
 }));
 
@@ -40,6 +46,10 @@ vi.mock('../shared/auth/AuthProvider', () => ({
 vi.mock('../shared/router/RouterProvider', () => ({
   getAuthPath: (path: string) => `/auth?returnTo=${encodeURIComponent(path)}`,
   getNumericRouteParam: (pathname: string, prefix: string) => Number(pathname.slice(prefix.length)),
+  getCategoryProductRouteParams: (pathname: string) => {
+    const match = pathname.match(/^\/category\/([^/]+)\/product\/([^/]+)$/);
+    return match ? { categorySlug: match[1], productSlug: match[2] } : null;
+  },
   isFirstLevelRoutePath: (path: string) => {
     const url = new URL(path, window.location.origin);
     return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
@@ -48,8 +58,8 @@ vi.mock('../shared/router/RouterProvider', () => ({
     <a href={to} {...props}>{children}</a>
   ),
   useRouter: () => ({
-    currentPath: '/product/10',
-    pathname: '/product/10',
+    currentPath: routerMocks.route.currentPath,
+    pathname: routerMocks.route.pathname,
     navigate: routerMocks.navigate,
     goBack: routerMocks.goBack,
   }),
@@ -66,6 +76,8 @@ function mockProductDetail(product = productFixture(), cart = cartFixture()) {
 describe('ProductDetailPage sticky actions', () => {
   afterEach(() => {
     cleanup();
+    routerMocks.route.currentPath = '/product/10';
+    routerMocks.route.pathname = '/product/10';
     vi.clearAllMocks();
   });
 
@@ -151,6 +163,8 @@ describe('ProductDetailPage sticky actions', () => {
 describe('ProductDetailPage description', () => {
   afterEach(() => {
     cleanup();
+    routerMocks.route.currentPath = '/product/10';
+    routerMocks.route.pathname = '/product/10';
     vi.clearAllMocks();
   });
 
@@ -247,6 +261,119 @@ describe('ProductDetailPage description', () => {
 
     await waitFor(() => expect(copy?.classList.contains('is-collapsed')).toBe(false));
     expect(copy?.textContent).toBe(description);
+  });
+});
+
+describe('ProductDetailPage resolver preselection', () => {
+  afterEach(() => {
+    cleanup();
+    routerMocks.route.currentPath = '/product/10';
+    routerMocks.route.pathname = '/product/10';
+    vi.clearAllMocks();
+  });
+
+  it('opens category product links through resolver and preselects the SKU variant', async () => {
+    routerMocks.route.currentPath = '/category/futbolki/product/line-break-hoodie?sku=00002';
+    routerMocks.route.pathname = '/category/futbolki/product/line-break-hoodie';
+    apiMocks.resolveProduct.mockResolvedValue({
+      product: productFixture({
+        variants: [
+          { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', sku: '00001' },
+          { ...productFixture().variants[0], id: 101, color: 'Black', size: 'L', sku: '00002' },
+        ],
+      }),
+      route_context: {
+        category: { id: 1, slug: 'futbolki', name: 'Футболки' },
+        product_slug: 'line-break-hoodie',
+        requested_sku: '00002',
+        selected_variant_id: 101,
+        selected_variant_sku: '00002',
+        variant_status: 'selected',
+      },
+    });
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    await waitFor(() => expect(apiMocks.resolveProduct).toHaveBeenCalledWith({
+      category_slug: 'futbolki',
+      product_slug: 'line-break-hoodie',
+      sku: '00002',
+    }));
+    expect(apiMocks.getProduct).not.toHaveBeenCalled();
+    expect(container.querySelector('.color-button.is-selected')?.textContent).toContain('Black');
+    expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('L');
+  });
+
+  it('falls back to the default available variant when resolver SKU is invalid', async () => {
+    routerMocks.route.currentPath = '/category/futbolki/product/line-break-hoodie?sku=bad';
+    routerMocks.route.pathname = '/category/futbolki/product/line-break-hoodie';
+    apiMocks.resolveProduct.mockResolvedValue({
+      product: productFixture({
+        variants: [
+          { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', sku: '00001' },
+          { ...productFixture().variants[0], id: 101, color: 'Black', size: 'L', sku: '00002' },
+        ],
+      }),
+      route_context: {
+        category: { id: 1, slug: 'futbolki', name: 'Футболки' },
+        product_slug: 'line-break-hoodie',
+        requested_sku: 'bad',
+        selected_variant_id: null,
+        selected_variant_sku: null,
+        variant_status: 'sku_not_found',
+      },
+    });
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    await waitFor(() => expect(apiMocks.resolveProduct).toHaveBeenCalled());
+    expect(container.querySelector('.color-button.is-selected')?.textContent).toContain('White');
+    expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('M');
+  });
+
+  it('keeps an out-of-stock resolver-selected variant highlighted with disabled purchase actions', async () => {
+    routerMocks.route.currentPath = '/category/futbolki/product/line-break-hoodie?sku=00002';
+    routerMocks.route.pathname = '/category/futbolki/product/line-break-hoodie';
+    apiMocks.resolveProduct.mockResolvedValue({
+      product: productFixture({
+        is_available: true,
+        variants: [
+          { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', sku: '00001' },
+          {
+            ...productFixture().variants[0],
+            id: 101,
+            color: 'Black',
+            size: 'L',
+            sku: '00002',
+            available_quantity: 0,
+          },
+        ],
+      }),
+      route_context: {
+        category: { id: 1, slug: 'futbolki', name: 'Футболки' },
+        product_slug: 'line-break-hoodie',
+        requested_sku: '00002',
+        selected_variant_id: 101,
+        selected_variant_sku: '00002',
+        variant_status: 'out_of_stock',
+      },
+    });
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    const { container } = render(<ProductDetailPage />);
+
+    const buyButton = await screen.findByRole('button', { name: 'Купить сейчас' });
+    expect(container.querySelector('.color-button.is-selected')?.textContent).toContain('Black');
+    expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('L');
+    expect((buyButton as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
@@ -8,6 +8,7 @@ import type {
   ProductImageBadgeType,
   ProductSizeGrid,
   ProductStatus,
+  ProductVariant,
   Tag,
 } from '../../shared/api';
 import { labelForEnum, useI18n } from '../../shared/i18n';
@@ -34,6 +35,13 @@ import {
   type MatrixColor,
   type VariantMatrixRow,
 } from './variantMatrix';
+import {
+  buildProductCustomerLink,
+  copyTextToClipboard,
+  getLinkableProductCategories,
+  getLinkableProductVariants,
+  getProductLinkGeneratorState,
+} from './productLinks';
 
 interface PageProps {
   mode: 'create' | 'edit';
@@ -148,6 +156,9 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [canRegenerateNewSkus, setCanRegenerateNewSkus] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [createdProductId, setCreatedProductId] = useState<number | null>(null);
+  const [selectedLinkCategoryId, setSelectedLinkCategoryId] = useState('');
+  const [selectedLinkVariantId, setSelectedLinkVariantId] = useState('');
+  const [linkCopyStatus, setLinkCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   function loadFormData() {
     setLoading(true);
@@ -224,6 +235,40 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   useEffect(() => {
     loadFormData();
   }, [mode, productId]);
+
+  const linkCategories = useMemo(() => getLinkableProductCategories(product), [product]);
+  const linkVariants = useMemo(() => getLinkableProductVariants(product), [product]);
+  const selectedLinkCategory =
+    linkCategories.find((category) => String(category.id) === selectedLinkCategoryId) ??
+    linkCategories[0] ??
+    null;
+  const selectedLinkVariant =
+    linkVariants.find((variant) => String(variant.id) === selectedLinkVariantId) ??
+    linkVariants[0] ??
+    null;
+  const linkGeneratorState = getProductLinkGeneratorState(product, linkCategories, linkVariants);
+  const generatedCustomerLink =
+    linkGeneratorState === 'ready' && product?.slug && selectedLinkCategory && selectedLinkVariant
+      ? buildProductCustomerLink({
+          categorySlug: selectedLinkCategory.slug,
+          productSlug: product.slug,
+          sku: selectedLinkVariant.sku,
+        })
+      : '';
+
+  useEffect(() => {
+    if (!selectedLinkCategory && selectedLinkCategoryId) {
+      setSelectedLinkCategoryId('');
+    } else if (selectedLinkCategory && selectedLinkCategoryId !== String(selectedLinkCategory.id)) {
+      setSelectedLinkCategoryId(String(selectedLinkCategory.id));
+    }
+
+    if (!selectedLinkVariant && selectedLinkVariantId) {
+      setSelectedLinkVariantId('');
+    } else if (selectedLinkVariant && selectedLinkVariantId !== String(selectedLinkVariant.id)) {
+      setSelectedLinkVariantId(String(selectedLinkVariant.id));
+    }
+  }, [selectedLinkCategory, selectedLinkCategoryId, selectedLinkVariant, selectedLinkVariantId]);
 
   function updateField<Key extends keyof ProductFormState>(key: Key, value: ProductFormState[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -368,6 +413,19 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     setVariants((current) =>
       current.map((variant) => (variant.localId === localId ? { ...variant, ...patch } : variant)),
     );
+  }
+
+  async function copyGeneratedCustomerLink() {
+    if (!generatedCustomerLink) {
+      return;
+    }
+
+    try {
+      const copied = await copyTextToClipboard(generatedCustomerLink);
+      setLinkCopyStatus(copied ? 'success' : 'error');
+    } catch {
+      setLinkCopyStatus('error');
+    }
   }
 
   function removeVariant(row: VariantRow) {
@@ -901,6 +959,79 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           </div>
         </div>
       </section>
+
+      <details className="panel product-links-panel" open={Boolean(generatedCustomerLink)}>
+        <summary className="product-links-summary">
+          <span>{t('productEditor.productLinks')}</span>
+          <small>{t('productEditor.productLinksHint')}</small>
+        </summary>
+        {linkGeneratorState === 'save_first' ? (
+          <p className="muted-text">{t('productEditor.productLinksSaveFirst')}</p>
+        ) : linkGeneratorState === 'needs_category' ? (
+          <p className="muted-text">{t('productEditor.productLinksNeedCategory')}</p>
+        ) : linkGeneratorState === 'needs_variant' ? (
+          <p className="muted-text">{t('productEditor.productLinksNeedVariant')}</p>
+        ) : (
+          <div className="product-link-generator">
+            <label className="field">
+              <span>{t('common.category')}</span>
+              <select
+                value={selectedLinkCategory ? String(selectedLinkCategory.id) : ''}
+                onChange={(event) => {
+                  setSelectedLinkCategoryId(event.target.value);
+                  setLinkCopyStatus('idle');
+                }}
+              >
+                {linkCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>{t('productEditor.sku')}</span>
+              <select
+                value={selectedLinkVariant ? String(selectedLinkVariant.id) : ''}
+                onChange={(event) => {
+                  setSelectedLinkVariantId(event.target.value);
+                  setLinkCopyStatus('idle');
+                }}
+              >
+                {linkVariants.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {formatCustomerLinkVariantLabel(variant, t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field field-wide product-link-preview">
+              <span>{t('productEditor.productLinksPreview')}</span>
+              <input readOnly value={generatedCustomerLink} />
+            </label>
+            <div className="product-link-actions">
+              <button
+                className="button button-primary"
+                disabled={!generatedCustomerLink}
+                type="button"
+                onClick={() => void copyGeneratedCustomerLink()}
+              >
+                {t('productEditor.productLinksCopy')}
+              </button>
+              {linkCopyStatus !== 'idle' ? (
+                <span
+                  className={`product-link-copy-status product-link-copy-status-${linkCopyStatus}`}
+                  role="status"
+                >
+                  {linkCopyStatus === 'success'
+                    ? t('productEditor.productLinksCopied')
+                    : t('productEditor.productLinksCopyFailed')}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </details>
 
       <section className="panel">
         <div className="section-heading">
@@ -1443,6 +1574,23 @@ function formatVariantValidationTarget(
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   return `${formatSizeLabel(size, t)} / ${formatColorLabel(color, t)}`;
+}
+
+function formatCustomerLinkVariantLabel(
+  variant: ProductVariant,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const availability = !variant.is_active
+    ? t('common.inactive')
+    : variant.available_quantity > 0
+      ? t('productEditor.productLinksAvailable')
+      : t('productEditor.productLinksUnavailable');
+  return [
+    variant.sku,
+    formatColorLabel(variant.color ?? '', t),
+    formatSizeLabel(variant.size, t),
+    availability,
+  ].join(' · ');
 }
 
 function isDuplicateSkuError(error: unknown): boolean {

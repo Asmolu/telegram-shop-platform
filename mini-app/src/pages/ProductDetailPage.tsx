@@ -7,16 +7,24 @@ import {
   getFavorites,
   getProduct,
   getProductReviews,
+  resolveProduct,
   removeFavorite,
   toApiErrorMessage,
   type Cart,
   type Product,
+  type ProductResolveRouteContext,
   type ProductVariant,
   type Review,
 } from '../shared/api';
 import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
-import { getAuthPath, getNumericRouteParam, useRouter, withReturnTo } from '../shared/router/RouterProvider';
+import {
+  getAuthPath,
+  getCategoryProductRouteParams,
+  getNumericRouteParam,
+  useRouter,
+  withReturnTo,
+} from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
 import {
   formatDate,
@@ -87,10 +95,52 @@ function getVisibleProductBrand(product: Product) {
   return duplicateBrandPattern.test(normalizedName) ? null : brand;
 }
 
+type ProductDetailRoute =
+  | { mode: 'id'; productId: number }
+  | { mode: 'slug'; categorySlug: string; productSlug: string; sku: string | null };
+
+export function getProductDetailRoute(pathname: string, currentPath: string): ProductDetailRoute | null {
+  const categoryProductRoute = getCategoryProductRouteParams(pathname);
+  if (categoryProductRoute) {
+    const url = new URL(currentPath, window.location.origin);
+    return {
+      mode: 'slug',
+      categorySlug: categoryProductRoute.categorySlug,
+      productSlug: categoryProductRoute.productSlug,
+      sku: url.searchParams.get('sku'),
+    };
+  }
+
+  const productId = getNumericRouteParam(pathname, '/product/');
+  return productId && productId > 0 ? { mode: 'id', productId } : null;
+}
+
+function getBackFallback(route: ProductDetailRoute | null) {
+  return route?.mode === 'slug'
+    ? `/category/${encodeURIComponent(route.categorySlug)}`
+    : '/main';
+}
+
+function getInitialSelectedVariant(
+  variants: ProductVariant[],
+  routeContext: ProductResolveRouteContext | null,
+) {
+  const selectedVariantId = routeContext?.selected_variant_id ?? null;
+  const selectedVariant = selectedVariantId
+    ? variants.find((variant) => variant.id === selectedVariantId) ?? null
+    : null;
+
+  return selectedVariant ?? firstSelectableVariant(variants);
+}
+
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
-  const productId = getNumericRouteParam(pathname, '/product/');
+  const productRoute = React.useMemo(
+    () => getProductDetailRoute(pathname, currentPath),
+    [currentPath, pathname],
+  );
+  const backFallback = getBackFallback(productRoute);
   const [product, setProduct] = React.useState<Product | null>(null);
   const [reviews, setReviews] = React.useState<Review[]>([]);
   const [cart, setCart] = React.useState<Cart | null>(null);
@@ -130,7 +180,7 @@ export function ProductDetailPage() {
     let cancelled = false;
 
     async function load() {
-      if (!productId) {
+      if (!productRoute) {
         setError('Товар не найден');
         setLoading(false);
         return;
@@ -138,10 +188,21 @@ export function ProductDetailPage() {
 
       setLoading(true);
       setError(null);
+      setNotice(null);
       try {
-        const [productResult, reviewsResult, favoritesResult, cartResult] = await Promise.all([
-          getProduct(productId),
-          getProductReviews(productId).catch(() => ({ items: [] })),
+        const resolvedProduct = productRoute.mode === 'slug'
+          ? await resolveProduct({
+              category_slug: productRoute.categorySlug,
+              product_slug: productRoute.productSlug,
+              sku: productRoute.sku,
+            })
+          : {
+              product: await getProduct(productRoute.productId),
+              route_context: null,
+            };
+        const productResult = resolvedProduct.product;
+        const [reviewsResult, favoritesResult, cartResult] = await Promise.all([
+          getProductReviews(productResult.id).catch(() => ({ items: [] })),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
           isAuthenticated ? getCart().catch(() => null) : Promise.resolve(null),
         ]);
@@ -157,10 +218,13 @@ export function ProductDetailPage() {
             productResult.variants.filter((variant) => variant.is_active),
             productResult.size_grid,
           );
-          const activeVariant = firstSelectableVariant(activeVariants);
+          const activeVariant = getInitialSelectedVariant(
+            activeVariants,
+            resolvedProduct.route_context,
+          );
           setSelectedColorKey(activeVariant ? getVariantColorKey(activeVariant) : null);
           setSelectedVariantId(activeVariant?.id ?? null);
-      }
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(toApiErrorMessage(loadError));
@@ -169,14 +233,14 @@ export function ProductDetailPage() {
         if (!cancelled) {
           setLoading(false);
         }
-        }
+      }
     }
 
     void load();
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, productId]);
+  }, [isAuthenticated, productRoute]);
 
   const activeVariants = React.useMemo(
     () => product
@@ -404,7 +468,7 @@ export function ProductDetailPage() {
   if (loading) {
     return (
       <div className="page">
-        <TopBar title="Товар" backFallback="/main" />
+        <TopBar title="Товар" backFallback={backFallback} />
         <PageLoader text="Загружаем товар..." />
       </div>
     );
@@ -413,7 +477,7 @@ export function ProductDetailPage() {
   if (error || !product) {
     return (
       <div className="page">
-        <TopBar title="Товар" backFallback="/main" />
+        <TopBar title="Товар" backFallback={backFallback} />
         <ErrorState message={error ?? 'Товар не найден'} actionLabel="К ленте" onAction={() => navigate('/main')} />
       </div>
     );
@@ -439,7 +503,7 @@ export function ProductDetailPage() {
     <div className="page page--detail">
       <TopBar
         title="Товар"
-        backFallback="/main"
+        backFallback={backFallback}
         right={
           <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" disabled={favoriteBusy} onClick={() => void toggleFavorite()}>
             {favorite ? '♥' : '♡'}

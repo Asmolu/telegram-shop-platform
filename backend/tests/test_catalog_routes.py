@@ -10,6 +10,7 @@ from app.modules.categories.router import get_categories_service
 from app.modules.products.router import get_products_service
 from app.modules.products.schemas import (
     ProductCardList,
+    ProductResolveResponse,
     ProductSearchSuggestion,
     ProductSearchSuggestionList,
 )
@@ -115,6 +116,53 @@ def test_public_product_suggestions_allow_anonymous_access() -> None:
     assert response.json() == {
         "items": [{"value": "Hoodie", "kind": "product", "label": None}]
     }
+
+
+def test_public_product_resolver_route_precedes_numeric_product_route() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        def __init__(self) -> None:
+            self.tracked_product_id: int | None = None
+
+        async def resolve_public_product(self, **kwargs: object) -> ProductResolveResponse:
+            assert kwargs["product_slug"] == "line-break-hoodie"
+            assert kwargs["category_slug"] == "futbolki"
+            assert kwargs["sku"] == "00001"
+            return ProductResolveResponse.model_validate({
+                "product": {
+                    **_product_response(),
+                    "variants": [_variant_response()],
+                    "is_available": True,
+                },
+                "route_context": {
+                    "category": {"id": 1, "slug": "futbolki", "name": "T-shirts"},
+                    "product_slug": "line-break-hoodie",
+                    "requested_sku": "00001",
+                    "selected_variant_id": 1,
+                    "selected_variant_sku": "00001",
+                    "variant_status": "selected",
+                },
+            })
+
+        async def track_public_product_view(self, **kwargs: object) -> None:
+            self.tracked_product_id = int(kwargs["product_id"])
+
+    service = FakeProductsService()
+    app.dependency_overrides[get_products_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/products/resolve"
+                "?category_slug=futbolki&product_slug=line-break-hoodie&sku=00001"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["route_context"]["variant_status"] == "selected"
+    assert response.json()["route_context"]["selected_variant_sku"] == "00001"
+    assert service.tracked_product_id == 1
 
 
 def test_product_create_requires_authentication() -> None:

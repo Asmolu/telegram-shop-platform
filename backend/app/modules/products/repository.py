@@ -412,6 +412,61 @@ class ProductsRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_public_detail_by_slug(self, product_slug: str) -> Product | None:
+        related_product_loader = selectinload(
+            Product.related_product_links
+        ).selectinload(ProductRelatedProduct.related_product)
+
+        result = await self.session.execute(
+            select(Product)
+            .options(
+                selectinload(Product.category),
+                selectinload(Product.product_categories).selectinload(ProductCategory.category),
+                selectinload(Product.tags),
+                selectinload(Product.images),
+                selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))),
+                related_product_loader.load_only(
+                    Product.id,
+                    Product.name,
+                    Product.slug,
+                    Product.brand,
+                    Product.base_price,
+                    Product.old_price,
+                    Product.size_grid,
+                    Product.image_badge_type,
+                    Product.image_badge_text,
+                    Product.image_badge_color,
+                    Product.image_badge_position,
+                    Product.status,
+                    Product.created_at,
+                ),
+                related_product_loader.selectinload(Product.images).load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.detail_path,
+                    ProductImage.alt_text,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
+                related_product_loader.selectinload(
+                    Product.variants.and_(ProductVariant.is_active.is_(True))
+                ).load_only(
+                    ProductVariant.id,
+                    ProductVariant.product_id,
+                    ProductVariant.size,
+                    ProductVariant.color,
+                    ProductVariant.stock_quantity,
+                    ProductVariant.reserved_quantity,
+                    ProductVariant.is_active,
+                ),
+            )
+            .where(Product.slug == product_slug, Product.status == ProductStatus.ACTIVE)
+        )
+        return result.scalar_one_or_none()
+
     async def list_existing_ids(self, product_ids: list[int]) -> set[int]:
         if not product_ids:
             return set()
@@ -674,6 +729,12 @@ class ProductVariantsRepository:
     async def get_by_id(self, variant_id: int) -> ProductVariant | None:
         result = await self.session.execute(
             select(ProductVariant).where(ProductVariant.id == variant_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_sku(self, sku: str) -> ProductVariant | None:
+        result = await self.session.execute(
+            select(ProductVariant).where(ProductVariant.sku == sku)
         )
         return result.scalar_one_or_none()
 

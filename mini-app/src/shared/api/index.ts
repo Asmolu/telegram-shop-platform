@@ -17,6 +17,7 @@ import type {
   PersonalDataUpdate,
   Product,
   ProductList,
+  ProductResolveResponse,
   ProductSearchSuggestionList,
   ProductSizeGrid,
   PromoValidation,
@@ -81,6 +82,16 @@ export function getProductSearchSuggestions(
 
 export function getProduct(productId: number, options: ApiRequestOptions = {}) {
   return apiRequest<Product>(`/products/${productId}`, options);
+}
+
+export function resolveProduct(
+  params: { category_slug?: string; product_slug: string; sku?: string | null },
+  options: ApiRequestOptions = {},
+) {
+  return apiRequest<ProductResolveResponse>('/products/resolve', {
+    ...options,
+    query: params,
+  });
 }
 
 export function getCategories(options: ApiRequestOptions = {}) {

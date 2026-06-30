@@ -61,6 +61,18 @@ export function isFirstLevelRoutePath(path: string) {
     || pathname === '/profile';
 }
 
+export function getCategoryProductRouteParams(pathname: string) {
+  const match = pathname.match(/^\/category\/([^/]+)\/product\/([^/]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    categorySlug: decodeURIComponent(match[1]),
+    productSlug: decodeURIComponent(match[2]),
+  };
+}
+
 export function getLogicalBackPath(path: string, fallback = '/main') {
   const url = getParsedPath(path);
   const { pathname } = url;
@@ -69,6 +81,10 @@ export function getLogicalBackPath(path: string, fallback = '/main') {
     return null;
   }
 
+  const categoryProductRoute = getCategoryProductRouteParams(pathname);
+  if (categoryProductRoute) {
+    return `/category/${encodeURIComponent(categoryProductRoute.categorySlug)}`;
+  }
   if (pathname.startsWith('/category/')) {
     return '/categories';
   }
@@ -415,6 +431,9 @@ export function getRouteId(pathname: string) {
   }
   if (pathname === '/categories') {
     return 'categories';
+  }
+  if (getCategoryProductRouteParams(pathname)) {
+    return 'product-detail';
   }
   if (pathname.startsWith('/category/')) {
     return 'category-detail';

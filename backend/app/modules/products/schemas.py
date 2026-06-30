@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -505,6 +506,36 @@ class ProductPublicDetailRead(BaseModel):
     related_products: list[ProductCardRead] = Field(default_factory=list)
     is_available: bool = False
     created_at: datetime
+
+
+ProductResolveVariantStatus = Literal[
+    "selected",
+    "out_of_stock",
+    "sku_missing",
+    "sku_not_found",
+    "sku_not_for_product",
+    "inactive",
+]
+
+
+class ProductResolveRouteCategory(BaseModel):
+    id: int
+    slug: str
+    name: str
+
+
+class ProductResolveRouteContext(BaseModel):
+    category: ProductResolveRouteCategory | None = None
+    product_slug: str
+    requested_sku: str | None = None
+    selected_variant_id: int | None = None
+    selected_variant_sku: str | None = None
+    variant_status: ProductResolveVariantStatus | None = None
+
+
+class ProductResolveResponse(BaseModel):
+    product: ProductPublicDetailRead
+    route_context: ProductResolveRouteContext
 
 
 class ProductVariantList(BaseModel):

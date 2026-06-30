@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getLogicalBackPath, isFirstLevelRoutePath } from './RouterProvider';
+import {
+  getCategoryProductRouteParams,
+  getLogicalBackPath,
+  getRouteId,
+  isFirstLevelRoutePath,
+} from './RouterProvider';
 
 describe('logical mini app back routes', () => {
   it.each([
@@ -16,6 +21,7 @@ describe('logical mini app back routes', () => {
   });
 
   it.each([
+    ['/category/futbolki/product/line-break-hoodie?sku=00001', '/category/futbolki'],
     ['/category/7', '/categories'],
     ['/search/results?q=hoodie', '/search'],
     ['/search/results?tag_id=4&from=categories', '/categories'],
@@ -31,5 +37,15 @@ describe('logical mini app back routes', () => {
     expect(getLogicalBackPath('/product/10?returnTo=%2Fsearch%2Fresults%3Fq%3Dhoodie')).toBe(
       '/search/results?q=hoodie',
     );
+  });
+
+  it('matches category-product links before generic category routes', () => {
+    const pathname = '/category/futbolki/product/line-break-hoodie';
+
+    expect(getCategoryProductRouteParams(pathname)).toEqual({
+      categorySlug: 'futbolki',
+      productSlug: 'line-break-hoodie',
+    });
+    expect(getRouteId(pathname)).toBe('product-detail');
   });
 });

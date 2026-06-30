@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addCartItem,
   addFavorite,
+  resolveProduct,
 } from './index';
 import {
   ApiClientError,
@@ -255,6 +256,24 @@ describe('apiRequest resilience', () => {
     await addCartItem(10, 100);
 
     expect(getNetworkState()).toBe('online');
+  });
+
+  it('builds product resolver requests with category slug, product slug, and SKU', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      product: { id: 10 },
+      route_context: { product_slug: 'line-break-hoodie' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await resolveProduct({
+      category_slug: 'futbolki',
+      product_slug: 'line-break-hoodie',
+      sku: '00001',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/products/resolve?category_slug=futbolki&product_slug=line-break-hoodie&sku=00001',
+    );
   });
 
   it('does not show the global network banner for local mutation failures', async () => {

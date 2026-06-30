@@ -1,6 +1,8 @@
 import React from 'react';
 import {
+  ApiClientError,
   getCategory,
+  getCategories,
   getFavorites,
   getProducts,
   toApiErrorMessage,
@@ -12,10 +14,34 @@ import { getNumericRouteParam, useRouter } from '../shared/router/RouterProvider
 import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { useProductActions } from '../features/catalog/useProductActions';
 
+type CategoryPageRoute =
+  | { mode: 'id'; categoryId: number; fallbackSlug: string }
+  | { mode: 'slug'; categorySlug: string };
+
+export function getCategoryPageRoute(pathname: string): CategoryPageRoute | null {
+  const raw = pathname.replace('/category/', '').split('/')[0];
+  if (!raw) {
+    return null;
+  }
+
+  const categoryId = getNumericRouteParam(pathname, '/category/');
+  if (categoryId && categoryId > 0 && /^\d+$/.test(raw)) {
+    return { mode: 'id', categoryId, fallbackSlug: decodeURIComponent(raw) };
+  }
+
+  return { mode: 'slug', categorySlug: decodeURIComponent(raw) };
+}
+
+async function getCategoryBySlug(categorySlug: string) {
+  return (await getCategories()).find(
+    (candidate) => candidate.slug === categorySlug,
+  ) ?? null;
+}
+
 export function CategoryPage() {
   const { pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
-  const categoryId = getNumericRouteParam(pathname, '/category/');
+  const categoryRoute = React.useMemo(() => getCategoryPageRoute(pathname), [pathname]);
   const [category, setCategory] = React.useState<Category | null>(null);
   const [products, setProducts] = React.useState<Product[]>([]);
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
@@ -30,7 +56,7 @@ export function CategoryPage() {
     let cancelled = false;
 
     async function load() {
-      if (!categoryId) {
+      if (!categoryRoute) {
         setError('Категория не найдена');
         setLoading(false);
         return;
@@ -39,9 +65,24 @@ export function CategoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const [categoryResult, productResult, favoriteResult] = await Promise.all([
-          getCategory(categoryId),
-          getProducts({ limit: 100, offset: 0, status: 'ACTIVE', category_id: categoryId }),
+        let categoryResult: Category | null = null;
+        if (categoryRoute.mode === 'id') {
+          try {
+            categoryResult = await getCategory(categoryRoute.categoryId);
+          } catch (categoryError) {
+            if (!(categoryError instanceof ApiClientError) || categoryError.status !== 404) {
+              throw categoryError;
+            }
+            categoryResult = await getCategoryBySlug(categoryRoute.fallbackSlug);
+          }
+        } else {
+          categoryResult = await getCategoryBySlug(categoryRoute.categorySlug);
+        }
+        if (!categoryResult) {
+          throw new Error('Категория не найдена');
+        }
+        const [productResult, favoriteResult] = await Promise.all([
+          getProducts({ limit: 100, offset: 0, status: 'ACTIVE', category_id: categoryResult.id }),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
         ]);
 
@@ -65,7 +106,7 @@ export function CategoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [categoryId, isAuthenticated]);
+  }, [categoryRoute, isAuthenticated]);
 
   return (
     <div className="page">

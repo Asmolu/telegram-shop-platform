@@ -605,6 +605,198 @@ async def test_public_product_detail_returns_only_active_related_products() -> N
 
 
 @pytest.mark.asyncio
+async def test_public_product_resolver_returns_product_without_category_or_sku() -> None:
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant()])
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+
+    result = await service.resolve_public_product(product_slug=product.slug, track_view=False)
+
+    assert result.product.id == product.id
+    assert result.route_context.product_slug == product.slug
+    assert result.route_context.category is None
+    assert result.route_context.variant_status == "sku_missing"
+    assert result.route_context.selected_variant_id is None
+    service.repository.get_public_detail_by_slug.assert_awaited_once_with(product.slug)
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_accepts_each_assigned_category() -> None:
+    primary = _category(category_id=1, name="T-shirts", slug="futbolki")
+    secondary = _category(category_id=2, name="Summer", slug="leto")
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant()])
+    product.category_id = primary.id
+    product.category = primary
+    product.product_categories = [
+        ProductCategory(category_id=primary.id, priority=1, category=primary),
+        ProductCategory(category_id=secondary.id, priority=2, category=secondary),
+    ]
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.categories_repository.get_by_slug = AsyncMock(side_effect=[primary, secondary])
+
+    first = await service.resolve_public_product(
+        product_slug=product.slug,
+        category_slug=primary.slug,
+        track_view=False,
+    )
+    second = await service.resolve_public_product(
+        product_slug=product.slug,
+        category_slug=secondary.slug,
+        track_view=False,
+    )
+
+    assert first.route_context.category is not None
+    assert first.route_context.category.slug == "futbolki"
+    assert second.route_context.category is not None
+    assert second.route_context.category.slug == "leto"
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_rejects_missing_category() -> None:
+    product = _product(status=ProductStatus.ACTIVE)
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.categories_repository.get_by_slug = AsyncMock(return_value=None)
+
+    with pytest.raises(AppError, match="Product not found") as error:
+        await service.resolve_public_product(
+            product_slug=product.slug,
+            category_slug="missing",
+            track_view=False,
+        )
+
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_rejects_unassigned_category() -> None:
+    product = _product(status=ProductStatus.ACTIVE)
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.categories_repository.get_by_slug = AsyncMock(
+        return_value=_category(category_id=99, slug="sale")
+    )
+
+    with pytest.raises(AppError, match="Product not found") as error:
+        await service.resolve_public_product(
+            product_slug=product.slug,
+            category_slug="sale",
+            track_view=False,
+        )
+
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_rejects_missing_product_slug() -> None:
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=None)
+
+    with pytest.raises(AppError, match="Product not found") as error:
+        await service.resolve_public_product(product_slug="missing", track_view=False)
+
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_selects_valid_sku() -> None:
+    variant = _variant(sku="00001", stock_quantity=5, reserved_quantity=1)
+    product = _product(status=ProductStatus.ACTIVE, variants=[variant])
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.variants_repository.get_by_sku = AsyncMock(return_value=variant)
+
+    result = await service.resolve_public_product(
+        product_slug=product.slug,
+        sku=variant.sku,
+        track_view=False,
+    )
+
+    assert result.route_context.variant_status == "selected"
+    assert result.route_context.selected_variant_id == variant.id
+    assert result.route_context.selected_variant_sku == "00001"
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_selects_out_of_stock_sku() -> None:
+    variant = _variant(sku="00001", stock_quantity=2, reserved_quantity=2)
+    product = _product(status=ProductStatus.ACTIVE, variants=[variant])
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.variants_repository.get_by_sku = AsyncMock(return_value=variant)
+
+    result = await service.resolve_public_product(
+        product_slug=product.slug,
+        sku=variant.sku,
+        track_view=False,
+    )
+
+    assert result.route_context.variant_status == "out_of_stock"
+    assert result.route_context.selected_variant_id == variant.id
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_handles_sku_from_another_product() -> None:
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant(sku="00001")])
+    other_variant = _variant(sku="00002")
+    other_variant.product_id = 2
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.variants_repository.get_by_sku = AsyncMock(return_value=other_variant)
+
+    result = await service.resolve_public_product(
+        product_slug=product.slug,
+        sku=other_variant.sku,
+        track_view=False,
+    )
+
+    assert result.product.id == product.id
+    assert result.route_context.variant_status == "sku_not_for_product"
+    assert result.route_context.selected_variant_id is None
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_handles_missing_and_inactive_skus() -> None:
+    product = _product(status=ProductStatus.ACTIVE, variants=[_variant(sku="00001")])
+    inactive_variant = _variant(sku="00003", is_active=False)
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.variants_repository.get_by_sku = AsyncMock(side_effect=[None, inactive_variant])
+
+    missing = await service.resolve_public_product(
+        product_slug=product.slug,
+        sku="00002",
+        track_view=False,
+    )
+    inactive = await service.resolve_public_product(
+        product_slug=product.slug,
+        sku=inactive_variant.sku,
+        track_view=False,
+    )
+
+    assert missing.route_context.variant_status == "sku_not_found"
+    assert missing.route_context.selected_variant_id is None
+    assert inactive.route_context.variant_status == "inactive"
+    assert inactive.route_context.selected_variant_id is None
+    assert [variant.sku for variant in inactive.product.variants] == ["00001"]
+
+
+@pytest.mark.asyncio
+async def test_public_product_resolver_tracks_product_view_when_enabled() -> None:
+    tracker = FakeAnalyticsTracker()
+    product = _product(status=ProductStatus.ACTIVE)
+    service = ProductsService(DummySession(), analytics_tracker=tracker)
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+
+    await service.resolve_public_product(product_slug=product.slug, user_id=42)
+
+    assert tracker.events == [
+        ("product.viewed", {"user_id": 42, "product_id": product.id})
+    ]
+
+
+@pytest.mark.asyncio
 async def test_product_service_rejects_multiple_primary_images() -> None:
     service = ProductsService(DummySession())
     service.categories_repository.get_by_id = AsyncMock(return_value=None)
@@ -1538,11 +1730,17 @@ def test_repository_category_context_orders_by_category_priority() -> None:
     assert "product_categories.priority" in str(ordering[0])
 
 
-def _category(*, image_path: str | None = None) -> Category:
+def _category(
+    *,
+    category_id: int = 1,
+    name: str = "Hoodies",
+    slug: str = "hoodies",
+    image_path: str | None = None,
+) -> Category:
     return Category(
-        id=1,
-        name="Hoodies",
-        slug="hoodies",
+        id=category_id,
+        name=name,
+        slug=slug,
         description=None,
         image_path=image_path,
         created_at=datetime(2026, 5, 27, tzinfo=UTC),

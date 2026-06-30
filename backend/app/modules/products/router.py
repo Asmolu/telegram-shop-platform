@@ -22,6 +22,7 @@ from app.modules.products.schemas import (
     ProductDetailRead,
     ProductList,
     ProductPublicDetailRead,
+    ProductResolveResponse,
     ProductSearchSuggestionList,
     ProductStatusUpdate,
     ProductUpdate,
@@ -94,6 +95,34 @@ async def list_product_search_suggestions(
     limit: Annotated[int, Query(ge=1, le=10)] = 8,
 ) -> ProductSearchSuggestionList:
     return await service.list_search_suggestions(query=query, limit=limit)
+
+
+@router.get("/resolve", response_model=ProductResolveResponse)
+async def resolve_public_product(
+    request: Request,
+    response: Response,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
+    product_slug: Annotated[str, Query(min_length=1, max_length=255)],
+    category_slug: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
+    sku: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+) -> ProductResolveResponse | Response:
+    result = await service.resolve_public_product(
+        product_slug=product_slug,
+        category_slug=category_slug,
+        sku=sku,
+        user_id=current_user.id if current_user is not None else None,
+        track_view=False,
+    )
+    etag = stable_etag(result)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_REVALIDATE_CACHE)
+    await service.track_public_product_view(
+        product_id=result.product.id,
+        user_id=current_user.id if current_user is not None else None,
+    )
+    return result
 
 
 @router.get("/admin", response_model=ProductList)

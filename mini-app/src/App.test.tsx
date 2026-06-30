@@ -117,4 +117,17 @@ describe('App lazy routes', () => {
     expect(await screen.findByText('Profile route loaded')).toBeTruthy();
     expect(testState.networkMountCount).toBe(1);
   });
+
+  it('loads product detail for category slug product links', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/category/futbolki/product/line-break-hoodie?sku=00001',
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText('Product route loaded')).toBeTruthy();
+    expect(screen.queryByText('Category detail route loaded')).toBeNull();
+  });
 });

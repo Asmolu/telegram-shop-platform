@@ -39,6 +39,9 @@ from app.modules.products.schemas import (
     ProductImageCreate,
     ProductList,
     ProductPublicDetailRead,
+    ProductResolveResponse,
+    ProductResolveRouteCategory,
+    ProductResolveRouteContext,
     ProductSearchSuggestion,
     ProductSearchSuggestionList,
     ProductStatusUpdate,
@@ -254,25 +257,68 @@ class ProductsService:
         product = await self.repository.get_public_detail_by_id(product_id)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
-        active_related_products = [
-            related_product
-            for related_product in product.related_products
-            if related_product.status == ProductStatus.ACTIVE
-        ]
-        result = ProductPublicDetailRead.model_validate(product).model_copy(
-            update={
-                "related_product_ids": [item.id for item in active_related_products],
-                "related_products": [
-                    ProductCardRead.model_validate(item) for item in active_related_products
-                ],
-            }
-        )
+        result = self._build_public_product_detail(product)
         if self.cache is not None:
             await self.cache.set_model(
                 cache_key,
                 result,
                 settings.cache_public_product_detail_ttl_seconds,
             )
+        if track_view:
+            await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
+        return result
+
+    async def resolve_public_product(
+        self,
+        *,
+        product_slug: str,
+        category_slug: str | None = None,
+        sku: str | None = None,
+        user_id: int | None = None,
+        track_view: bool = True,
+    ) -> ProductResolveResponse:
+        product = await self.repository.get_public_detail_by_slug(product_slug)
+        if product is None:
+            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+
+        route_category: ProductResolveRouteCategory | None = None
+        if category_slug is not None:
+            category = await self.categories_repository.get_by_slug(category_slug)
+            if category is None or not self._product_has_category(product, category.id):
+                raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+            route_category = ProductResolveRouteCategory(
+                id=category.id,
+                slug=category.slug,
+                name=category.name,
+            )
+
+        selected_variant: ProductVariant | None = None
+        variant_status: str | None = "sku_missing" if sku is None else None
+        if sku:
+            variant = await self.variants_repository.get_by_sku(sku)
+            if variant is None:
+                variant_status = "sku_not_found"
+            elif variant.product_id != product.id:
+                variant_status = "sku_not_for_product"
+            elif not variant.is_active:
+                variant_status = "inactive"
+            else:
+                selected_variant = variant
+                variant_status = (
+                    "out_of_stock" if variant.available_quantity <= 0 else "selected"
+                )
+
+        result = ProductResolveResponse(
+            product=self._build_public_product_detail(product),
+            route_context=ProductResolveRouteContext(
+                category=route_category,
+                product_slug=product.slug,
+                requested_sku=sku,
+                selected_variant_id=selected_variant.id if selected_variant else None,
+                selected_variant_sku=selected_variant.sku if selected_variant else None,
+                variant_status=variant_status,
+            ),
+        )
         if track_view:
             await self._track_event("product.viewed", user_id=user_id, product_id=product.id)
         return result
@@ -293,6 +339,26 @@ class ProductsService:
         user_id: int | None,
     ) -> None:
         await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
+
+    def _build_public_product_detail(self, product: Product) -> ProductPublicDetailRead:
+        active_related_products = [
+            related_product
+            for related_product in product.related_products
+            if related_product.status == ProductStatus.ACTIVE
+        ]
+        return ProductPublicDetailRead.model_validate(product).model_copy(
+            update={
+                "related_product_ids": [item.id for item in active_related_products],
+                "related_products": [
+                    ProductCardRead.model_validate(item) for item in active_related_products
+                ],
+            }
+        )
+
+    def _product_has_category(self, product: Product, category_id: int) -> bool:
+        return product.category_id == category_id or any(
+            assignment.category_id == category_id for assignment in product.product_categories
+        )
 
     async def get_product(self, product_id: int) -> Product:
         product = await self.repository.get_by_id(product_id)

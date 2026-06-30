@@ -1416,6 +1416,34 @@ Object.assign(dictionaries.en, {
     'Reserved quantity for {variant} cannot exceed stock.',
 });
 
+Object.assign(dictionaries.ru, {
+  'productEditor.productLinks': 'Ссылки на товар',
+  'productEditor.productLinksHint': 'Сформируйте ссылку для выбранной категории и SKU.',
+  'productEditor.productLinksSaveFirst': 'Сохраните товар, чтобы сформировать ссылки.',
+  'productEditor.productLinksNeedCategory': 'Добавьте категорию, чтобы сформировать ссылку.',
+  'productEditor.productLinksNeedVariant': 'Добавьте артикулы/варианты, чтобы сформировать ссылку.',
+  'productEditor.productLinksPreview': 'Ссылка для покупателя',
+  'productEditor.productLinksCopy': 'Скопировать',
+  'productEditor.productLinksCopied': 'Ссылка скопирована.',
+  'productEditor.productLinksCopyFailed': 'Не удалось скопировать ссылку.',
+  'productEditor.productLinksAvailable': 'доступен',
+  'productEditor.productLinksUnavailable': 'нет в наличии',
+});
+
+Object.assign(dictionaries.en, {
+  'productEditor.productLinks': 'Product links',
+  'productEditor.productLinksHint': 'Build a customer link for a category and SKU.',
+  'productEditor.productLinksSaveFirst': 'Save the product to generate links.',
+  'productEditor.productLinksNeedCategory': 'Add a category to generate a link.',
+  'productEditor.productLinksNeedVariant': 'Add SKU variants to generate a link.',
+  'productEditor.productLinksPreview': 'Customer link',
+  'productEditor.productLinksCopy': 'Copy',
+  'productEditor.productLinksCopied': 'Link copied.',
+  'productEditor.productLinksCopyFailed': 'Could not copy the link.',
+  'productEditor.productLinksAvailable': 'available',
+  'productEditor.productLinksUnavailable': 'out of stock',
+});
+
 interface I18nContextValue {
   language: Language;
   setLanguage: (language: Language) => void;

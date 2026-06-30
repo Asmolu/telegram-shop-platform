@@ -18,6 +18,13 @@ export type ProductImageBadgeColor =
   | 'white';
 export type ProductImageBadgePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type ProductSearchSuggestionKind = 'product' | 'brand' | 'alias' | 'category' | 'tag';
+export type ProductResolveVariantStatus =
+  | 'selected'
+  | 'out_of_stock'
+  | 'sku_missing'
+  | 'sku_not_found'
+  | 'sku_not_for_product'
+  | 'inactive';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
 export type ManualPaymentStatus =
@@ -140,6 +147,20 @@ export type Product = {
 export type ProductList = {
   items: Product[];
   meta: PageMeta;
+};
+
+export type ProductResolveRouteContext = {
+  category?: Pick<Category, 'id' | 'slug' | 'name'> | null;
+  product_slug: string;
+  requested_sku?: string | null;
+  selected_variant_id?: number | null;
+  selected_variant_sku?: string | null;
+  variant_status?: ProductResolveVariantStatus | null;
+};
+
+export type ProductResolveResponse = {
+  product: Product;
+  route_context: ProductResolveRouteContext;
 };
 
 export type ProductSearchSuggestion = {

@@ -964,6 +964,66 @@ textarea:focus {
   margin-top: 10px;
 }
 
+.product-links-panel {
+  display: block;
+}
+
+.product-links-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.product-links-summary span {
+  font-size: 18px;
+}
+
+.product-links-summary small {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.product-link-generator {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(240px, 1.2fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.product-link-preview {
+  grid-column: 1 / -1;
+}
+
+.product-link-preview input {
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.product-link-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.product-link-copy-status {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.product-link-copy-status-success {
+  color: #047857;
+}
+
+.product-link-copy-status-error {
+  color: #b91c1c;
+}
+
 .related-product-list {
   display: grid;
   gap: 10px;
@@ -2104,6 +2164,10 @@ textarea:focus {
   }
 
   .variant-builder-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-link-generator {
     grid-template-columns: 1fr;
   }
 
