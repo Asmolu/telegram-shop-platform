@@ -245,6 +245,8 @@ const dictionaries: Record<Language, Record<string, string>> = {
 
     'productEditor.loading': 'Загружаем форму товара',
     'productEditor.required': 'Название, slug и базовая цена обязательны.',
+    'productEditor.createRequired': '\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0438 \u0431\u0430\u0437\u043e\u0432\u0430\u044f \u0446\u0435\u043d\u0430 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b.',
+    'productEditor.slugAutofillFailed': '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u0441\u0433\u0435\u043d\u0435\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c slug. \u041c\u043e\u0436\u043d\u043e \u0432\u0432\u0435\u0441\u0442\u0438 \u0435\u0433\u043e \u0432\u0440\u0443\u0447\u043d\u0443\u044e.',
     'productEditor.variantRequired': 'Для каждого варианта нужны минимум размер и SKU.',
     'productEditor.duplicateVariants': 'Размер и цвет варианта не должны повторяться.',
     'productEditor.incompatibleSizes': 'Сетка не изменена. Несовместимые размеры: {sizes}. Удалите или исправьте варианты.',
@@ -897,6 +899,8 @@ Object.assign(englishOverrides, {
 Object.assign(englishOverrides, {
   'productEditor.loading': 'Loading product form',
   'productEditor.required': 'Name, slug, and base price are required.',
+  'productEditor.createRequired': 'Name and base price are required.',
+  'productEditor.slugAutofillFailed': 'Could not generate a slug automatically. You can enter one manually.',
   'productEditor.variantRequired': 'Each variant needs at least size and SKU.',
   'productEditor.duplicateVariants': 'Variant size and color combinations must be unique.',
   'productEditor.incompatibleSizes': 'Size grid was not changed. Incompatible sizes: {sizes}. Remove or correct those variants.',

@@ -70,6 +70,17 @@ test('generated customer link includes category slug, product slug, and SKU', ()
   );
 });
 
+test('generated customer link supports numeric product slugs', () => {
+  assert.equal(
+    buildProductCustomerLink({
+      categorySlug: 'futbolki',
+      productSlug: '00042',
+      sku: '00001',
+    }),
+    'https://mini.stylexac.ru/category/futbolki/product/00042?sku=00001',
+  );
+});
+
 test('category and variant selects stay compact instead of rendering every combination', () => {
   const linkCategories = getLinkableProductCategories(product());
   const linkVariants = getLinkableProductVariants(product({

@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   Category,
@@ -15,7 +15,7 @@ import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { ImageCropEditor, PRODUCT_IMAGE_CROP_SPEC } from '../../shared/ui/ImageCropEditor';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
-import { formatDate, formatMoney, slugify } from '../../shared/utils/format';
+import { formatDate, formatMoney } from '../../shared/utils/format';
 import {
   allowedSizes,
   buildColorInputFromRows,
@@ -35,6 +35,7 @@ import {
   type MatrixColor,
   type VariantMatrixRow,
 } from './variantMatrix';
+import { applyGeneratedProductSlug } from './productSlugAutofill';
 import {
   buildProductCustomerLink,
   copyTextToClipboard,
@@ -159,6 +160,30 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
   const [selectedLinkCategoryId, setSelectedLinkCategoryId] = useState('');
   const [selectedLinkVariantId, setSelectedLinkVariantId] = useState('');
   const [linkCopyStatus, setLinkCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const manualSlugEditRef = useRef(false);
+
+  function loadNextProductSlug() {
+    if (mode !== 'create') {
+      return;
+    }
+
+    api.products.generateProductSlugs(1)
+      .then((response) => {
+        const nextSlug = response.items[0];
+        setForm((current) => ({
+          ...current,
+          slug: applyGeneratedProductSlug({
+            mode,
+            currentSlug: current.slug,
+            generatedSlug: nextSlug,
+            wasManuallyEdited: manualSlugEditRef.current,
+          }),
+        }));
+      })
+      .catch(() => {
+        setFormError(t('productEditor.slugAutofillFailed'));
+      });
+  }
 
   function loadFormData() {
     setLoading(true);
@@ -177,6 +202,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         setCanRegenerateNewSkus(false);
 
         if (loadedProduct) {
+          manualSlugEditRef.current = true;
           const loadedVariants: VariantRow[] = loadedProduct.variants.map((variant) => ({
             localId: variant.id,
             id: variant.id,
@@ -219,6 +245,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           setMatrixColorInput(buildColorInputFromRows(loadedVariants));
           setSelectedMatrixSizes(deriveSelectedSizesFromRows(loadedSizeGrid, loadedVariants));
         } else {
+          manualSlugEditRef.current = false;
           setProduct(null);
           setForm(initialForm);
           setCategoryAssignments([createCategoryAssignmentRow()]);
@@ -226,6 +253,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
           setVariants([]);
           setMatrixColorInput('');
           setSelectedMatrixSizes([]);
+          loadNextProductSlug();
         }
       })
       .catch(setError)
@@ -526,8 +554,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     setCanRegenerateNewSkus(false);
     setSuccess(null);
 
-    if (!form.name.trim() || !form.slug.trim() || !form.basePrice.trim()) {
-      setFormError(t('productEditor.required'));
+    if (!form.name.trim() || (mode === 'edit' && !form.slug.trim()) || !form.basePrice.trim()) {
+      setFormError(t(mode === 'edit' ? 'productEditor.required' : 'productEditor.createRequired'));
       setSaving(false);
       return;
     }
@@ -605,11 +633,12 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     const primaryCategoryId =
       [...normalizedCategories].sort((left, right) => left.priority - right.priority)[0]
         ?.category_id ?? null;
+    const trimmedSlug = form.slug.trim();
 
     try {
       const payload = {
         name: form.name.trim(),
-        slug: form.slug.trim(),
+        ...(trimmedSlug ? { slug: trimmedSlug } : {}),
         brand: form.brand.trim() || null,
         description: form.description.trim() || null,
         base_price: form.basePrice.trim(),
@@ -748,17 +777,18 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               <span>{t('common.name')}</span>
               <input
                 value={form.name}
-                onChange={(event) => {
-                  updateField('name', event.target.value);
-                  if (!form.slug || form.slug === slugify(form.name)) {
-                    updateField('slug', slugify(event.target.value));
-                  }
-                }}
+                onChange={(event) => updateField('name', event.target.value)}
               />
             </label>
             <label className="field">
               <span>{t('productEditor.slug')}</span>
-              <input value={form.slug} onChange={(event) => updateField('slug', event.target.value)} />
+              <input
+                value={form.slug}
+                onChange={(event) => {
+                  manualSlugEditRef.current = true;
+                  updateField('slug', event.target.value);
+                }}
+              />
             </label>
             <label className="field field-wide">
               <span>{t('productEditor.brand')}</span>

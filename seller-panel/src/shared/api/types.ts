@@ -201,7 +201,7 @@ export interface ProductImageCreate {
 
 export interface ProductCreate {
   name: string;
-  slug: string;
+  slug?: string | null;
   brand?: string | null;
   description?: string | null;
   base_price: string;
@@ -250,6 +250,10 @@ export interface ProductVariantPayload {
   stock_quantity: number;
   reserved_quantity: number;
   is_active: boolean;
+}
+
+export interface ProductSlugList {
+  items: string[];
 }
 
 export interface UploadedProductImage extends ProductImage {}

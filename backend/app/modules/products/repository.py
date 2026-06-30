@@ -475,6 +475,16 @@ class ProductsRepository:
         )
         return set(result.scalars().all())
 
+    async def list_numeric_slug_candidates(self) -> list[str]:
+        result = await self.session.execute(
+            select(Product.slug).where(
+                func.length(Product.slug) == 5,
+                Product.slug >= "00001",
+                Product.slug <= "99999",
+            )
+        )
+        return list(result.scalars().all())
+
     def add(self, product: Product) -> None:
         self.session.add(product)
 

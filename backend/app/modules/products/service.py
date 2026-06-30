@@ -44,6 +44,7 @@ from app.modules.products.schemas import (
     ProductResolveRouteContext,
     ProductSearchSuggestion,
     ProductSearchSuggestionList,
+    ProductSlugList,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -93,6 +94,11 @@ VARIANT_AUDIT_FIELDS = (
 NUMERIC_VARIANT_SKU_MIN = 1
 NUMERIC_VARIANT_SKU_MAX = 99999
 NUMERIC_VARIANT_SKU_EXHAUSTED_MESSAGE = "Numeric SKU range 00001-99999 is exhausted"
+NUMERIC_PRODUCT_SLUG_MIN = 1
+NUMERIC_PRODUCT_SLUG_MAX = 99999
+NUMERIC_PRODUCT_SLUG_EXHAUSTED_MESSAGE = (
+    "Numeric product slug range 00001-99999 is exhausted."
+)
 
 
 class ProductsService:
@@ -372,6 +378,7 @@ class ProductsService:
         actor_user_id: int | None = None,
     ) -> Product:
         try:
+            payload = await self._prepare_product_create_payload_slug(payload)
             product = await self.stage_product_with_variants(payload, [])
         except AppError:
             await self.session.rollback()
@@ -628,6 +635,16 @@ class ProductsService:
             items=self._allocate_numeric_variant_skus(existing_skus, count)
         )
 
+    async def generate_product_slugs(self, count: int) -> ProductSlugList:
+        existing_slugs = await self.repository.list_numeric_slug_candidates()
+        return ProductSlugList(items=self._allocate_numeric_product_slugs(existing_slugs, count))
+
+    async def _prepare_product_create_payload_slug(self, payload: ProductCreate) -> ProductCreate:
+        if payload.slug is not None:
+            return payload
+        generated_slug = (await self.generate_product_slugs(1)).items[0]
+        return payload.model_copy(update={"slug": generated_slug})
+
     async def create_product_variant(
         self,
         product_id: int,
@@ -773,6 +790,48 @@ class ProductsService:
 
     @staticmethod
     def _format_numeric_variant_sku(value: int) -> str:
+        return f"{value:05d}"
+
+    def _allocate_numeric_product_slugs(
+        self,
+        existing_slugs: list[str],
+        count: int,
+    ) -> list[str]:
+        used_numbers = {
+            value
+            for slug in existing_slugs
+            if (value := self._numeric_product_slug_value(slug)) is not None
+        }
+        generated: list[str] = []
+
+        for value in range(NUMERIC_PRODUCT_SLUG_MIN, NUMERIC_PRODUCT_SLUG_MAX + 1):
+            if value in used_numbers:
+                continue
+            used_numbers.add(value)
+            generated.append(self._format_numeric_product_slug(value))
+            if len(generated) == count:
+                return generated
+
+        raise AppError(
+            NUMERIC_PRODUCT_SLUG_EXHAUSTED_MESSAGE,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    @staticmethod
+    def _numeric_product_slug_value(slug: str) -> int | None:
+        if not ProductsService._is_numeric_product_slug_candidate(slug):
+            return None
+        value = int(slug)
+        if value < NUMERIC_PRODUCT_SLUG_MIN or value > NUMERIC_PRODUCT_SLUG_MAX:
+            return None
+        return value
+
+    @staticmethod
+    def _is_numeric_product_slug_candidate(slug: str) -> bool:
+        return len(slug) == 5 and all("0" <= char <= "9" for char in slug)
+
+    @staticmethod
+    def _format_numeric_product_slug(value: int) -> str:
         return f"{value:05d}"
 
     async def update_product_variant(

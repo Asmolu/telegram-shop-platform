@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
@@ -100,6 +101,12 @@ class InspectingFirstFlushSession(DummySession):
             assert "related_product_links" in product.__dict__
             assert list(product.related_product_links) == []
             product.id = self.assigned_id
+
+
+class IntegrityErrorFlushSession(DummySession):
+    async def flush(self) -> None:
+        self.flush_count += 1
+        raise IntegrityError("insert products", {}, Exception("duplicate slug"))
 
 
 class FakeAnalyticsTracker:
@@ -621,6 +628,27 @@ async def test_public_product_resolver_returns_product_without_category_or_sku()
 
 
 @pytest.mark.asyncio
+async def test_public_product_resolver_accepts_numeric_product_slug_with_sku() -> None:
+    variant = _variant(sku="00001")
+    product = _product(status=ProductStatus.ACTIVE, variants=[variant])
+    product.slug = "00042"
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_slug = AsyncMock(return_value=product)
+    service.variants_repository.get_by_sku = AsyncMock(return_value=variant)
+
+    result = await service.resolve_public_product(
+        product_slug="00042",
+        sku="00001",
+        track_view=False,
+    )
+
+    assert result.product.slug == "00042"
+    assert result.route_context.product_slug == "00042"
+    assert result.route_context.selected_variant_sku == "00001"
+    service.repository.get_public_detail_by_slug.assert_awaited_once_with("00042")
+
+
+@pytest.mark.asyncio
 async def test_public_product_resolver_accepts_each_assigned_category() -> None:
     primary = _category(category_id=1, name="T-shirts", slug="futbolki")
     secondary = _category(category_id=2, name="Summer", slug="leto")
@@ -984,6 +1012,123 @@ async def test_generate_variant_skus_reports_exhaustion() -> None:
 
     with pytest.raises(AppError, match="00001-99999 is exhausted"):
         await service.generate_variant_skus(1)
+
+
+@pytest.mark.asyncio
+async def test_generate_product_slugs_starts_at_first_numeric_value() -> None:
+    service = ProductsService(DummySession())
+    service.repository.list_numeric_slug_candidates = AsyncMock(return_value=[])
+
+    result = await service.generate_product_slugs(1)
+
+    assert result.items == ["00001"]
+
+
+@pytest.mark.asyncio
+async def test_generate_product_slugs_skips_existing_numeric_and_legacy_values() -> None:
+    service = ProductsService(DummySession())
+    service.repository.list_numeric_slug_candidates = AsyncMock(
+        return_value=["00001", "00003", "product-slug", "123", "00000"]
+    )
+
+    result = await service.generate_product_slugs(3)
+
+    assert result.items == ["00002", "00004", "00005"]
+
+
+@pytest.mark.asyncio
+async def test_generate_product_slugs_preserves_leading_zeroes() -> None:
+    service = ProductsService(DummySession())
+    service.repository.list_numeric_slug_candidates = AsyncMock(
+        return_value=[f"{value:05d}" for value in range(1, 42)]
+    )
+
+    result = await service.generate_product_slugs(1)
+
+    assert result.items == ["00042"]
+
+
+@pytest.mark.asyncio
+async def test_generate_product_slugs_reports_exhaustion() -> None:
+    service = ProductsService(DummySession())
+    service.repository.list_numeric_slug_candidates = AsyncMock(
+        return_value=[f"{value:05d}" for value in range(1, 100000)]
+    )
+
+    with pytest.raises(AppError, match="Numeric product slug range 00001-99999 is exhausted"):
+        await service.generate_product_slugs(1)
+
+
+@pytest.mark.asyncio
+async def test_product_create_without_slug_generates_numeric_slug() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_numeric_slug_candidates = AsyncMock(return_value=[])
+    service.repository.add = lambda product: (
+        setattr(product, "id", 1),
+        captured.setdefault("product", product),
+    )
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(name="Hoodie", base_price=Decimal("59.90"))
+    )
+
+    assert created.slug == "00001"
+
+
+@pytest.mark.asyncio
+async def test_product_create_with_blank_slug_generates_numeric_slug() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_numeric_slug_candidates = AsyncMock(return_value=["00001"])
+    service.repository.add = lambda product: (
+        setattr(product, "id", 1),
+        captured.setdefault("product", product),
+    )
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(name="Hoodie", slug="   ", base_price=Decimal("59.90"))
+    )
+
+    assert created.slug == "00002"
+
+
+@pytest.mark.asyncio
+async def test_product_create_with_manual_slug_preserves_manual_value() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.list_numeric_slug_candidates = AsyncMock(return_value=["00001"])
+    service.repository.add = lambda product: (
+        setattr(product, "id", 1),
+        captured.setdefault("product", product),
+    )
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(name="Hoodie", slug="product-slug", base_price=Decimal("59.90"))
+    )
+
+    assert created.slug == "product-slug"
+    service.repository.list_numeric_slug_candidates.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_product_create_duplicate_slug_keeps_conflict_response() -> None:
+    service = ProductsService(IntegrityErrorFlushSession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+    service.repository.add = lambda _: None
+
+    with pytest.raises(AppError, match="Product slug or variant SKU already exists") as error:
+        await service.create_product(
+            ProductCreate(name="Hoodie", slug="product-slug", base_price=Decimal("59.90"))
+        )
+
+    assert error.value.status_code == 409
 
 
 @pytest.mark.asyncio

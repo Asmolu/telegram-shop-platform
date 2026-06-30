@@ -34,6 +34,7 @@ import type {
   PageList,
   Product,
   ProductCreate,
+  ProductSlugList,
   ProductStatus,
   ProductUpdate,
   ProductVariant,
@@ -276,6 +277,10 @@ export const api = {
       apiRequest<void>(`/products/variants/${variantId}`, { method: 'DELETE' }),
     generateVariantSkus: (count: number) =>
       apiRequest<ProductVariantSkuList>('/products/admin/variant-skus/next', {
+        query: { count },
+      }),
+    generateProductSlugs: (count: number) =>
+      apiRequest<ProductSlugList>('/products/admin/slugs/next', {
         query: { count },
       }),
     uploadImage: (

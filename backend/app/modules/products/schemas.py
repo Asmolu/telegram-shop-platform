@@ -22,6 +22,8 @@ from app.modules.products.search import (
 )
 from app.modules.tags.schemas import TagRead
 
+SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
 
 class ProductImageBase(BaseModel):
     file_path: str = Field(min_length=1, max_length=1024)
@@ -266,7 +268,7 @@ def _normalize_optional_enum(value: object) -> object:
 
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    slug: str = Field(min_length=1, max_length=255, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    slug: str = Field(min_length=1, max_length=255, pattern=SLUG_PATTERN)
     brand: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     base_price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
@@ -331,10 +333,18 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
+    slug: str | None = Field(default=None, min_length=1, max_length=255, pattern=SLUG_PATTERN)
     categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] = Field(default_factory=list)
     images: list[ProductImageCreate] = Field(default_factory=list)
     related_product_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("slug", mode="before")
+    @classmethod
+    def normalize_blank_slug(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("categories")
     @classmethod
@@ -356,7 +366,7 @@ class ProductUpdate(BaseModel):
         default=None,
         min_length=1,
         max_length=255,
-        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        pattern=SLUG_PATTERN,
     )
     brand: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
@@ -543,6 +553,10 @@ class ProductVariantList(BaseModel):
 
 
 class ProductVariantSkuList(BaseModel):
+    items: list[str]
+
+
+class ProductSlugList(BaseModel):
     items: list[str]
 
 

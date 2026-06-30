@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 
+from fastapi import status
 from fastapi.testclient import TestClient
 
 from app.common.deps import get_current_user
 from app.common.pagination import PageMeta
+from app.core.errors import AppError
 from app.db.models import User, UserRole
 from app.main import create_app
 from app.modules.categories.router import get_categories_service
@@ -328,6 +330,29 @@ def test_product_create_allows_seller() -> None:
     assert response.json()["related_products"] == []
 
 
+def test_product_create_allows_missing_slug_for_backend_generation() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def create_product(self, payload: object, **__: object) -> dict[str, object]:
+            assert payload.slug is None  # type: ignore[attr-defined]
+            return {**_product_response(), "slug": "00001"}
+
+    payload = _product_payload()
+    del payload["slug"]
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/products", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["slug"] == "00001"
+
+
 def test_product_create_returns_related_products_for_seller() -> None:
     app = create_app()
 
@@ -428,6 +453,50 @@ def test_product_variant_sku_generation_allows_seller() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"items": ["00001", "00002"]}
+
+
+def test_product_slug_generation_allows_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def generate_product_slugs(self, count: int) -> dict[str, object]:
+            assert count == 2
+            return {"items": ["00001", "00002"]}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/admin/slugs/next?count=2")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": ["00001", "00002"]}
+
+
+def test_product_slug_generation_exhaustion_returns_clear_400() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def generate_product_slugs(self, _: int) -> dict[str, object]:
+            raise AppError(
+                "Numeric product slug range 00001-99999 is exhausted.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/admin/slugs/next")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Numeric product slug range 00001-99999 is exhausted."
+    }
 
 
 def test_product_status_and_archive_routes_are_protected() -> None:

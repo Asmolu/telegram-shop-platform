@@ -24,6 +24,7 @@ from app.modules.products.schemas import (
     ProductPublicDetailRead,
     ProductResolveResponse,
     ProductSearchSuggestionList,
+    ProductSlugList,
     ProductStatusUpdate,
     ProductUpdate,
     ProductVariantCreate,
@@ -158,6 +159,15 @@ async def generate_variant_skus(
     count: Annotated[int, Query(ge=1, le=1000)] = 1,
 ) -> ProductVariantSkuList:
     return await service.generate_variant_skus(count)
+
+
+@router.get("/admin/slugs/next", response_model=ProductSlugList)
+async def generate_product_slugs(
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    count: Annotated[int, Query(ge=1, le=1000)] = 1,
+) -> ProductSlugList:
+    return await service.generate_product_slugs(count)
 
 
 @router.get("/admin/{product_id}", response_model=ProductDetailRead)
