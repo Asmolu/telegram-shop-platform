@@ -45,6 +45,7 @@ from app.modules.products.schemas import (
     ProductUpdate,
     ProductVariantCreate,
     ProductVariantList,
+    ProductVariantSkuList,
     ProductVariantUpdate,
 )
 from app.modules.products.search import sanitize_search_query
@@ -86,6 +87,9 @@ VARIANT_AUDIT_FIELDS = (
     "reserved_quantity",
     "is_active",
 )
+NUMERIC_VARIANT_SKU_MIN = 1
+NUMERIC_VARIANT_SKU_MAX = 99999
+NUMERIC_VARIANT_SKU_EXHAUSTED_MESSAGE = "Numeric SKU range 00001-99999 is exhausted"
 
 
 class ProductsService:
@@ -372,8 +376,9 @@ class ProductsService:
             for position, related_product_id in enumerate(related_product_ids)
         )
 
+        prepared_payloads = await self._prepare_variant_create_payloads(variants)
         combinations: set[tuple[str, str | None]] = set()
-        for variant_payload in variants:
+        for variant_payload in prepared_payloads:
             variant = self.prepare_product_variant(
                 product_id=product.id,
                 size_grid=product.size_grid,
@@ -551,6 +556,12 @@ class ProductsService:
         variants = await self.variants_repository.list_by_product_id(product_id)
         return ProductVariantList(items=variants)
 
+    async def generate_variant_skus(self, count: int) -> ProductVariantSkuList:
+        existing_skus = await self.variants_repository.list_skus()
+        return ProductVariantSkuList(
+            items=self._allocate_numeric_variant_skus(existing_skus, count)
+        )
+
     async def create_product_variant(
         self,
         product_id: int,
@@ -558,6 +569,7 @@ class ProductsService:
         actor_user_id: int | None = None,
     ) -> ProductVariant:
         product = await self.get_product(product_id)
+        payload = (await self._prepare_variant_create_payloads([payload]))[0]
         variant = self.prepare_product_variant(
             product_id=product_id,
             size_grid=product.size_grid,
@@ -590,9 +602,112 @@ class ProductsService:
         payload: ProductVariantCreate,
     ) -> ProductVariant:
         self._validate_inventory(payload.stock_quantity, payload.reserved_quantity)
+        if payload.sku is None:
+            raise AppError(
+                "Product variant SKU was not generated",
+                status.HTTP_400_BAD_REQUEST,
+            )
         variant_data = payload.model_dump()
         variant_data["size"] = self._normalize_variant_size(size_grid, payload.size)
         return ProductVariant(product_id=product_id, **variant_data)
+
+    async def _prepare_variant_create_payloads(
+        self,
+        variants: list[ProductVariantCreate],
+    ) -> list[ProductVariantCreate]:
+        if not variants:
+            return []
+        if all(
+            payload.sku is not None
+            and not self._is_numeric_variant_sku_candidate(payload.sku)
+            for payload in variants
+        ):
+            return variants
+
+        existing_skus = await self.variants_repository.list_skus()
+        reserved_skus: set[str] = set()
+        return [
+            self._prepare_variant_create_payload_sku(
+                payload,
+                existing_skus=existing_skus,
+                reserved_skus=reserved_skus,
+            )
+            for payload in variants
+        ]
+
+    def _prepare_variant_create_payload_sku(
+        self,
+        payload: ProductVariantCreate,
+        *,
+        existing_skus: list[str],
+        reserved_skus: set[str],
+    ) -> ProductVariantCreate:
+        sku = payload.sku
+        existing_sku_set = set(existing_skus)
+        if sku is not None and not self._is_numeric_variant_sku_candidate(sku):
+            reserved_skus.add(sku)
+            return payload
+
+        if (
+            sku is not None
+            and self._numeric_variant_sku_value(sku) is not None
+            and sku not in existing_sku_set
+            and sku not in reserved_skus
+        ):
+            reserved_skus.add(sku)
+            return payload
+
+        generated_sku = self._allocate_numeric_variant_skus(
+            existing_skus,
+            1,
+            reserved_skus=reserved_skus,
+        )[0]
+        reserved_skus.add(generated_sku)
+        return payload.model_copy(update={"sku": generated_sku})
+
+    def _allocate_numeric_variant_skus(
+        self,
+        existing_skus: list[str],
+        count: int,
+        *,
+        reserved_skus: set[str] | None = None,
+    ) -> list[str]:
+        used_numbers = {
+            value
+            for sku in [*existing_skus, *(reserved_skus or set())]
+            if (value := self._numeric_variant_sku_value(sku)) is not None
+        }
+        generated: list[str] = []
+
+        for value in range(NUMERIC_VARIANT_SKU_MIN, NUMERIC_VARIANT_SKU_MAX + 1):
+            if value in used_numbers:
+                continue
+            used_numbers.add(value)
+            generated.append(self._format_numeric_variant_sku(value))
+            if len(generated) == count:
+                return generated
+
+        raise AppError(
+            NUMERIC_VARIANT_SKU_EXHAUSTED_MESSAGE,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    @staticmethod
+    def _numeric_variant_sku_value(sku: str) -> int | None:
+        if not ProductsService._is_numeric_variant_sku_candidate(sku):
+            return None
+        value = int(sku)
+        if value < NUMERIC_VARIANT_SKU_MIN or value > NUMERIC_VARIANT_SKU_MAX:
+            return None
+        return value
+
+    @staticmethod
+    def _is_numeric_variant_sku_candidate(sku: str) -> bool:
+        return len(sku) == 5 and all("0" <= char <= "9" for char in sku)
+
+    @staticmethod
+    def _format_numeric_variant_sku(value: int) -> str:
+        return f"{value:05d}"
 
     async def update_product_variant(
         self,

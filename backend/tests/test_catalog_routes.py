@@ -334,6 +334,54 @@ def test_product_variant_create_allows_seller() -> None:
     assert response.json()["available_quantity"] == 3
 
 
+def test_product_variant_create_allows_missing_sku_for_backend_generation() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def create_product_variant(
+            self,
+            _: int,
+            payload: object,
+            **___: object,
+        ) -> dict[str, object]:
+            assert payload.sku is None  # type: ignore[attr-defined]
+            return {**_variant_response(), "sku": "00001"}
+
+    variant_payload = _variant_payload()
+    del variant_payload["sku"]
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/products/1/variants", json=variant_payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["sku"] == "00001"
+
+
+def test_product_variant_sku_generation_allows_seller() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def generate_variant_skus(self, count: int) -> dict[str, object]:
+            assert count == 2
+            return {"items": ["00001", "00002"]}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/admin/variant-skus/next?count=2")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": ["00001", "00002"]}
+
+
 def test_product_status_and_archive_routes_are_protected() -> None:
     with TestClient(create_app()) as client:
         status_response = client.patch("/api/v1/products/1/status", json={"status": "ACTIVE"})

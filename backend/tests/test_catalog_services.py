@@ -762,6 +762,83 @@ async def test_variant_size_is_normalized_against_product_grid() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_variant_skus_starts_at_first_numeric_value() -> None:
+    service = ProductsService(DummySession())
+    service.variants_repository.list_skus = AsyncMock(return_value=[])
+
+    result = await service.generate_variant_skus(1)
+
+    assert result.items == ["00001"]
+
+
+@pytest.mark.asyncio
+async def test_generate_variant_skus_skips_existing_numeric_and_legacy_values() -> None:
+    service = ProductsService(DummySession())
+    service.variants_repository.list_skus = AsyncMock(
+        return_value=["00001", "00003", "tshirt-white-m", "123", "00000"]
+    )
+
+    result = await service.generate_variant_skus(3)
+
+    assert result.items == ["00002", "00004", "00005"]
+
+
+@pytest.mark.asyncio
+async def test_generate_variant_skus_reports_exhaustion() -> None:
+    service = ProductsService(DummySession())
+    service.variants_repository.list_skus = AsyncMock(
+        return_value=[f"{value:05d}" for value in range(1, 100000)]
+    )
+
+    with pytest.raises(AppError, match="00001-99999 is exhausted"):
+        await service.generate_variant_skus(1)
+
+
+@pytest.mark.asyncio
+async def test_variant_create_generates_sku_when_missing() -> None:
+    product = _product()
+    variant = _variant(size="M", sku="00001")
+    created_variants: list[ProductVariant] = []
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.variants_repository.list_skus = AsyncMock(return_value=[])
+    service.variants_repository.add = lambda created: (
+        setattr(created, "id", 1),
+        created_variants.append(created),
+    )
+    service.variants_repository.get_by_id = AsyncMock(return_value=variant)
+
+    await service.create_product_variant(
+        product.id,
+        ProductVariantCreate(size="M", stock_quantity=1),
+    )
+
+    assert created_variants[0].sku == "00001"
+
+
+@pytest.mark.asyncio
+async def test_variant_create_reallocates_duplicate_generated_sku() -> None:
+    product = _product()
+    variant = _variant(size="M", sku="00002")
+    created_variants: list[ProductVariant] = []
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+    service.variants_repository.list_skus = AsyncMock(return_value=["00001"])
+    service.variants_repository.add = lambda created: (
+        setattr(created, "id", 1),
+        created_variants.append(created),
+    )
+    service.variants_repository.get_by_id = AsyncMock(return_value=variant)
+
+    await service.create_product_variant(
+        product.id,
+        ProductVariantCreate(size="M", sku="00001", stock_quantity=1),
+    )
+
+    assert created_variants[0].sku == "00002"
+
+
+@pytest.mark.asyncio
 async def test_variant_service_rejects_size_outside_product_grid() -> None:
     product = _product(size_grid=ProductSizeGrid.SHOES_EU)
     service = ProductsService(DummySession())
@@ -1531,13 +1608,14 @@ def _variant(
     reserved_quantity: int = 0,
     is_active: bool = True,
     size: str = "M",
+    sku: str = "HOODIE-M-BLK",
 ) -> ProductVariant:
     return ProductVariant(
         id=1,
         product_id=1,
         size=size,
         color="Black",
-        sku="HOODIE-M-BLK",
+        sku=sku,
         stock_quantity=stock_quantity,
         reserved_quantity=reserved_quantity,
         is_active=is_active,

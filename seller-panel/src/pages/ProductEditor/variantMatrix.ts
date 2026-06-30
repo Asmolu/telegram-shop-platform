@@ -18,66 +18,9 @@ export const SHOES_EU_SIZES = [
 export const SHOES_RU_SIZES = SHOES_EU_SIZES;
 
 const NO_COLOR_KEY = '__no_color__';
-const SKU_MAX_LENGTH = 100;
-
-const CYRILLIC_TO_LATIN: Record<string, string> = {
-  '\u0430': 'a',
-  '\u0431': 'b',
-  '\u0432': 'v',
-  '\u0433': 'g',
-  '\u0434': 'd',
-  '\u0435': 'e',
-  '\u0451': 'e',
-  '\u0436': 'zh',
-  '\u0437': 'z',
-  '\u0438': 'i',
-  '\u0439': 'y',
-  '\u043a': 'k',
-  '\u043b': 'l',
-  '\u043c': 'm',
-  '\u043d': 'n',
-  '\u043e': 'o',
-  '\u043f': 'p',
-  '\u0440': 'r',
-  '\u0441': 's',
-  '\u0442': 't',
-  '\u0443': 'u',
-  '\u0444': 'f',
-  '\u0445': 'h',
-  '\u0446': 'ts',
-  '\u0447': 'ch',
-  '\u0448': 'sh',
-  '\u0449': 'sch',
-  '\u044a': '',
-  '\u044b': 'y',
-  '\u044c': '',
-  '\u044d': 'e',
-  '\u044e': 'yu',
-  '\u044f': 'ya',
-};
-
-const COLOR_SKU_ALIASES: Record<string, string> = {
-  '\u0431\u0435\u0436\u0435\u0432\u044b\u0439': 'beige',
-  '\u0431\u0435\u043b\u044b\u0439': 'white',
-  '\u0431\u043e\u0440\u0434\u043e\u0432\u044b\u0439': 'burgundy',
-  '\u0433\u043e\u043b\u0443\u0431\u043e\u0439': 'light-blue',
-  '\u0436\u0435\u043b\u0442\u044b\u0439': 'yellow',
-  '\u0436\u0451\u043b\u0442\u044b\u0439': 'yellow',
-  '\u0437\u0435\u043b\u0435\u043d\u044b\u0439': 'green',
-  '\u0437\u0435\u043b\u0451\u043d\u044b\u0439': 'green',
-  '\u0437\u043e\u043b\u043e\u0442\u043e\u0439': 'gold',
-  '\u043a\u043e\u0440\u0438\u0447\u043d\u0435\u0432\u044b\u0439': 'brown',
-  '\u043a\u0440\u0430\u0441\u043d\u044b\u0439': 'red',
-  '\u043c\u043e\u043b\u043e\u0447\u043d\u044b\u0439': 'milk',
-  '\u043e\u0440\u0430\u043d\u0436\u0435\u0432\u044b\u0439': 'orange',
-  '\u0440\u043e\u0437\u043e\u0432\u044b\u0439': 'pink',
-  '\u0441\u0435\u0440\u044b\u0439': 'gray',
-  '\u0441\u0435\u0440\u0435\u0431\u0440\u044f\u043d\u044b\u0439': 'silver',
-  '\u0441\u0438\u043d\u0438\u0439': 'blue',
-  '\u0444\u0438\u043e\u043b\u0435\u0442\u043e\u0432\u044b\u0439': 'purple',
-  '\u0447\u0435\u0440\u043d\u044b\u0439': 'black',
-  '\u0447\u0451\u0440\u043d\u044b\u0439': 'black',
-};
+const NUMERIC_SKU_MIN = 1;
+const NUMERIC_SKU_MAX = 99999;
+const NUMERIC_SKU_PATTERN = /^[0-9]{5}$/;
 
 export interface VariantMatrixRow {
   localId: number;
@@ -125,16 +68,11 @@ interface MatrixBuildOptions {
   productName: string;
   productSlug: string;
   createLocalId?: () => number;
-  randomSuffix?: () => string;
+  generatedSkus?: string[];
 }
 
 interface SkuOptions {
-  productName: string;
-  productSlug: string;
-  color: string;
-  size: string;
   existingSkus: Set<string>;
-  randomSuffix?: () => string;
 }
 
 export function allowedSizes(sizeGrid: ProductSizeGrid): readonly string[] {
@@ -260,6 +198,7 @@ export function buildVariantMatrixRows<Row extends VariantMatrixRow>(
   });
 
   const nextRows: Row[] = [];
+  let generatedSkuIndex = 0;
   matrixColors.forEach((color) => {
     selectedSizes.forEach((size) => {
       const key = getVariantKey(size, color.value, options.sizeGrid);
@@ -271,14 +210,8 @@ export function buildVariantMatrixRows<Row extends VariantMatrixRow>(
         return;
       }
 
-      const sku = generateVariantSku({
-        productName: options.productName,
-        productSlug: options.productSlug,
-        color: color.value,
-        size,
-        existingSkus,
-        randomSuffix: options.randomSuffix,
-      });
+      const sku = options.generatedSkus?.[generatedSkuIndex] ?? generateVariantSku({ existingSkus });
+      generatedSkuIndex += 1;
       existingSkus.add(sku.toLowerCase());
       nextRows.push({
         localId: options.createLocalId?.() ?? createLocalId(),
@@ -306,9 +239,38 @@ export function buildVariantMatrixRows<Row extends VariantMatrixRow>(
   return nextRows;
 }
 
+export function countNewVariantMatrixRows(
+  currentRows: VariantMatrixRow[],
+  options: Pick<MatrixBuildOptions, 'sizeGrid' | 'selectedSizes' | 'colorInput'>,
+): number {
+  const matrixColors = parseMatrixColors(options.colorInput);
+  const selectedSizes = sortSizesForGrid(options.sizeGrid, options.selectedSizes);
+  const currentKeys = new Set<string>();
+
+  currentRows.forEach((row) => {
+    if (row.remove) return;
+    const key = getVariantKey(row.size, row.color, options.sizeGrid);
+    if (key) {
+      currentKeys.add(key);
+    }
+  });
+
+  let count = 0;
+  matrixColors.forEach((color) => {
+    selectedSizes.forEach((size) => {
+      const key = getVariantKey(size, color.value, options.sizeGrid);
+      if (key && !currentKeys.has(key)) {
+        count += 1;
+      }
+    });
+  });
+
+  return count;
+}
+
 export function regenerateNewSkusForRows<Row extends VariantMatrixRow>(
   rows: Row[],
-  options: Pick<MatrixBuildOptions, 'productName' | 'productSlug' | 'randomSuffix'>,
+  options: Pick<MatrixBuildOptions, 'generatedSkus'> = {},
 ): Row[] {
   const existingSkus = new Set(
     rows
@@ -316,20 +278,15 @@ export function regenerateNewSkusForRows<Row extends VariantMatrixRow>(
       .map((row) => row.sku.trim().toLowerCase())
       .filter(Boolean),
   );
+  let generatedSkuIndex = 0;
 
   return rows.map((row) => {
     if (row.id || row.remove || !row.size.trim()) {
       return row;
     }
 
-    const sku = generateVariantSku({
-      productName: options.productName,
-      productSlug: options.productSlug,
-      color: row.color,
-      size: row.size,
-      existingSkus,
-      randomSuffix: options.randomSuffix,
-    });
+    const sku = options.generatedSkus?.[generatedSkuIndex] ?? generateVariantSku({ existingSkus });
+    generatedSkuIndex += 1;
     existingSkus.add(sku.toLowerCase());
     return { ...row, sku };
   });
@@ -435,47 +392,35 @@ export function normalizeVariantColorKey(color: string): string {
 }
 
 export function generateVariantSku(options: SkuOptions): string {
-  const productKey =
-    asciiSlug(options.productSlug, '') || asciiSlug(options.productName, '') || 'product';
-  const colorKey = getSkuColorKey(options.color);
-  const sizeKey = asciiSlug(options.size, 'size');
-  const base = [productKey.slice(0, 42), colorKey.slice(0, 24), sizeKey.slice(0, 12)]
-    .filter(Boolean)
-    .join('-')
-    .slice(0, 88)
-    .replace(/-+$/g, '');
+  return allocateNumericVariantSkus(options.existingSkus, 1)[0];
+}
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const suffix = sanitizeSkuPart(options.randomSuffix?.() ?? defaultRandomSuffix()).slice(0, 8);
-    const sku = trimSku(`${base}-${suffix || defaultRandomSuffix()}`);
-    if (!options.existingSkus.has(sku.toLowerCase())) {
-      return sku;
+export function allocateNumericVariantSkus(existingSkus: Set<string>, count: number): string[] {
+  const usedNumbers = new Set<number>();
+
+  existingSkus.forEach((sku) => {
+    if (!NUMERIC_SKU_PATTERN.test(sku)) {
+      return;
+    }
+    const value = Number(sku);
+    if (value >= NUMERIC_SKU_MIN && value <= NUMERIC_SKU_MAX) {
+      usedNumbers.add(value);
+    }
+  });
+
+  const generated: string[] = [];
+  for (let value = NUMERIC_SKU_MIN; value <= NUMERIC_SKU_MAX; value += 1) {
+    if (usedNumbers.has(value)) {
+      continue;
+    }
+    usedNumbers.add(value);
+    generated.push(formatNumericVariantSku(value));
+    if (generated.length === count) {
+      return generated;
     }
   }
 
-  return trimSku(`${base}-${Date.now().toString(16).slice(-8)}`);
-}
-
-export function asciiSlug(value: string, fallback = 'product'): string {
-  const transliterated = value
-    .trim()
-    .toLocaleLowerCase('ru-RU')
-    .split('')
-    .map((char) => CYRILLIC_TO_LATIN[char] ?? char)
-    .join('')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '');
-  const slug = sanitizeSkuPart(transliterated);
-  return slug || fallback;
-}
-
-function getSkuColorKey(color: string): string {
-  const normalized = normalizeVariantColorKey(color);
-  if (!normalized) {
-    return 'no-color';
-  }
-
-  return COLOR_SKU_ALIASES[normalized] ?? asciiSlug(normalized, 'color');
+  throw new Error('Numeric SKU range 00001-99999 is exhausted.');
 }
 
 function getVariantKey(
@@ -495,29 +440,8 @@ function getColorKey(color: string): string {
   return normalizeVariantColorKey(color) || NO_COLOR_KEY;
 }
 
-function sanitizeSkuPart(value: string): string {
-  return value
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-+/g, '-');
-}
-
-function trimSku(sku: string): string {
-  return sku.slice(0, SKU_MAX_LENGTH).replace(/-+$/g, '');
-}
-
-function defaultRandomSuffix(): string {
-  const random = new Uint8Array(3);
-  globalThis.crypto?.getRandomValues(random);
-  if (random.some((byte) => byte > 0)) {
-    return Array.from(random)
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  return Math.floor(Math.random() * 0xffffff)
-    .toString(16)
-    .padStart(6, '0');
+function formatNumericVariantSku(value: number): string {
+  return value.toString().padStart(5, '0');
 }
 
 function createLocalId(): number {

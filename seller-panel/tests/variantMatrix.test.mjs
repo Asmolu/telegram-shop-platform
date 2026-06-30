@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  allocateNumericVariantSkus,
   buildColorInputFromRows,
   buildVariantMatrixRows,
+  countNewVariantMatrixRows,
   deriveSelectedSizesFromRows,
   generateVariantSku,
   getPersistedIncompatibleSizes,
@@ -14,20 +16,12 @@ import {
   validateVariantQuantities,
 } from '../src/pages/ProductEditor/variantMatrix.ts';
 
-function suffixFactory() {
-  let value = 0;
-  return () => {
-    value += 1;
-    return value.toString(16).padStart(6, '0');
-  };
-}
-
 function row(overrides = {}) {
   return {
     localId: 1,
     size: 'M',
     color: '',
-    sku: 'product-no-color-m-000001',
+    sku: '00001',
     stockQuantity: '0',
     reservedQuantity: '0',
     isActive: true,
@@ -49,13 +43,22 @@ test('create matrix forms 9 rows with automatic safe SKU values', () => {
         return id;
       };
     })(),
-    randomSuffix: suffixFactory(),
   });
 
   assert.equal(rows.length, 9);
   assert.deepEqual(rows.map((variant) => variant.size).slice(0, 3), ['M', 'L', 'XL']);
-  assert.ok(rows.every((variant) => /^[a-z0-9-]+$/.test(variant.sku)));
-  assert.ok(rows.every((variant) => !/\s/.test(variant.sku)));
+  assert.deepEqual(rows.map((variant) => variant.sku), [
+    '00001',
+    '00002',
+    '00003',
+    '00004',
+    '00005',
+    '00006',
+    '00007',
+    '00008',
+    '00009',
+  ]);
+  assert.ok(rows.every((variant) => /^[0-9]{5}$/.test(variant.sku)));
   assert.equal(new Set(rows.map((variant) => variant.sku)).size, 9);
 
   const editedRows = rows.map((variant, index) =>
@@ -73,7 +76,6 @@ test('duplicate colors are merged into one matrix block', () => {
     colorInput: 'чёрный, черный, ЧЁРНЫЙ',
     productName: 'Hoodie',
     productSlug: 'hoodie',
-    randomSuffix: suffixFactory(),
   });
   const grouping = groupVariantMatrixRows(rows, {
     sizeGrid: 'clothing_alpha',
@@ -129,7 +131,6 @@ test('edit mode groups existing variants and preserves IDs and SKUs', () => {
     colorInput: 'чёрный, белый',
     productName: 'Saved product',
     productSlug: 'saved-product',
-    randomSuffix: suffixFactory(),
   });
   const grouping = groupVariantMatrixRows(rebuiltRows, {
     sizeGrid: 'clothing_alpha',
@@ -162,7 +163,6 @@ test('persisted variants outside the selected matrix are kept outside instead of
     colorInput: 'black',
     productName: 'Saved product',
     productSlug: 'saved-product',
-    randomSuffix: suffixFactory(),
   });
   const grouping = groupVariantMatrixRows(rebuiltRows, {
     sizeGrid: 'clothing_alpha',
@@ -220,17 +220,68 @@ test('variant payload keeps color null, SKU, stock, reserved, and active flag', 
   );
 });
 
-test('SKU generation transliterates names and does not reuse existing values', () => {
-  const existingSkus = new Set(['monkler-komplekt-black-m-000001']);
+test('SKU generation starts at 00001 when no numeric SKU exists', () => {
+  const existingSkus = new Set(['legacy-sku']);
+  const sku = generateVariantSku({ existingSkus });
+
+  assert.equal(sku, '00001');
+  assert.equal(generateVariantSku({ existingSkus: new Set() }), '00001');
+});
+
+test('SKU generation skips existing numeric values', () => {
   const sku = generateVariantSku({
-    productName: 'Монклер комплект',
-    productSlug: '',
-    color: 'чёрный',
-    size: 'M',
-    existingSkus,
-    randomSuffix: suffixFactory(),
+    existingSkus: new Set(['00001', '00002', '00004', 'legacy-sku']),
   });
 
-  assert.equal(sku, 'monkler-komplekt-black-m-000002');
-  assert.ok(!/[^\x00-\x7F]/.test(sku));
+  assert.equal(sku, '00003');
+});
+
+test('SKU generation preserves leading zeroes', () => {
+  const existingSkus = new Set(
+    Array.from({ length: 41 }, (_, index) => (index + 1).toString().padStart(5, '0')),
+  );
+
+  assert.equal(generateVariantSku({ existingSkus }), '00042');
+});
+
+test('batch SKU generation creates unique numeric values', () => {
+  const generated = allocateNumericVariantSkus(new Set(['00001', '00003', 'random words']), 4);
+
+  assert.deepEqual(generated, ['00002', '00004', '00005', '00006']);
+  assert.equal(new Set(generated).size, generated.length);
+  assert.ok(generated.every((sku) => /^[0-9]{5}$/.test(sku)));
+});
+
+test('SKU generation reports exhaustion instead of generating an invalid value', () => {
+  const exhausted = new Set(
+    Array.from({ length: 99999 }, (_, index) => (index + 1).toString().padStart(5, '0')),
+  );
+
+  assert.throws(
+    () => generateVariantSku({ existingSkus: exhausted }),
+    /00001-99999 is exhausted/,
+  );
+});
+
+test('legacy nonnumeric SKUs do not block numeric generation', () => {
+  assert.deepEqual(allocateNumericVariantSkus(new Set(['tshirt-white-m', 'MONCLER-M-WHITE']), 2), [
+    '00001',
+    '00002',
+  ]);
+});
+
+test('matrix counts only new rows before requesting backend generated SKUs', () => {
+  const currentRows = [
+    row({ id: 1, size: 'M', color: 'black', sku: 'saved-black-m' }),
+    row({ size: 'L', color: 'black', sku: '00012' }),
+  ];
+
+  assert.equal(
+    countNewVariantMatrixRows(currentRows, {
+      sizeGrid: 'clothing_alpha',
+      selectedSizes: ['M', 'L', 'XL'],
+      colorInput: 'black',
+    }),
+    1,
+  );
 });

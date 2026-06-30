@@ -38,6 +38,7 @@ import type {
   ProductUpdate,
   ProductVariant,
   ProductVariantPayload,
+  ProductVariantSkuList,
   PromoCode,
   PromoCodePayload,
   Review,
@@ -273,6 +274,10 @@ export const api = {
       apiRequest<ProductVariant>(`/products/variants/${variantId}`, { method: 'PATCH', body }),
     deleteVariant: (variantId: number) =>
       apiRequest<void>(`/products/variants/${variantId}`, { method: 'DELETE' }),
+    generateVariantSkus: (count: number) =>
+      apiRequest<ProductVariantSkuList>('/products/admin/variant-skus/next', {
+        query: { count },
+      }),
     uploadImage: (
       productId: number,
       file: File,

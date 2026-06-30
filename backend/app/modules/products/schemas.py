@@ -143,7 +143,7 @@ class ProductVariantBase(BaseModel):
 
 
 class ProductVariantCreate(ProductVariantBase):
-    pass
+    sku: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ProductVariantUpdate(BaseModel):
@@ -509,6 +509,10 @@ class ProductPublicDetailRead(BaseModel):
 
 class ProductVariantList(BaseModel):
     items: list[ProductVariantRead]
+
+
+class ProductVariantSkuList(BaseModel):
+    items: list[str]
 
 
 class ProductSearchSuggestion(BaseModel):

@@ -56,6 +56,98 @@ vi.mock('../shared/router/RouterProvider', () => ({
   withReturnTo: (path: string) => path,
 }));
 
+function mockProductDetail(product = productFixture(), cart = cartFixture()) {
+  apiMocks.getProduct.mockResolvedValue(product);
+  apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+  apiMocks.getFavorites.mockResolvedValue({ items: [] });
+  apiMocks.getCart.mockResolvedValue(cart);
+}
+
+describe('ProductDetailPage sticky actions', () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it('renders bottom-attached action buttons without duplicating the price', async () => {
+    mockProductDetail();
+
+    const { container } = render(<ProductDetailPage />);
+
+    const buyButton = await screen.findByRole('button', { name: 'Купить сейчас' });
+    const cartButton = screen.getByRole('button', { name: 'В корзину' });
+    const cta = buyButton.closest('.detail-cta');
+    const productInfoPrice = container.querySelector('.price-block strong')?.textContent;
+
+    expect(cta).not.toBeNull();
+    expect(cta?.classList.contains('detail-cta--bottom-attached')).toBe(true);
+    expect(cartButton.closest('.detail-cta')).toBe(cta);
+    expect(cta?.querySelector('.detail-cta__price')).toBeNull();
+    expect(productInfoPrice).toBeTruthy();
+    expect(cta?.textContent ?? '').not.toContain(productInfoPrice!);
+  });
+
+  it('keeps the buy-now button wired to checkout', async () => {
+    mockProductDetail();
+    apiMocks.addCartItem.mockResolvedValue(cartFixture());
+
+    render(<ProductDetailPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Купить сейчас' }));
+
+    await waitFor(() => expect(apiMocks.addCartItem).toHaveBeenCalledWith(10, 100, 1));
+    await waitFor(() => expect(routerMocks.navigate).toHaveBeenCalledWith('/checkout'));
+  });
+
+  it('keeps the add-to-cart button wired to cart insertion', async () => {
+    mockProductDetail();
+    apiMocks.addCartItem.mockResolvedValue(cartFixture());
+
+    render(<ProductDetailPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'В корзину' }));
+
+    await waitFor(() => expect(apiMocks.addCartItem).toHaveBeenCalledWith(10, 100, 1));
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('preserves disabled action buttons for unavailable variants', async () => {
+    mockProductDetail(productFixture({
+      variants: [{
+        ...productFixture().variants[0],
+        available_quantity: 0,
+      }],
+    }));
+
+    render(<ProductDetailPage />);
+
+    const buyButton = await screen.findByRole('button', { name: 'Купить сейчас' });
+    const cartButton = screen.getByRole('button', { name: 'В корзину' });
+
+    expect((buyButton as HTMLButtonElement).disabled).toBe(true);
+    expect((cartButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('preserves loading state inside the bottom-attached action bar', async () => {
+    let resolveCart: ((cart: ReturnType<typeof cartFixture>) => void) | undefined;
+    mockProductDetail();
+    apiMocks.addCartItem.mockReturnValue(new Promise((resolve) => {
+      resolveCart = resolve;
+    }));
+
+    render(<ProductDetailPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'В корзину' }));
+
+    const loadingButton = await screen.findByRole('button', { name: 'Добавляем...' });
+    expect((loadingButton as HTMLButtonElement).disabled).toBe(true);
+    expect(loadingButton.closest('.detail-cta')?.classList.contains('detail-cta--bottom-attached')).toBe(true);
+
+    resolveCart?.(cartFixture());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Перейти в корзину' })).toBeTruthy());
+  });
+});
+
 describe('ProductDetailPage description', () => {
   afterEach(() => {
     cleanup();

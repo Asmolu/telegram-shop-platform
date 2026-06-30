@@ -621,14 +621,10 @@ export function ProductDetailPage() {
         </form>
       </section>
 
-      <div className="detail-cta">
-        <span className="detail-cta__price">
-          <strong>{formatPrice(product.base_price)}</strong>
-          {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
-        </span>
+      <div className="detail-cta detail-cta--bottom-attached">
         <div className="detail-cta__actions">
           <button
-            className="secondary-button"
+            className="secondary-button detail-cta__button detail-cta__button--buy"
             type="button"
             disabled={purchaseActionsDisabled}
             onClick={() => void runCartAction('buy')}
@@ -636,7 +632,7 @@ export function ProductDetailPage() {
             {cartAction === 'buy' ? 'Открываем...' : 'Купить сейчас'}
           </button>
           <button
-            className="primary-button"
+            className="primary-button detail-cta__button detail-cta__button--cart"
             type="button"
             disabled={cartActionDisabled}
             onClick={() => void runCartAction('cart')}

@@ -153,6 +153,10 @@ export interface ProductVariant {
   updated_at: string;
 }
 
+export interface ProductVariantSkuList {
+  items: string[];
+}
+
 export interface ProductCategoryAssignment {
   category_id: number;
   priority: 1 | 2 | 3;

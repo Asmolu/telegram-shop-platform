@@ -677,6 +677,10 @@ class ProductVariantsRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_skus(self) -> list[str]:
+        result = await self.session.execute(select(ProductVariant.sku))
+        return list(result.scalars().all())
+
     def add(self, variant: ProductVariant) -> None:
         self.session.add(variant)
 

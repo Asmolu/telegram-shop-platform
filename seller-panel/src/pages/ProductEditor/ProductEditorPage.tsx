@@ -19,6 +19,7 @@ import {
   allowedSizes,
   buildColorInputFromRows,
   buildVariantMatrixRows,
+  countNewVariantMatrixRows,
   deriveSelectedSizesFromRows,
   getIncompatibleSizes,
   getPersistedIncompatibleSizes,
@@ -394,7 +395,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     });
   }
 
-  function generateVariantMatrix() {
+  async function generateVariantMatrix() {
     const normalizedSizes = sortSizesForGrid(form.sizeGrid, selectedMatrixSizes);
     if (normalizedSizes.length === 0) {
       setFormError(t('productEditor.matrixSelectSize'));
@@ -402,31 +403,61 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
     }
 
     const normalizedColorInput = normalizeMatrixColorInput(matrixColorInput);
-    setSelectedMatrixSizes(normalizedSizes);
-    setMatrixColorInput(normalizedColorInput);
-    setVariants((current) =>
-      buildVariantMatrixRows(current, {
-        sizeGrid: form.sizeGrid,
-        selectedSizes: normalizedSizes,
-        colorInput: normalizedColorInput,
-        productName: form.name,
-        productSlug: form.slug,
-        createLocalId: createVariantLocalId,
-      }),
-    );
-    setCanRegenerateNewSkus(false);
-    setFormError(null);
+    const newRowCount = countNewVariantMatrixRows(variants, {
+      sizeGrid: form.sizeGrid,
+      selectedSizes: normalizedSizes,
+      colorInput: normalizedColorInput,
+    });
+
+    try {
+      const generatedSkus =
+        newRowCount > 0 ? (await api.products.generateVariantSkus(newRowCount)).items : [];
+      setSelectedMatrixSizes(normalizedSizes);
+      setMatrixColorInput(normalizedColorInput);
+      setVariants((current) =>
+        buildVariantMatrixRows(current, {
+          sizeGrid: form.sizeGrid,
+          selectedSizes: normalizedSizes,
+          colorInput: normalizedColorInput,
+          productName: form.name,
+          productSlug: form.slug,
+          createLocalId: createVariantLocalId,
+          generatedSkus,
+        }),
+      );
+      setCanRegenerateNewSkus(false);
+      setFormError(null);
+    } catch (requestError) {
+      setFormError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Unable to generate numeric SKU values.',
+      );
+    }
   }
 
-  function regenerateNewVariantSkus() {
-    setVariants((current) =>
-      regenerateNewSkusForRows(current, {
-        productName: form.name,
-        productSlug: form.slug,
-      }),
-    );
-    setCanRegenerateNewSkus(false);
-    setFormError(null);
+  async function regenerateNewVariantSkus() {
+    const newRowCount = variants.filter(
+      (variant) => !variant.id && !variant.remove && variant.size.trim(),
+    ).length;
+
+    try {
+      const generatedSkus =
+        newRowCount > 0 ? (await api.products.generateVariantSkus(newRowCount)).items : [];
+      setVariants((current) =>
+        regenerateNewSkusForRows(current, {
+          generatedSkus,
+        }),
+      );
+      setCanRegenerateNewSkus(false);
+      setFormError(null);
+    } catch (requestError) {
+      setFormError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Unable to generate numeric SKU values.',
+      );
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
