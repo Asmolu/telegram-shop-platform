@@ -194,6 +194,7 @@ describe('TopBar back behavior', () => {
     const backButton = container.querySelector<HTMLButtonElement>('.top-bar__back-button');
 
     expect(backButton).not.toBeNull();
+    expect(backButton?.classList.contains('top-bar__back-button--transparent')).toBe(true);
     fireEvent.click(backButton!);
     expect(routerMocks.goBack).toHaveBeenCalledWith('/main');
   });

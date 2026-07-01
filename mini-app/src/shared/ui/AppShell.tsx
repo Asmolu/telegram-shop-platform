@@ -259,7 +259,7 @@ export function TopBar({
           <>
             <div className="top-bar__left top-bar__left--edge">
               {showBack ? (
-                <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
+                <button className="icon-button top-bar__back-button top-bar__back-button--transparent" type="button" aria-label="Назад" onClick={handleBack}>
                   <BackIcon />
                 </button>
               ) : (
@@ -276,7 +276,7 @@ export function TopBar({
           <>
             <div className="top-bar__left">
               {showBack ? (
-                <button className="icon-button top-bar__back-button" type="button" aria-label="Назад" onClick={handleBack}>
+                <button className="icon-button top-bar__back-button top-bar__back-button--transparent" type="button" aria-label="Назад" onClick={handleBack}>
                   <BackIcon />
                 </button>
               ) : null}

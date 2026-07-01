@@ -25,7 +25,7 @@ import {
   useRouter,
   withReturnTo,
 } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, HeartIcon, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
 import {
   formatDate,
   formatDiscountPercent,
@@ -505,8 +505,14 @@ export function ProductDetailPage() {
         title="Товар"
         backFallback={backFallback}
         right={
-          <button className={`icon-button favorite-button ${favorite ? 'is-active' : ''}`} type="button" disabled={favoriteBusy} onClick={() => void toggleFavorite()}>
-            {favorite ? '♥' : '♡'}
+          <button
+            className={`icon-button favorite-button product-detail-favorite-button ${favorite ? 'is-active' : ''}`}
+            type="button"
+            aria-label={favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+            disabled={favoriteBusy}
+            onClick={() => void toggleFavorite()}
+          >
+            <HeartIcon filled={favorite} />
           </button>
         }
       />
@@ -741,14 +747,16 @@ function ColorButton({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const unavailable = option.availableCount <= 0;
+
   return (
     <button
-      className={`color-button ${selected ? 'is-selected' : ''} ${option.availableCount <= 0 ? 'is-unavailable' : ''}`}
+      className={`variant-chip variant-chip--color color-button ${selected ? 'is-selected variant-chip--selected' : ''} ${unavailable ? 'is-unavailable variant-chip--unavailable' : ''}`}
       type="button"
       onClick={onSelect}
     >
       <strong>{option.label}</strong>
-      <span>{option.availableCount <= 0 ? 'нет' : `${option.availableCount} шт.`}</span>
+      <span>{unavailable ? 'нет' : `${option.availableCount} шт.`}</span>
     </button>
   );
 }
@@ -768,7 +776,7 @@ function VariantButton({
 
   return (
     <button
-      className={`variant-button ${selected ? 'is-selected' : ''}`}
+      className={`variant-chip variant-chip--size variant-button ${selected ? 'is-selected variant-chip--selected' : ''} ${disabled ? 'is-unavailable variant-chip--unavailable' : ''}`}
       disabled={disabled}
       type="button"
       onClick={onSelect}

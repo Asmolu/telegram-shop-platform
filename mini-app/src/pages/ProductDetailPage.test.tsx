@@ -73,6 +73,70 @@ function mockProductDetail(product = productFixture(), cart = cartFixture()) {
   apiMocks.getCart.mockResolvedValue(cart);
 }
 
+describe('ProductDetailPage visual polish', () => {
+  afterEach(() => {
+    cleanup();
+    routerMocks.route.currentPath = '/product/10';
+    routerMocks.route.pathname = '/product/10';
+    vi.clearAllMocks();
+  });
+
+  it('renders color and size options as selected gradient chips', async () => {
+    mockProductDetail(productFixture({
+      variants: [
+        { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', available_quantity: 3 },
+        { ...productFixture().variants[0], id: 101, color: 'White', size: 'L', available_quantity: 2 },
+        { ...productFixture().variants[0], id: 102, color: 'Black', size: 'M', available_quantity: 4 },
+        { ...productFixture().variants[0], id: 103, color: 'Black', size: 'L', available_quantity: 1 },
+      ],
+    }));
+
+    const { container } = render(<ProductDetailPage />);
+
+    await screen.findByText('White');
+    const colorButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.color-button'));
+    const sizeButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.variant-button'));
+    const selectedColor = container.querySelector<HTMLButtonElement>('.color-button.is-selected');
+    const selectedSize = container.querySelector<HTMLButtonElement>('.variant-button.is-selected');
+    const styles = readFileSync('src/styles.css', 'utf-8');
+
+    expect(colorButtons).toHaveLength(2);
+    expect(sizeButtons).toHaveLength(2);
+    colorButtons.forEach((button) => {
+      expect(button.classList.contains('variant-chip')).toBe(true);
+      expect(button.classList.contains('variant-chip--color')).toBe(true);
+    });
+    sizeButtons.forEach((button) => {
+      expect(button.classList.contains('variant-chip')).toBe(true);
+      expect(button.classList.contains('variant-chip--size')).toBe(true);
+    });
+    expect(selectedColor?.classList.contains('variant-chip--selected')).toBe(true);
+    expect(selectedSize?.classList.contains('variant-chip--selected')).toBe(true);
+    expect(styles).toMatch(/\.variant-chip--selected,\s*\.variant-button\.is-selected,\s*\.color-button\.is-selected\s*{[^}]*background:\s*var\(--marketplace-gradient\)/s);
+  });
+
+  it('renders the product detail favorite action as a transparent SVG heart and preserves toggling', async () => {
+    mockProductDetail();
+    apiMocks.addFavorite.mockResolvedValue(undefined);
+
+    const { container } = render(<ProductDetailPage />);
+
+    await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' });
+    const favoriteButton = container.querySelector<HTMLButtonElement>('.product-detail-favorite-button');
+    const styles = readFileSync('src/styles.css', 'utf-8');
+
+    expect(favoriteButton).not.toBeNull();
+    expect(favoriteButton?.classList.contains('favorite-button')).toBe(true);
+    expect(favoriteButton?.querySelector('svg')).not.toBeNull();
+    expect(styles).toMatch(/\.product-detail-favorite-button\s*{[^}]*border-color:\s*transparent/s);
+    expect(styles).toMatch(/\.product-detail-favorite-button\s*{[^}]*background:\s*transparent/s);
+
+    fireEvent.click(favoriteButton!);
+
+    await waitFor(() => expect(apiMocks.addFavorite).toHaveBeenCalledWith(10));
+  });
+});
+
 describe('ProductDetailPage sticky actions', () => {
   afterEach(() => {
     cleanup();
@@ -305,6 +369,8 @@ describe('ProductDetailPage resolver preselection', () => {
     expect(apiMocks.getProduct).not.toHaveBeenCalled();
     expect(container.querySelector('.color-button.is-selected')?.textContent).toContain('Black');
     expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('L');
+    expect(container.querySelector('.color-button.is-selected')?.classList.contains('variant-chip--selected')).toBe(true);
+    expect(container.querySelector('.variant-button.is-selected')?.classList.contains('variant-chip--selected')).toBe(true);
   });
 
   it('falls back to the default available variant when resolver SKU is invalid', async () => {
@@ -371,8 +437,13 @@ describe('ProductDetailPage resolver preselection', () => {
     const { container } = render(<ProductDetailPage />);
 
     const buyButton = await screen.findByRole('button', { name: 'Купить сейчас' });
-    expect(container.querySelector('.color-button.is-selected')?.textContent).toContain('Black');
-    expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('L');
+    const selectedColor = container.querySelector('.color-button.is-selected');
+    const selectedSize = container.querySelector('.variant-button.is-selected');
+
+    expect(selectedColor?.textContent).toContain('Black');
+    expect(selectedSize?.textContent).toContain('L');
+    expect(selectedColor?.classList.contains('variant-chip--unavailable')).toBe(true);
+    expect(selectedSize?.classList.contains('variant-chip--unavailable')).toBe(true);
     expect((buyButton as HTMLButtonElement).disabled).toBe(true);
   });
 });
