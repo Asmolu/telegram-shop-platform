@@ -23,7 +23,7 @@ import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram
 import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
 import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
-import { formatPrice, getUserDisplayName } from '../shared/utils/format';
+import { formatPrice, getDisplayOldPrice, getUserDisplayName } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
@@ -552,6 +552,11 @@ function CheckoutItemSummary({ item }: { item: CartItem }) {
   const size = displaySize(item.product.size_grid, item.product_variant.size, true);
   const sku = item.product_variant.sku?.trim();
   const quantity = item.quantity;
+  const oldPrice = getDisplayOldPrice(
+    item.unit_price,
+    item.product.old_price,
+    item.product.compare_at_price,
+  );
   const detailParts = [
     size,
     color ?? '',
@@ -565,10 +570,10 @@ function CheckoutItemSummary({ item }: { item: CartItem }) {
           <img
             src={imageUrl}
             srcSet={checkoutProductImageSrcSet(item.product.thumbnail_image_url, item.product.image_url)}
-            sizes="72px"
+            sizes="96px"
             alt=""
-            width={72}
-            height={90}
+            width={96}
+            height={96}
             loading="lazy"
             decoding="async"
           />
@@ -576,21 +581,20 @@ function CheckoutItemSummary({ item }: { item: CartItem }) {
           <span>{item.product.name.slice(0, 1)}</span>
         )}
       </span>
-      <div className="checkout-item-card__body">
-        <div className="checkout-item-card__main">
-          <div className="checkout-item-card__info">
-            {brand ? <span className="checkout-item-card__brand">{brand}</span> : null}
-            <strong className="checkout-item-card__title">{item.product.name}</strong>
-          </div>
-          <div className="checkout-item-card__price">
-            <strong>{formatPrice(item.unit_price)}</strong>
-            {quantity > 1 ? <span>Итого {formatPrice(item.subtotal)}</span> : null}
-          </div>
+      <div className="checkout-item-card__content">
+        <div className="checkout-item-card__price-row">
+          <strong>{formatPrice(item.unit_price)}</strong>
+          {oldPrice ? <del>{formatPrice(oldPrice)}</del> : null}
         </div>
+        {brand ? <span className="checkout-item-card__brand">{brand}</span> : null}
+        <strong className="checkout-item-card__title">{item.product.name}</strong>
         {detailParts.length > 0 ? (
           <p className="checkout-item-card__meta">{detailParts.join(' · ')}</p>
         ) : null}
-        <span className="checkout-item-card__quantity">Кол-во: {quantity}</span>
+        <p className="checkout-item-card__quantity">
+          <span>Кол-во: {quantity}</span>
+          {quantity > 1 ? <span>Сумма: {formatPrice(item.subtotal)}</span> : null}
+        </p>
       </div>
     </article>
   );

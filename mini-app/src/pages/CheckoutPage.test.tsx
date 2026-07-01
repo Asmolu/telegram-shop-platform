@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -171,19 +171,56 @@ describe('CheckoutPage item details', () => {
     const card = itemCard.closest('.checkout-item-card') as HTMLElement | null;
     const meta = card?.querySelector('.checkout-item-card__meta')?.textContent ?? '';
     const quantity = card?.querySelector('.checkout-item-card__quantity')?.textContent ?? '';
-    const price = card?.querySelector('.checkout-item-card__price')?.textContent ?? '';
+    const price = card?.querySelector('.checkout-item-card__price-row')?.textContent ?? '';
 
     expect(card).not.toBeNull();
     expect(card?.querySelector('.checkout-item-card__image img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
     expect(card?.querySelector('dl')).toBeNull();
+    expect(card?.querySelectorAll('dt, dd')).toHaveLength(0);
     expect(screen.getByText('ICON STORE')).toBeTruthy();
     expect(meta).toContain('Black');
     expect(meta).toContain('M');
     expect(meta).toContain('SKU-M');
     expect(quantity).toContain('2');
+    expect(quantity).toContain('200');
     expect(price).toContain('100');
-    expect(price).toContain('200');
     expect(container.querySelector('.promo-form')).toBeTruthy();
+  });
+
+  it('keeps long SKU in a single metadata line without table-style field labels', async () => {
+    const cart = cartFixture();
+    const item = cart.items[0];
+    const longSku = 'tshirt1-temno-siniy-3xl-8a7542-extra-long';
+    if (!item) {
+      throw new Error('Expected cart fixture item');
+    }
+    item.product.name = 'Футболка Oversize Premium';
+    item.product.brand = 'Premium ICON STORE';
+    item.product_variant.size = '3XL';
+    item.product_variant.color = 'темно-синий';
+    item.product_variant.sku = longSku;
+    item.quantity = 1;
+    item.subtotal = '100.00';
+    vi.mocked(getCart).mockResolvedValueOnce(cart);
+
+    render(<CheckoutPage />);
+
+    const title = await screen.findByText('Футболка Oversize Premium');
+    const card = title.closest('.checkout-item-card') as HTMLElement | null;
+    const meta = card?.querySelector('.checkout-item-card__meta');
+    const quantity = card?.querySelector('.checkout-item-card__quantity');
+
+    expect(card).not.toBeNull();
+    expect(meta?.textContent).toContain('3XL');
+    expect(meta?.textContent).toContain('темно-синий');
+    expect(meta?.textContent).toContain(`арт. ${longSku}`);
+    expect(quantity?.textContent).toMatch(/Кол-во:\s*1/);
+    expect(card?.querySelector('dl')).toBeNull();
+    expect(card?.querySelectorAll('dt, dd')).toHaveLength(0);
+    expect(within(card as HTMLElement).queryByText('Цвет')).toBeNull();
+    expect(within(card as HTMLElement).queryByText('Размер')).toBeNull();
+    expect(within(card as HTMLElement).queryByText('Артикул')).toBeNull();
+    expect(within(card as HTMLElement).queryByText('Кол-во')).toBeNull();
   });
 
   it('places enabled order notification status near the bottom of the checkout form', async () => {
