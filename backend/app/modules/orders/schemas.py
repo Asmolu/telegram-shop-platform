@@ -58,6 +58,7 @@ class OrderItemRead(BaseModel):
     unit_price: Decimal
     quantity: int
     subtotal: Decimal
+    product_brand: str | None = None
     product_thumbnail_path: str | None = None
     product_thumbnail_url: str | None = None
     created_at: datetime
@@ -89,6 +90,7 @@ class OrderItemRead(BaseModel):
             "unit_price": _read_attr(data, "unit_price"),
             "quantity": _read_attr(data, "quantity"),
             "subtotal": _read_attr(data, "subtotal"),
+            "product_brand": _read_attr(product, "brand") if product is not None else None,
             "product_thumbnail_path": thumbnail_path,
             "product_thumbnail_url": thumbnail_url,
             "created_at": _read_attr(data, "created_at"),

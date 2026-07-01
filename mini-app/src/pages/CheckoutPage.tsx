@@ -11,6 +11,7 @@ import {
   toApiErrorMessage,
   validatePromoCode,
   type Cart,
+  type CartItem,
   type CustomerNotificationSubscription,
   type OrderDeliveryMethod,
   type PersonalData,
@@ -23,7 +24,9 @@ import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../sha
 import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice, getUserDisplayName } from '../shared/utils/format';
+import { normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
+import { displaySize } from '../shared/utils/sizes';
 
 const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string }[] = [
   { value: 'ROUTE_TAXI', label: 'Маршруткой' },
@@ -43,6 +46,21 @@ function areServiceNotificationsAvailable(subscription: CustomerNotificationSubs
     return subscription.service_notifications_available;
   }
   return Boolean(subscription.has_chat && subscription.service_opt_in && !subscription.blocked_at);
+}
+
+function checkoutProductImageSrcSet(thumbnailUrl?: string | null, imageUrl?: string | null) {
+  const normalizedThumbnail = normalizeAssetUrl(thumbnailUrl);
+  const normalizedImage = normalizeAssetUrl(imageUrl);
+  const entries: string[] = [];
+
+  if (normalizedThumbnail) {
+    entries.push(`${normalizedThumbnail} 240w`);
+  }
+  if (normalizedImage && normalizedImage !== normalizedThumbnail) {
+    entries.push(`${normalizedImage} 480w`);
+  }
+
+  return entries.length > 1 ? entries.join(', ') : undefined;
 }
 
 export function CheckoutPage() {
@@ -401,11 +419,15 @@ export function CheckoutPage() {
             </InlineNotice>
           ) : null}
 
-          <section className="summary-card">
+          <section className="summary-card checkout-summary-card">
             <h2>Корзина</h2>
-            {selectedItems.map((item) => (
-              <div key={item.id}><span>{item.product.name} × {item.quantity}</span><strong>{formatPrice(item.subtotal)}</strong></div>
-            ))}
+            <div className="checkout-item-list">
+              {selectedItems.map((item) => (
+                <CheckoutItemSummary item={item} key={item.id} />
+              ))}
+            </div>
+            <div><span>Выбрано</span><strong>{cart.selected_quantity_total}</strong></div>
+            <div><span>Товары</span><strong>{formatPrice(selectedTotal)}</strong></div>
             <div><span>Скидка</span><strong>{formatPrice(promoValidation?.discount_amount ?? 0)}</strong></div>
             <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? selectedTotal)}</strong></div>
           </section>
@@ -419,12 +441,6 @@ export function CheckoutPage() {
               <span>{promoValidation.code}: −{formatPrice(promoValidation.discount_amount)}</span>
               <button type="button" onClick={clearPromo}>Убрать</button>
             </div>
-          ) : null}
-
-          {serviceNotificationsAvailable ? (
-            <InlineNotice tone="success">
-              <span>Уведомления о заказах включены</span>
-            </InlineNotice>
           ) : null}
 
           {showNotificationPrompt ? (
@@ -514,6 +530,11 @@ export function CheckoutPage() {
             </div>
             <label>Имя в Telegram<input value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
             <label>Комментарий<textarea value={form.comment} onChange={(event) => updateField('comment', event.target.value)} rows={3} /></label>
+            {serviceNotificationsAvailable ? (
+              <InlineNotice tone="success">
+                <span>Уведомления о заказах включены</span>
+              </InlineNotice>
+            ) : null}
             <button className="primary-button" type="submit" disabled={busy}>
               {busy ? 'Создаём заказ...' : 'Оформить заказ'}
             </button>
@@ -521,5 +542,53 @@ export function CheckoutPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function CheckoutItemSummary({ item }: { item: CartItem }) {
+  const imageUrl = normalizeAssetUrl(item.product.thumbnail_image_url ?? item.product.image_url);
+  const brand = item.product.brand?.trim();
+  const color = item.product_variant.color?.trim();
+  const size = displaySize(item.product.size_grid, item.product_variant.size, true);
+  const sku = item.product_variant.sku?.trim();
+  const quantity = item.quantity;
+
+  return (
+    <article className="checkout-item-card">
+      <span className="checkout-item-card__image">
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            srcSet={checkoutProductImageSrcSet(item.product.thumbnail_image_url, item.product.image_url)}
+            sizes="72px"
+            alt=""
+            width={72}
+            height={90}
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <span>{item.product.name.slice(0, 1)}</span>
+        )}
+      </span>
+      <div className="checkout-item-card__content">
+        {brand ? <span className="checkout-item-card__brand">{brand}</span> : null}
+        <strong>{item.product.name}</strong>
+        <dl className="checkout-item-card__details">
+          {color ? (
+            <div><dt>Цвет</dt><dd>{color}</dd></div>
+          ) : null}
+          <div><dt>Размер</dt><dd>{size}</dd></div>
+          {sku ? (
+            <div><dt>Артикул</dt><dd>{sku}</dd></div>
+          ) : null}
+          <div><dt>Кол-во</dt><dd>{quantity}</dd></div>
+        </dl>
+      </div>
+      <div className="checkout-item-card__price">
+        <strong>{formatPrice(item.unit_price)}</strong>
+        {quantity > 1 ? <span>{formatPrice(item.subtotal)}</span> : null}
+      </div>
+    </article>
   );
 }

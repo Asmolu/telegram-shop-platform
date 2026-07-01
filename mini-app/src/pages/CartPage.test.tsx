@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getCart, loginWithTelegram } from '../shared/api';
+import {
+  getCart,
+  loginWithTelegram,
+  removeCartItem,
+  updateCartItem,
+  updateCartItemSelection,
+} from '../shared/api';
 import { CartPage } from './CartPage';
 
 const getProductMock = vi.hoisted(() => vi.fn());
@@ -100,6 +106,9 @@ describe('CartPage compact favorites', () => {
     routerMocks.navigate.mockClear();
     vi.mocked(getCart).mockClear();
     vi.mocked(loginWithTelegram).mockClear();
+    vi.mocked(removeCartItem).mockClear();
+    vi.mocked(updateCartItem).mockClear();
+    vi.mocked(updateCartItemSelection).mockClear();
     getProductMock.mockClear();
   });
 
@@ -162,6 +171,50 @@ describe('CartPage compact favorites', () => {
     fireEvent.blur(promoInput);
 
     expect(promoInput.closest('.cart-layout')?.classList.contains('cart-layout--promo-focused')).toBe(false);
+  });
+
+  it('opens product detail when the cart item body is clicked', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+    vi.mocked(getCart).mockResolvedValueOnce(cartWithSelectedItemFixture());
+
+    render(<CartPage />);
+
+    fireEvent.click(await screen.findByText('Compact Hoodie'));
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/product/20');
+  });
+
+  it('does not open product detail from cart item controls', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+    const cart = cartWithSelectedItemFixture();
+    vi.mocked(getCart).mockResolvedValueOnce(cart);
+    vi.mocked(updateCartItem).mockResolvedValue(cart);
+    vi.mocked(updateCartItemSelection).mockResolvedValue(cart);
+    vi.mocked(removeCartItem).mockResolvedValue({ ...cart, items: [] });
+
+    render(<CartPage />);
+
+    const item = (await screen.findByText('Compact Hoodie')).closest('.cart-item') as HTMLElement;
+    expect(item).not.toBeNull();
+
+    fireEvent.click(within(item).getByRole('button', { name: '+' }));
+    await waitFor(() => expect(updateCartItem).toHaveBeenCalledWith(10, 3));
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/product/20');
+
+    routerMocks.navigate.mockClear();
+    fireEvent.click(within(item).getByRole('checkbox'));
+    await waitFor(() => expect(updateCartItemSelection).toHaveBeenCalledWith(10, false));
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/product/20');
+
+    routerMocks.navigate.mockClear();
+    fireEvent.click(within(item).getByRole('button', { name: 'Купить' }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/checkout');
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/product/20');
+
+    routerMocks.navigate.mockClear();
+    fireEvent.click(within(item).getByRole('button', { name: 'Удалить' }));
+    await waitFor(() => expect(removeCartItem).toHaveBeenCalledWith(10));
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/product/20');
   });
 });
 

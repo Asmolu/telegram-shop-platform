@@ -889,6 +889,7 @@ async def test_order_response_contains_rich_item_and_total_fields() -> None:
     assert body["promo_code"] == "SAVE10"
     assert body["promo_applied"] is True
     assert item["product_title"] == "Hoodie"
+    assert item["product_brand"] == "ICON STORE"
     assert item["variant_color"] == "Black"
     assert item["item_total"] == Decimal("119.80")
     assert item["product_thumbnail_path"] == "products/hoodie.webp"
@@ -1328,6 +1329,7 @@ def _product(
     return Product(
         id=product_id,
         name=name,
+        brand="ICON STORE",
         slug=name.lower(),
         description="Warm",
         base_price=base_price,

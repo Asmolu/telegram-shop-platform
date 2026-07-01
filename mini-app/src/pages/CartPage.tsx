@@ -381,6 +381,7 @@ function CartItemsTab({
   onRemove: (itemId: number) => Promise<void>;
   onSelectAll: (isSelected: boolean) => Promise<void>;
 }) {
+  const { currentPath, navigate } = useRouter();
   const promoFormRef = React.useRef<HTMLFormElement | null>(null);
   const promoInputRef = React.useRef<HTMLInputElement | null>(null);
   const promoVisibilityTimers = React.useRef<number[]>([]);
@@ -545,6 +546,23 @@ function CartItemsTab({
     }
   }
 
+  function navigateToProduct(productId: number) {
+    navigate(withReturnTo(`/product/${productId}`, currentPath));
+  }
+
+  function stopCartItemNavigation(event: React.SyntheticEvent) {
+    event.stopPropagation();
+  }
+
+  function handleCartItemKeyDown(event: React.KeyboardEvent<HTMLElement>, productId: number) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+
+    event.preventDefault();
+    navigateToProduct(productId);
+  }
+
   if (!cart || items.length === 0) {
     return <EmptyState title="Корзина пустая" actionLabel="Перейти к товарам" onAction={onGoShop} />;
   }
@@ -586,8 +604,20 @@ function CartItemsTab({
           );
 
           return (
-            <article className={`cart-item ${item.is_selected ? '' : 'cart-item--unselected'}`} key={item.id}>
-              <label className="cart-item__selector" aria-label="Выбрать товар">
+            <article
+              className={`cart-item cart-item--clickable ${item.is_selected ? '' : 'cart-item--unselected'}`}
+              key={item.id}
+              role="link"
+              tabIndex={0}
+              onClick={() => navigateToProduct(item.product.id)}
+              onKeyDown={(event) => handleCartItemKeyDown(event, item.product.id)}
+            >
+              <label
+                className="cart-item__selector"
+                aria-label="Выбрать товар"
+                onClick={stopCartItemNavigation}
+                onKeyDown={stopCartItemNavigation}
+              >
                 <input
                   checked={item.is_selected}
                   type="checkbox"
@@ -620,16 +650,39 @@ function CartItemsTab({
                 <small className="cart-item__delivery">Доступно к оформлению</small>
               </div>
               <div className="cart-item__actions">
-                <div className="quantity-stepper" aria-label="Количество">
+                <div
+                  className="quantity-stepper"
+                  aria-label="Количество"
+                  onClick={stopCartItemNavigation}
+                  onKeyDown={stopCartItemNavigation}
+                >
                   <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity - 1)}>−</button>
                   <span>{item.quantity}</span>
                   <button type="button" onClick={() => void onQuantityChange(item.id, item.quantity + 1)}>+</button>
                 </div>
-                <button className="cart-item__buy-button" type="button" disabled={!item.is_selected || unavailable} onClick={onCheckout}>
+                <button
+                  className="cart-item__buy-button"
+                  type="button"
+                  disabled={!item.is_selected || unavailable}
+                  onClick={(event) => {
+                    stopCartItemNavigation(event);
+                    onCheckout();
+                  }}
+                  onKeyDown={stopCartItemNavigation}
+                >
                   Купить
                 </button>
               </div>
-              <button className="icon-button" type="button" onClick={() => void onRemove(item.id)} aria-label="Удалить">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={(event) => {
+                  stopCartItemNavigation(event);
+                  void onRemove(item.id);
+                }}
+                onKeyDown={stopCartItemNavigation}
+                aria-label="Удалить"
+              >
                 ×
               </button>
             </article>
@@ -738,6 +791,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                     </Link>
                     <div>
                       <Link to={productPath}>{item.product_title ?? item.product_name}</Link>
+                      {item.product_brand ? <small>{item.product_brand}</small> : null}
                       <small>{variant}</small>
                       <small>{item.quantity} × {formatPrice(item.unit_price)}</small>
                     </div>

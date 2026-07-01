@@ -297,6 +297,7 @@ export type OrderItem = {
   product_id: number;
   product_variant_id: number;
   product_name: string;
+  product_brand?: string | null;
   variant_size: string;
   variant_size_grid: ProductSizeGrid;
   variant_color?: string | null;

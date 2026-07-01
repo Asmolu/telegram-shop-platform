@@ -3,8 +3,10 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   checkoutCart,
+  getCart,
   getCustomerNotificationSubscription,
   recordCustomerNotificationWriteAccess,
+  type Cart,
   type CustomerNotificationSubscription,
 } from '../shared/api';
 import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
@@ -52,6 +54,7 @@ vi.mock('../shared/telegram/webApp', () => ({
 vi.mock('../shared/api', () => ({
   checkoutCart: vi.fn().mockResolvedValue({ id: 99 }),
   createIdempotencyKey: vi.fn(() => 'checkout-key'),
+  getApiBaseUrl: vi.fn(() => ''),
   getApiErrorTelemetryCategory: vi.fn(() => 'unknown'),
   getCart: vi.fn().mockResolvedValue(cartFixture()),
   getCustomerNotificationSubscription: vi.fn().mockResolvedValue(subscriptionFixture()),
@@ -76,6 +79,7 @@ describe('CheckoutPage notification write access', () => {
     routerMocks.navigate.mockClear();
     routerMocks.searchParams = new URLSearchParams();
     vi.mocked(checkoutCart).mockClear();
+    vi.mocked(getCart).mockResolvedValue(cartFixture());
     vi.mocked(getCustomerNotificationSubscription).mockResolvedValue(subscriptionFixture());
     vi.mocked(recordCustomerNotificationWriteAccess).mockClear();
     vi.mocked(recordCustomerNotificationWriteAccess).mockResolvedValue(
@@ -150,6 +154,75 @@ describe('CheckoutPage notification write access', () => {
   });
 });
 
+describe('CheckoutPage item details', () => {
+  afterEach(() => {
+    cleanup();
+    routerMocks.navigate.mockClear();
+    routerMocks.searchParams = new URLSearchParams();
+    vi.mocked(checkoutCart).mockClear();
+    vi.mocked(getCart).mockResolvedValue(cartFixture());
+    vi.mocked(getCustomerNotificationSubscription).mockResolvedValue(subscriptionFixture());
+  });
+
+  it('renders selected checkout items with image, name, brand, variant, SKU, quantity, and subtotal', async () => {
+    const { container } = render(<CheckoutPage />);
+
+    const itemCard = await screen.findByText('Compact Hoodie');
+    const card = itemCard.closest('.checkout-item-card') as HTMLElement | null;
+
+    expect(card).not.toBeNull();
+    expect(card?.querySelector('img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
+    expect(screen.getByText('ICON STORE')).toBeTruthy();
+    expect(screen.getByText('Black')).toBeTruthy();
+    expect(screen.getByText('M')).toBeTruthy();
+    expect(screen.getByText('SKU-M')).toBeTruthy();
+    expect(container.querySelector('.checkout-item-card__price')?.textContent).toContain('200');
+  });
+
+  it('places enabled order notification status near the bottom of the checkout form', async () => {
+    vi.mocked(getCustomerNotificationSubscription).mockResolvedValueOnce(
+      subscriptionFixture({
+        has_chat: true,
+        service_notifications_available: true,
+        availability_status: 'available',
+        service_opt_in: true,
+        write_access_granted: true,
+      }),
+    );
+
+    const { container } = render(<CheckoutPage />);
+
+    const message = await screen.findByText('Уведомления о заказах включены');
+    const checkoutForm = container.querySelector('.checkout-form');
+    const promoForm = container.querySelector('.promo-form');
+    const submitButton = screen.getByRole('button', { name: 'Оформить заказ' });
+
+    if (!promoForm) {
+      throw new Error('Promo form was not rendered');
+    }
+
+    expect(message.closest('.checkout-form')).toBe(checkoutForm);
+    expect(promoForm.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(message.compareDocumentPosition(submitButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps checkout submit wired after rendering detailed item cards', async () => {
+    render(<CheckoutPage />);
+
+    fireEvent.change(await screen.findByLabelText('Город'), { target: { value: 'Хасавюрт' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
+
+    await waitFor(() => expect(checkoutCart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contact_name: 'Ada',
+        contact_phone: '+79990000000',
+        delivery_address: 'Хасавюрт',
+      }),
+      'checkout-key',
+    ));
+  });
+});
+
 function subscriptionFixture(
   overrides: Partial<CustomerNotificationSubscription> = {},
 ): CustomerNotificationSubscription {
@@ -171,7 +244,7 @@ function subscriptionFixture(
   };
 }
 
-function cartFixture() {
+function cartFixture(): Cart {
   return {
     id: 1,
     user_id: 1,
@@ -188,8 +261,8 @@ function cartFixture() {
           compare_at_price: null,
           size_grid: 'clothing_alpha',
           status: 'ACTIVE',
-          image_url: null,
-          thumbnail_image_url: null,
+          image_url: '/uploads/products/card.webp',
+          thumbnail_image_url: '/uploads/products/thumb.webp',
         },
         product_variant: {
           id: 30,
@@ -200,19 +273,19 @@ function cartFixture() {
           is_active: true,
           available_quantity: 5,
         },
-        quantity: 1,
+        quantity: 2,
         is_selected: true,
         unit_price: '100.00',
-        subtotal: '100.00',
+        subtotal: '200.00',
         created_at: '2026-06-24T00:00:00Z',
         updated_at: '2026-06-24T00:00:00Z',
       },
     ],
-    total: '100.00',
-    quantity_total: 1,
+    total: '200.00',
+    quantity_total: 2,
     distinct_item_count: 1,
-    selected_total: '100.00',
-    selected_quantity_total: 1,
+    selected_total: '200.00',
+    selected_quantity_total: 2,
     selected_distinct_item_count: 1,
     created_at: '2026-06-24T00:00:00Z',
     updated_at: '2026-06-24T00:00:00Z',
