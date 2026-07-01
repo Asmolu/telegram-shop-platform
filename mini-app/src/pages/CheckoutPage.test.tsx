@@ -164,19 +164,26 @@ describe('CheckoutPage item details', () => {
     vi.mocked(getCustomerNotificationSubscription).mockResolvedValue(subscriptionFixture());
   });
 
-  it('renders selected checkout items with image, name, brand, variant, SKU, quantity, and subtotal', async () => {
+  it('renders selected checkout items with cart-like image, product details, quantity, and price', async () => {
     const { container } = render(<CheckoutPage />);
 
     const itemCard = await screen.findByText('Compact Hoodie');
     const card = itemCard.closest('.checkout-item-card') as HTMLElement | null;
+    const meta = card?.querySelector('.checkout-item-card__meta')?.textContent ?? '';
+    const quantity = card?.querySelector('.checkout-item-card__quantity')?.textContent ?? '';
+    const price = card?.querySelector('.checkout-item-card__price')?.textContent ?? '';
 
     expect(card).not.toBeNull();
-    expect(card?.querySelector('img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
+    expect(card?.querySelector('.checkout-item-card__image img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
+    expect(card?.querySelector('dl')).toBeNull();
     expect(screen.getByText('ICON STORE')).toBeTruthy();
-    expect(screen.getByText('Black')).toBeTruthy();
-    expect(screen.getByText('M')).toBeTruthy();
-    expect(screen.getByText('SKU-M')).toBeTruthy();
-    expect(container.querySelector('.checkout-item-card__price')?.textContent).toContain('200');
+    expect(meta).toContain('Black');
+    expect(meta).toContain('M');
+    expect(meta).toContain('SKU-M');
+    expect(quantity).toContain('2');
+    expect(price).toContain('100');
+    expect(price).toContain('200');
+    expect(container.querySelector('.promo-form')).toBeTruthy();
   });
 
   it('places enabled order notification status near the bottom of the checkout form', async () => {

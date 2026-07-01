@@ -552,6 +552,11 @@ function CheckoutItemSummary({ item }: { item: CartItem }) {
   const size = displaySize(item.product.size_grid, item.product_variant.size, true);
   const sku = item.product_variant.sku?.trim();
   const quantity = item.quantity;
+  const detailParts = [
+    size,
+    color ?? '',
+    sku ? `арт. ${sku}` : '',
+  ].filter(Boolean);
 
   return (
     <article className="checkout-item-card">
@@ -571,23 +576,21 @@ function CheckoutItemSummary({ item }: { item: CartItem }) {
           <span>{item.product.name.slice(0, 1)}</span>
         )}
       </span>
-      <div className="checkout-item-card__content">
-        {brand ? <span className="checkout-item-card__brand">{brand}</span> : null}
-        <strong>{item.product.name}</strong>
-        <dl className="checkout-item-card__details">
-          {color ? (
-            <div><dt>Цвет</dt><dd>{color}</dd></div>
-          ) : null}
-          <div><dt>Размер</dt><dd>{size}</dd></div>
-          {sku ? (
-            <div><dt>Артикул</dt><dd>{sku}</dd></div>
-          ) : null}
-          <div><dt>Кол-во</dt><dd>{quantity}</dd></div>
-        </dl>
-      </div>
-      <div className="checkout-item-card__price">
-        <strong>{formatPrice(item.unit_price)}</strong>
-        {quantity > 1 ? <span>{formatPrice(item.subtotal)}</span> : null}
+      <div className="checkout-item-card__body">
+        <div className="checkout-item-card__main">
+          <div className="checkout-item-card__info">
+            {brand ? <span className="checkout-item-card__brand">{brand}</span> : null}
+            <strong className="checkout-item-card__title">{item.product.name}</strong>
+          </div>
+          <div className="checkout-item-card__price">
+            <strong>{formatPrice(item.unit_price)}</strong>
+            {quantity > 1 ? <span>Итого {formatPrice(item.subtotal)}</span> : null}
+          </div>
+        </div>
+        {detailParts.length > 0 ? (
+          <p className="checkout-item-card__meta">{detailParts.join(' · ')}</p>
+        ) : null}
+        <span className="checkout-item-card__quantity">Кол-во: {quantity}</span>
       </div>
     </article>
   );
