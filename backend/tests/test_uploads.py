@@ -752,6 +752,8 @@ def _product() -> Product:
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=ProductStatus.DRAFT,
+        is_listed=True,
+        is_returnable=True,
         category_id=None,
         images=[],
         tags=[],

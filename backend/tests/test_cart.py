@@ -252,6 +252,16 @@ async def test_reject_inactive_product() -> None:
 
 
 @pytest.mark.asyncio
+async def test_add_item_accepts_active_unlisted_product() -> None:
+    service, _ = _cart_service(product_is_listed=False)
+
+    cart = await service.add_item(1, CartItemCreate(product_id=1, product_variant_id=1, quantity=1))
+
+    assert cart.items[0].product.id == 1
+    assert cart.items[0].product.status == ProductStatus.ACTIVE
+
+
+@pytest.mark.asyncio
 async def test_reject_inactive_variant() -> None:
     service, _ = _cart_service(variant_is_active=False)
 
@@ -300,6 +310,8 @@ async def test_user_cannot_access_another_users_cart_item() -> None:
 def _cart_service(
     *,
     product_status: ProductStatus = ProductStatus.ACTIVE,
+    product_is_listed: bool = True,
+    product_is_returnable: bool = True,
     variant_is_active: bool = True,
     stock_quantity: int = 5,
     reserved_quantity: int = 0,
@@ -307,7 +319,11 @@ def _cart_service(
 ) -> tuple[CartService, FakeCartRepository]:
     service = CartService(DummySession(), analytics_tracker=analytics_tracker)
     repository = FakeCartRepository()
-    repository.products[1] = _product(status=product_status)
+    repository.products[1] = _product(
+        status=product_status,
+        is_listed=product_is_listed,
+        is_returnable=product_is_returnable,
+    )
     repository.variants[1] = _variant(
         stock_quantity=stock_quantity,
         reserved_quantity=reserved_quantity,
@@ -317,7 +333,12 @@ def _cart_service(
     return service, repository
 
 
-def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
+def _product(
+    status: ProductStatus = ProductStatus.ACTIVE,
+    *,
+    is_listed: bool = True,
+    is_returnable: bool = True,
+) -> Product:
     return Product(
         id=1,
         name="Hoodie",
@@ -326,6 +347,8 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
+        is_listed=is_listed,
+        is_returnable=is_returnable,
         category_id=None,
         created_at=_now(),
         updated_at=_now(),

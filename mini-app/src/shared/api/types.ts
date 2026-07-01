@@ -305,6 +305,7 @@ export type OrderItem = {
   unit_price: string;
   quantity: number;
   subtotal: string;
+  is_returnable: boolean;
   product_title?: string;
   item_total?: string;
   product_thumbnail_path?: string | null;
@@ -341,6 +342,7 @@ export type Order = {
     receipt_image_url?: string | null;
   } | null;
   items: OrderItem[];
+  delivered_at?: string | null;
   created_at: string;
   updated_at: string;
 };

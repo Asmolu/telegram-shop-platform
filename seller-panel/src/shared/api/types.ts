@@ -179,6 +179,8 @@ export interface Product {
   image_badge_color: ProductImageBadgeColor | null;
   image_badge_position: ProductImageBadgePosition | null;
   status: ProductStatus;
+  is_listed: boolean;
+  is_returnable: boolean;
   category_id: number | null;
   category: Category | null;
   categories: ProductCategoryAssignment[];
@@ -214,6 +216,8 @@ export interface ProductCreate {
   image_badge_color?: ProductImageBadgeColor | null;
   image_badge_position?: ProductImageBadgePosition | null;
   status: ProductStatus;
+  is_listed?: boolean;
+  is_returnable?: boolean;
   category_id?: number | null;
   categories?: ProductCategoryAssignment[];
   tag_ids: number[];
@@ -236,6 +240,8 @@ export interface ProductUpdate {
   image_badge_color?: ProductImageBadgeColor | null;
   image_badge_position?: ProductImageBadgePosition | null;
   status?: ProductStatus;
+  is_listed?: boolean;
+  is_returnable?: boolean;
   category_id?: number | null;
   categories?: ProductCategoryAssignment[];
   tag_ids?: number[];
@@ -284,6 +290,7 @@ export interface OrderItem {
   unit_price: ApiDecimal;
   quantity: number;
   subtotal: ApiDecimal;
+  is_returnable: boolean;
   item_total?: ApiDecimal;
   product_thumbnail_path?: string | null;
   product_thumbnail_url?: string | null;
@@ -314,6 +321,7 @@ export interface Order {
     receipt_image_url: string | null;
   } | null;
   items: OrderItem[];
+  delivered_at: string | null;
   created_at: string;
   updated_at: string;
 }

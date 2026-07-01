@@ -80,6 +80,8 @@ PRODUCT_AUDIT_FIELDS = (
     "image_badge_color",
     "image_badge_position",
     "status",
+    "is_listed",
+    "is_returnable",
     "category_id",
 )
 VARIANT_AUDIT_FIELDS = (
@@ -350,7 +352,7 @@ class ProductsService:
         active_related_products = [
             related_product
             for related_product in product.related_products
-            if related_product.status == ProductStatus.ACTIVE
+            if related_product.status == ProductStatus.ACTIVE and related_product.is_listed
         ]
         return ProductPublicDetailRead.model_validate(product).model_copy(
             update={

@@ -239,6 +239,18 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                     </td>
                     <td>
                       <StatusBadge status={product.status} />
+                      {!product.is_listed || !product.is_returnable ? (
+                        <div className="product-state-badges">
+                          {!product.is_listed ? (
+                            <span className="product-state-badge">{t('products.hiddenBadge')}</span>
+                          ) : null}
+                          {!product.is_returnable ? (
+                            <span className="product-state-badge product-state-badge-warning">
+                              {t('products.nonReturnableBadge')}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </td>
                     <td>
                       <div className="tag-list">

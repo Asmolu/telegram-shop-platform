@@ -142,6 +142,7 @@ function orderFixture(overrides: Partial<Order> = {}): Order {
       unit_price: '100.00',
       quantity: 2,
       subtotal: '200.00',
+      is_returnable: true,
       item_total: '200.00',
       product_thumbnail_path: 'products/thumb.webp',
       product_thumbnail_url: '/uploads/products/thumb.webp',

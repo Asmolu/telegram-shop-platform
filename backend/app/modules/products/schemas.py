@@ -286,6 +286,8 @@ class ProductBase(BaseModel):
     image_badge_color: ProductImageBadgeColor | None = None
     image_badge_position: ProductImageBadgePosition | None = None
     status: ProductStatus = ProductStatus.DRAFT
+    is_listed: bool = True
+    is_returnable: bool = True
     category_id: int | None = None
 
     @field_validator("search_aliases")
@@ -380,6 +382,8 @@ class ProductUpdate(BaseModel):
     image_badge_color: ProductImageBadgeColor | None = None
     image_badge_position: ProductImageBadgePosition | None = None
     status: ProductStatus | None = None
+    is_listed: bool | None = None
+    is_returnable: bool | None = None
     category_id: int | None = None
     categories: list[ProductCategoryInput] | None = None
     tag_ids: list[int] | None = None

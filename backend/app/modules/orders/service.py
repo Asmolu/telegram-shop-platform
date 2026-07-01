@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from decimal import Decimal
 from secrets import token_hex
 from typing import Protocol
@@ -174,6 +175,7 @@ class OrdersService:
             for item in checkout_items:
                 variant = variants_by_id[item.product_variant_id]
                 subtotal = item.product.base_price * item.quantity
+                is_returnable = item.product.is_returnable
                 variant.stock_quantity -= item.quantity
                 self.repository.add(
                     OrderItem(
@@ -190,6 +192,7 @@ class OrdersService:
                         unit_price=item.product.base_price,
                         quantity=item.quantity,
                         subtotal=subtotal,
+                        is_returnable=is_returnable if is_returnable is not None else True,
                     )
                 )
 
@@ -324,8 +327,10 @@ class OrdersService:
                 "Use the manual payment approve or reject action for this order",
                 status.HTTP_409_CONFLICT,
             )
-        before_data = self.audit_service.snapshot(order, ("status",))
+        before_data = self.audit_service.snapshot(order, ("status", "delivered_at"))
         order.status = payload.status
+        if order.status == OrderStatus.DELIVERED and order.delivered_at is None:
+            order.delivered_at = datetime.now(UTC)
         post_commit_events: list[tuple[str, dict[str, object]]] = []
         if previous_status != order.status:
             await self.audit_service.record_action(
@@ -334,7 +339,7 @@ class OrdersService:
                 entity_type="order",
                 entity_id=order.id,
                 before_data=before_data,
-                after_data=self.audit_service.snapshot(order, ("status",)),
+                after_data=self.audit_service.snapshot(order, ("status", "delivered_at")),
             )
             post_commit_events.append(
                 (

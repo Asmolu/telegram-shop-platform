@@ -96,6 +96,8 @@ async def _seed_products(session: AsyncSession) -> None:
             size_grid=ProductSizeGrid.CLOTHING_ALPHA,
             image_badge_type=ProductImageBadgeType.NONE,
             status=ProductStatus.ACTIVE,
+            is_listed=True,
+            is_returnable=True,
             created_at=created_at,
             images=[
                 ProductImage(

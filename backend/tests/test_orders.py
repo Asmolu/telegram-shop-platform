@@ -381,6 +381,7 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
     assert order.items[0].variant_size == "M"
     assert order.items[0].variant_size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert order.items[0].variant_sku == "HOODIE-M-BLK"
+    assert order.items[0].is_returnable is True
     assert order.manual_payment is not None
     assert order.manual_payment.status == ManualPaymentStatus.PENDING
     assert repository.variants[1].stock_quantity == 3
@@ -869,6 +870,27 @@ async def test_order_item_snapshot_is_immutable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_checkout_accepts_active_unlisted_product() -> None:
+    service, _, _, _ = _orders_service(product_is_listed=False)
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert order.items[0].product_id == 1
+    assert order.status == OrderStatus.NEW
+
+
+@pytest.mark.asyncio
+async def test_checkout_snapshots_order_item_returnability() -> None:
+    service, repository, _, _ = _orders_service(product_is_returnable=False)
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+    repository.orders[order.id].items[0].product.is_returnable = True
+
+    assert order.items[0].is_returnable is False
+    assert repository.orders[order.id].items[0].is_returnable is False
+
+
+@pytest.mark.asyncio
 async def test_order_response_contains_rich_item_and_total_fields() -> None:
     promo_codes_service = FakePromoCodesService(discount_amount=Decimal("20.00"))
     service, _, _, _ = _orders_service(promo_codes_service=promo_codes_service)
@@ -892,6 +914,7 @@ async def test_order_response_contains_rich_item_and_total_fields() -> None:
     assert item["product_brand"] == "ICON STORE"
     assert item["variant_color"] == "Black"
     assert item["item_total"] == Decimal("119.80")
+    assert item["is_returnable"] is True
     assert item["product_thumbnail_path"] == "products/hoodie.webp"
     assert item["product_thumbnail_url"] == "/uploads/products/hoodie.webp"
 
@@ -1001,6 +1024,44 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
             },
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_order_status_update_to_delivered_sets_delivered_at_once() -> None:
+    service, repository, _, _ = _orders_service()
+    order = _order(order_id=10, user_id=1)
+    repository.orders[10] = order
+
+    delivered = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.DELIVERED),
+    )
+    first_delivered_at = delivered.delivered_at
+    redelivered = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.DELIVERED),
+    )
+
+    assert first_delivered_at is not None
+    assert redelivered.delivered_at == first_delivered_at
+    assert repository.orders[10].delivered_at == first_delivered_at
+
+
+@pytest.mark.asyncio
+async def test_order_status_update_preserves_delivered_at_after_later_status_change() -> None:
+    service, repository, _, _ = _orders_service()
+    delivered_at = datetime(2026, 5, 28, tzinfo=UTC)
+    order = _order(order_id=10, user_id=1, status_value=OrderStatus.DELIVERED)
+    order.delivered_at = delivered_at
+    repository.orders[10] = order
+
+    updated = await service.update_order_status(
+        10,
+        OrderStatusUpdate(status=OrderStatus.SHIPPED),
+    )
+
+    assert updated.status == OrderStatus.SHIPPED
+    assert updated.delivered_at == delivered_at
 
 
 @pytest.mark.asyncio
@@ -1213,6 +1274,8 @@ def test_order_admin_routes_allow_seller_to_update_status() -> None:
 def _orders_service(
     *,
     product_status: ProductStatus = ProductStatus.ACTIVE,
+    product_is_listed: bool = True,
+    product_is_returnable: bool = True,
     variant_is_active: bool = True,
     stock_quantity: int = 5,
     cart_items: list[CartItem] | None = None,
@@ -1237,6 +1300,8 @@ def _orders_service(
     repository.carts[1] = _cart(
         user_id=1,
         product_status=product_status,
+        product_is_listed=product_is_listed,
+        product_is_returnable=product_is_returnable,
         variant_is_active=variant_is_active,
         stock_quantity=stock_quantity,
         items=cart_items,
@@ -1256,6 +1321,8 @@ def _cart(
     *,
     user_id: int,
     product_status: ProductStatus = ProductStatus.ACTIVE,
+    product_is_listed: bool = True,
+    product_is_returnable: bool = True,
     variant_is_active: bool = True,
     stock_quantity: int = 5,
     items: list[CartItem] | None = None,
@@ -1265,7 +1332,11 @@ def _cart(
         cart.items = items
         return cart
 
-    product = _product(status=product_status)
+    product = _product(
+        status=product_status,
+        is_listed=product_is_listed,
+        is_returnable=product_is_returnable,
+    )
     variant = _variant(stock_quantity=stock_quantity, is_active=variant_is_active)
     cart.items = [
         CartItem(
@@ -1298,6 +1369,7 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
         delivery_method=OrderDeliveryMethod.ROUTE_TAXI,
         delivery_address="Main street",
         delivery_comment=None,
+        delivered_at=None,
         items=[
             OrderItem(
                 id=1,
@@ -1311,6 +1383,7 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
                 unit_price=Decimal("59.90"),
                 quantity=1,
                 subtotal=Decimal("59.90"),
+                is_returnable=True,
                 created_at=_now(),
             )
         ],
@@ -1325,6 +1398,8 @@ def _product(
     product_id: int = 1,
     name: str = "Hoodie",
     base_price: Decimal = Decimal("59.90"),
+    is_listed: bool = True,
+    is_returnable: bool = True,
 ) -> Product:
     return Product(
         id=product_id,
@@ -1335,6 +1410,8 @@ def _product(
         base_price=base_price,
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
         status=status,
+        is_listed=is_listed,
+        is_returnable=is_returnable,
         category_id=None,
         images=[
             ProductImage(

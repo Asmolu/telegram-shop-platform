@@ -109,6 +109,27 @@ class IntegrityErrorFlushSession(DummySession):
         raise IntegrityError("insert products", {}, Exception("duplicate slug"))
 
 
+class EmptyQueryResult:
+    def scalars(self) -> "EmptyQueryResult":
+        return self
+
+    def all(self) -> list[object]:
+        return []
+
+    def scalar_one(self) -> int:
+        return 0
+
+
+class CapturingQuerySession(DummySession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.statements: list[object] = []
+
+    async def execute(self, statement: object) -> EmptyQueryResult:
+        self.statements.append(statement)
+        return EmptyQueryResult()
+
+
 class FakeAnalyticsTracker:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
@@ -417,6 +438,48 @@ async def test_product_service_creates_updates_and_reads_brand() -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_create_defaults_visibility_and_returnability() -> None:
+    captured: dict[str, Product] = {}
+    service = ProductsService(DummySession())
+    service.tags_repository.list_by_ids = AsyncMock(return_value=[])
+
+    def capture_product(product: Product) -> None:
+        product.id = 1
+        product.created_at = datetime(2026, 5, 27, tzinfo=UTC)
+        product.updated_at = datetime(2026, 5, 27, tzinfo=UTC)
+        captured["product"] = product
+
+    service.repository.add = capture_product
+    service.repository.get_by_id = AsyncMock(side_effect=lambda _: captured["product"])
+
+    created = await service.create_product(
+        ProductCreate(
+            name="Listed Returnable Hoodie",
+            slug="listed-returnable-hoodie",
+            base_price=Decimal("59.90"),
+        )
+    )
+
+    assert created.is_listed is True
+    assert created.is_returnable is True
+
+
+@pytest.mark.asyncio
+async def test_product_update_persists_visibility_and_returnability() -> None:
+    product = _product(is_listed=True, is_returnable=True)
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    updated = await service.update_product(
+        product.id,
+        ProductUpdate(is_listed=False, is_returnable=False),
+    )
+
+    assert updated.is_listed is False
+    assert updated.is_returnable is False
+
+
+@pytest.mark.asyncio
 async def test_public_product_list_never_exposes_non_active_statuses() -> None:
     service = ProductsService(DummySession())
     service.repository.list_public_cards = AsyncMock(
@@ -587,6 +650,7 @@ async def test_public_product_detail_tracks_product_view() -> None:
 async def test_public_product_detail_returns_only_active_related_products() -> None:
     active_related = _product(product_id=2, status=ProductStatus.ACTIVE)
     inactive_related = _product(product_id=3, status=ProductStatus.DRAFT)
+    unlisted_related = _product(product_id=4, status=ProductStatus.ACTIVE, is_listed=False)
     product = _product(status=ProductStatus.ACTIVE)
     product.related_product_links = [
         ProductRelatedProduct(
@@ -601,6 +665,12 @@ async def test_public_product_detail_returns_only_active_related_products() -> N
             position=1,
             related_product=inactive_related,
         ),
+        ProductRelatedProduct(
+            product_id=product.id,
+            related_product_id=unlisted_related.id,
+            position=2,
+            related_product=unlisted_related,
+        ),
     ]
     service = ProductsService(DummySession())
     service.repository.get_public_detail_by_id = AsyncMock(return_value=product)
@@ -609,6 +679,18 @@ async def test_public_product_detail_returns_only_active_related_products() -> N
 
     assert result.related_product_ids == [2]
     assert [item.id for item in result.related_products] == [2]
+
+
+@pytest.mark.asyncio
+async def test_public_product_detail_returns_active_unlisted_product_by_direct_id() -> None:
+    product = _product(status=ProductStatus.ACTIVE, is_listed=False)
+    service = ProductsService(DummySession())
+    service.repository.get_public_detail_by_id = AsyncMock(return_value=product)
+
+    result = await service.get_public_product(product.id, track_view=False)
+
+    assert result.id == product.id
+    assert result.name == product.name
 
 
 @pytest.mark.asyncio
@@ -1839,6 +1921,50 @@ def test_color_filter_keeps_latin_and_russian_variant_colors_searchable() -> Non
     assert "product_variants.color" in rendered
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {},
+        {"category_id": 1},
+        {"tag_id": 1},
+        {"search": "hoodie"},
+    ],
+)
+async def test_public_product_card_queries_require_listed_products(
+    filters: dict[str, object],
+) -> None:
+    session = CapturingQuerySession()
+    repository = ProductsRepository(session)  # type: ignore[arg-type]
+
+    await repository.list_public_cards(limit=20, offset=0, **filters)
+
+    rendered = "\n".join(_literal_sql(statement) for statement in session.statements)
+    assert "products.is_listed IS true" in rendered
+
+
+@pytest.mark.asyncio
+async def test_admin_product_list_does_not_filter_unlisted_products() -> None:
+    session = CapturingQuerySession()
+    repository = ProductsRepository(session)  # type: ignore[arg-type]
+
+    await repository.list(limit=20, offset=0, status=ProductStatus.ACTIVE)
+
+    rendered = "\n".join(_literal_sql(statement) for statement in session.statements)
+    assert "products.is_listed IS true" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_public_search_suggestions_require_listed_products() -> None:
+    session = CapturingQuerySession()
+    repository = ProductsRepository(session)  # type: ignore[arg-type]
+
+    await repository.list_search_suggestions(query="hoodie", limit=8)
+
+    rendered = "\n".join(_literal_sql(statement) for statement in session.statements)
+    assert rendered.count("products.is_listed IS true") >= 5
+
+
 def test_product_variant_color_is_stored_as_trimmed_display_text() -> None:
     variant = ProductVariantCreate(size="M", color="  Красный  ", sku="RED-M")
     update = ProductVariantUpdate(color="  ")
@@ -1916,6 +2042,8 @@ def _product(
     variants: list[ProductVariant] | None = None,
     old_price: Decimal | None = None,
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA,
+    is_listed: bool = True,
+    is_returnable: bool = True,
 ) -> Product:
     return Product(
         id=product_id,
@@ -1932,6 +2060,8 @@ def _product(
         image_badge_color=None,
         image_badge_position=None,
         status=status,
+        is_listed=is_listed,
+        is_returnable=is_returnable,
         category_id=1,
         category=_category(),
         product_categories=[

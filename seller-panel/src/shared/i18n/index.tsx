@@ -242,6 +242,8 @@ const dictionaries: Record<Language, Record<string, string>> = {
     'products.available': '{count} доступно',
     'products.noTags': 'Нет тегов',
     'products.changeStatus': 'Изменить статус для {name}',
+    'products.hiddenBadge': 'Скрыт',
+    'products.nonReturnableBadge': 'Невозвратный',
 
     'productEditor.loading': 'Загружаем форму товара',
     'productEditor.required': 'Название, slug и базовая цена обязательны.',
@@ -263,6 +265,8 @@ const dictionaries: Record<Language, Record<string, string>> = {
     'productEditor.oldPriceInvalid': 'Старая цена должна быть выше базовой цены.',
     'productEditor.searchPriority': 'Приоритет поиска',
     'productEditor.searchPriorityHint': '1 показывается выше 2 и 3 в результатах поиска.',
+    'productEditor.isListed': 'Показывать в витрине',
+    'productEditor.isReturnable': 'Возвратный товар',
     'productEditor.priorityHigh': '1 - высокий',
     'productEditor.priorityMedium': '2 - средний',
     'productEditor.priorityLow': '3 - низкий',
@@ -894,6 +898,8 @@ Object.assign(englishOverrides, {
   'products.available': '{count} available',
   'products.noTags': 'No tags',
   'products.changeStatus': 'Change status for {name}',
+  'products.hiddenBadge': 'Hidden',
+  'products.nonReturnableBadge': 'Non-returnable',
 });
 
 Object.assign(englishOverrides, {
@@ -917,6 +923,8 @@ Object.assign(englishOverrides, {
   'productEditor.oldPriceInvalid': 'Old price must be higher than the base price.',
   'productEditor.searchPriority': 'Search priority',
   'productEditor.searchPriorityHint': '1 appears above 2 and 3 in search results.',
+  'productEditor.isListed': 'Show in storefront',
+  'productEditor.isReturnable': 'Returnable product',
   'productEditor.priorityHigh': '1 - high',
   'productEditor.priorityMedium': '2 - medium',
   'productEditor.priorityLow': '3 - low',

@@ -58,6 +58,7 @@ class OrderItemRead(BaseModel):
     unit_price: Decimal
     quantity: int
     subtotal: Decimal
+    is_returnable: bool = True
     product_brand: str | None = None
     product_thumbnail_path: str | None = None
     product_thumbnail_url: str | None = None
@@ -75,6 +76,7 @@ class OrderItemRead(BaseModel):
         variant_color = _read_attr(data, "variant_color")
         if variant_color is None and product_variant is not None:
             variant_color = _read_attr(product_variant, "color")
+        is_returnable = _read_attr(data, "is_returnable")
 
         return {
             "id": _read_attr(data, "id"),
@@ -90,6 +92,7 @@ class OrderItemRead(BaseModel):
             "unit_price": _read_attr(data, "unit_price"),
             "quantity": _read_attr(data, "quantity"),
             "subtotal": _read_attr(data, "subtotal"),
+            "is_returnable": is_returnable if is_returnable is not None else True,
             "product_brand": _read_attr(product, "brand") if product is not None else None,
             "product_thumbnail_path": thumbnail_path,
             "product_thumbnail_url": thumbnail_url,
@@ -126,6 +129,7 @@ class OrderRead(BaseModel):
     delivery_comment: str | None = None
     manual_payment: ManualPaymentSummary | None = None
     items: list[OrderItemRead]
+    delivered_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

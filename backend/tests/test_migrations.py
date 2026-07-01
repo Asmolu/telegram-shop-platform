@@ -421,6 +421,29 @@ def test_customer_write_access_migration_adds_explicit_permission_state() -> Non
     assert table.c.write_access_source.type.length == 100
 
 
+def test_product_visibility_and_returnability_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260701_0040_add_product_visibility_and_returnability.py"
+    )
+    content = migration_path.read_text(encoding="utf-8")
+
+    assert "is_listed" in content
+    assert "is_returnable" in content
+    assert "delivered_at" in content
+    assert "UPDATE products SET is_listed = TRUE" in content
+    assert "UPDATE products SET is_returnable = TRUE" in content
+    assert "UPDATE order_items SET is_returnable = TRUE" in content
+    assert Product.__table__.c.is_listed.nullable is False
+    assert Product.__table__.c.is_returnable.nullable is False
+    assert Product.__table__.c.is_listed.default.arg is True
+    assert Product.__table__.c.is_returnable.default.arg is True
+    assert OrderItem.__table__.c.is_returnable.nullable is False
+    assert Order.__table__.c.delivered_at.nullable is True
+
+
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

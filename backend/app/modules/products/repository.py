@@ -103,6 +103,7 @@ class ProductsRepository:
             size_grid=size_grid,
             size=size,
             color=color,
+            listed_only=True,
         )
         order_by = self._list_ordering(search=search, category_id=category_id)
         products_query = (
@@ -172,6 +173,7 @@ class ProductsRepository:
             select(Product.name)
             .where(
                 Product.status == ProductStatus.ACTIVE,
+                Product.is_listed.is_(True),
                 self._suggestion_text_matches(Product.name, search_pattern),
             )
             .order_by(
@@ -192,6 +194,7 @@ class ProductsRepository:
             select(Product.brand, func.count(Product.id).label("product_count"))
             .where(
                 Product.status == ProductStatus.ACTIVE,
+                Product.is_listed.is_(True),
                 Product.brand.is_not(None),
                 self._normalized_column(Product.brand) != "",
                 self._suggestion_text_matches(Product.brand, search_pattern),
@@ -212,9 +215,19 @@ class ProductsRepository:
         )
 
         active_category_condition = or_(
-            Category.products.any(Product.status == ProductStatus.ACTIVE),
+            Category.products.any(
+                and_(
+                    Product.status == ProductStatus.ACTIVE,
+                    Product.is_listed.is_(True),
+                )
+            ),
             Category.product_categories.any(
-                ProductCategory.product.has(Product.status == ProductStatus.ACTIVE)
+                ProductCategory.product.has(
+                    and_(
+                        Product.status == ProductStatus.ACTIVE,
+                        Product.is_listed.is_(True),
+                    )
+                )
             ),
         )
         category_rows = await self.session.execute(
@@ -242,7 +255,12 @@ class ProductsRepository:
         tag_rows = await self.session.execute(
             select(Tag.name)
             .where(
-                Tag.products.any(Product.status == ProductStatus.ACTIVE),
+                Tag.products.any(
+                    and_(
+                        Product.status == ProductStatus.ACTIVE,
+                        Product.is_listed.is_(True),
+                    )
+                ),
                 or_(
                     self._suggestion_text_matches(Tag.name, search_pattern),
                     self._suggestion_text_matches(Tag.slug, search_pattern),
@@ -264,6 +282,7 @@ class ProductsRepository:
             select(Product.search_aliases)
             .where(
                 Product.status == ProductStatus.ACTIVE,
+                Product.is_listed.is_(True),
                 Product.search_aliases.is_not(None),
                 self._suggestion_text_matches(Product.search_aliases, search_pattern),
             )
@@ -383,6 +402,7 @@ class ProductsRepository:
                     Product.image_badge_color,
                     Product.image_badge_position,
                     Product.status,
+                    Product.is_listed,
                     Product.created_at,
                 ),
                 related_product_loader.selectinload(Product.images).load_only(
@@ -438,6 +458,7 @@ class ProductsRepository:
                     Product.image_badge_color,
                     Product.image_badge_position,
                     Product.status,
+                    Product.is_listed,
                     Product.created_at,
                 ),
                 related_product_loader.selectinload(Product.images).load_only(
@@ -501,6 +522,7 @@ class ProductsRepository:
         size_grid: ProductSizeGrid | None = None,
         size: str | None = None,
         color: str | None = None,
+        listed_only: bool = False,
     ) -> list[Any]:
         conditions = []
         if category_id is not None:
@@ -514,6 +536,8 @@ class ProductsRepository:
             conditions.append(Product.tags.any(Tag.id == tag_id))
         if status is not None:
             conditions.append(Product.status == status)
+        if listed_only:
+            conditions.append(Product.is_listed.is_(True))
         if size_grid is not None:
             conditions.append(Product.size_grid == size_grid)
         if size is not None or color is not None:

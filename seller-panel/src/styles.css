@@ -711,6 +711,18 @@ textarea:focus {
   align-items: start;
 }
 
+.product-settings-row {
+  align-items: stretch;
+}
+
+.product-setting-toggle {
+  min-height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #fff;
+}
+
 .form-stack {
   display: grid;
   gap: 12px;
@@ -1381,6 +1393,27 @@ textarea:focus {
   padding: 3px 7px;
   color: #4b5563;
   font-size: 12px;
+}
+
+.product-state-badges {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.product-state-badge {
+  border-radius: 999px;
+  background: #fef3c7;
+  padding: 3px 7px;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.product-state-badge-warning {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .price-stack {

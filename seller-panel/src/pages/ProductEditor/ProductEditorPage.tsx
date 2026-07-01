@@ -66,6 +66,8 @@ interface ProductFormState {
   imageBadgeColor: ProductImageBadgeColor;
   imageBadgePosition: ProductImageBadgePosition;
   status: ProductStatus;
+  isListed: boolean;
+  isReturnable: boolean;
   tagIds: number[];
 }
 
@@ -102,6 +104,8 @@ const initialForm: ProductFormState = {
   imageBadgeColor: 'purple',
   imageBadgePosition: 'top-left',
   status: 'DRAFT',
+  isListed: true,
+  isReturnable: true,
   tagIds: [],
 };
 
@@ -235,6 +239,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               loadedProduct.image_badge_position ??
               getDefaultBadgePosition(loadedProduct.image_badge_type ?? 'none'),
             status: loadedProduct.status,
+            isListed: loadedProduct.is_listed ?? true,
+            isReturnable: loadedProduct.is_returnable ?? true,
             tagIds: loadedProduct.tags.map((tag) => tag.id),
           });
           setCategoryAssignments(getCategoryRowsFromProduct(loadedProduct));
@@ -651,6 +657,8 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         image_badge_color: form.imageBadgeColor,
         image_badge_position: form.imageBadgePosition,
         status: form.status,
+        is_listed: form.isListed,
+        is_returnable: form.isReturnable,
         category_id: primaryCategoryId,
         categories: normalizedCategories,
         tag_ids: form.tagIds,
@@ -848,6 +856,24 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
                 <small className="field-hint">{t('productEditor.searchPriorityHint')}</small>
               </label>
             </div>
+            <div className="form-pair-row field-wide product-settings-row">
+              <label className="toggle-label product-setting-toggle">
+                <input
+                  checked={form.isListed}
+                  type="checkbox"
+                  onChange={(event) => updateField('isListed', event.target.checked)}
+                />
+                <span>{t('productEditor.isListed')}</span>
+              </label>
+              <label className="toggle-label product-setting-toggle">
+                <input
+                  checked={form.isReturnable}
+                  type="checkbox"
+                  onChange={(event) => updateField('isReturnable', event.target.checked)}
+                />
+                <span>{t('productEditor.isReturnable')}</span>
+              </label>
+            </div>
             <label className="field field-wide">
               <span>{t('common.description')}</span>
               <textarea
@@ -898,6 +924,14 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               <div>
                 <dt>{t('productEditor.searchPriority')}</dt>
                 <dd>{product.search_priority ?? 2}</dd>
+              </div>
+              <div>
+                <dt>{t('productEditor.isListed')}</dt>
+                <dd>{product.is_listed ? t('common.yes') : t('common.no')}</dd>
+              </div>
+              <div>
+                <dt>{t('productEditor.isReturnable')}</dt>
+                <dd>{product.is_returnable ? t('common.yes') : t('common.no')}</dd>
               </div>
             </dl>
           ) : (
