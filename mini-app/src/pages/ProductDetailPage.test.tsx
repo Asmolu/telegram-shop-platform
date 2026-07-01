@@ -93,7 +93,7 @@ describe('ProductDetailPage visual polish', () => {
 
     const { container } = render(<ProductDetailPage />);
 
-    await screen.findByText('White');
+    await waitFor(() => expect(container.querySelector('.color-button')).not.toBeNull());
     const colorButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.color-button'));
     const sizeButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.variant-button'));
     const selectedColor = container.querySelector<HTMLButtonElement>('.color-button.is-selected');
@@ -128,12 +128,38 @@ describe('ProductDetailPage visual polish', () => {
     expect(favoriteButton).not.toBeNull();
     expect(favoriteButton?.classList.contains('favorite-button')).toBe(true);
     expect(favoriteButton?.querySelector('svg')).not.toBeNull();
-    expect(styles).toMatch(/\.product-detail-favorite-button\s*{[^}]*border-color:\s*transparent/s);
+    expect(styles).toMatch(/\.product-detail-favorite-button\s*{[^}]*border:\s*0/s);
     expect(styles).toMatch(/\.product-detail-favorite-button\s*{[^}]*background:\s*transparent/s);
+    expect(styles).toMatch(/\.top-bar--marketplace\s+\.icon-button\.product-detail-favorite-button\s*{[^}]*background:\s*transparent/s);
+    expect(styles).toMatch(/\.top-bar--marketplace\s+\.icon-button\.product-detail-favorite-button\s*{[^}]*box-shadow:\s*none/s);
+    expect(styles).toMatch(/\.product-detail-favorite-button svg\s*{[^}]*width:\s*28px/s);
+    expect(styles).toMatch(/\.product-detail-favorite-button svg\s*{[^}]*filter:\s*none/s);
 
     fireEvent.click(favoriteButton!);
 
     await waitFor(() => expect(apiMocks.addFavorite).toHaveBeenCalledWith(10));
+  });
+
+  it('keeps variant chip surfaces clean without transparent edge bleed', async () => {
+    mockProductDetail(productFixture({
+      variants: [
+        { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', available_quantity: 3 },
+        { ...productFixture().variants[0], id: 101, color: 'Black', size: 'M', available_quantity: 0 },
+      ],
+    }));
+
+    const { container } = render(<ProductDetailPage />);
+    const styles = readFileSync('src/styles.css', 'utf-8');
+
+    await waitFor(() => expect(container.querySelector('.color-button')).not.toBeNull());
+
+    expect(container.querySelector('.color-button:not(.is-selected)')?.classList.contains('variant-chip')).toBe(true);
+    expect(container.querySelector('.color-button.is-unavailable')?.classList.contains('variant-chip--unavailable')).toBe(true);
+    expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*overflow:\s*hidden/s);
+    expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*background:\s*color-mix\(in srgb, var\(--surface-elevated\) 92%, var\(--surface-soft\)\)/s);
+    expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*box-shadow:\s*none/s);
+    expect(styles).toMatch(/\.variant-chip--selected,\s*\.variant-button\.is-selected,\s*\.color-button\.is-selected\s*{[^}]*box-shadow:\s*none/s);
+    expect(styles).toMatch(/\.variant-chip:disabled\s*{[^}]*opacity:\s*1/s);
   });
 });
 

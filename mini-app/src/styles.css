@@ -1289,7 +1289,7 @@ label {
 .product-detail-favorite-button {
   width: 46px;
   height: 46px;
-  border-color: transparent;
+  border: 0;
   border-radius: 50%;
   background: transparent;
   color: rgba(255, 255, 255, 0.92);
@@ -1298,14 +1298,26 @@ label {
   line-height: 1;
 }
 
+.top-bar--marketplace .icon-button.product-detail-favorite-button {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.94);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .product-detail-favorite-button.is-active {
   color: #ffffff;
 }
 
+.top-bar--marketplace .icon-button.product-detail-favorite-button.is-active {
+  color: #ffffff;
+}
+
 .product-detail-favorite-button svg {
-  width: 25px;
-  height: 25px;
-  filter: drop-shadow(0 3px 8px rgba(17, 24, 39, 0.28));
+  width: 28px;
+  height: 28px;
+  filter: none;
 }
 
 .product-card__body {
@@ -2298,14 +2310,17 @@ label {
   min-width: 72px;
   max-width: 148px;
   min-height: 48px;
-  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--surface-elevated));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-elevated) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 92%, var(--surface-soft));
+  background-clip: border-box;
   color: var(--text);
   padding: 8px 14px;
   scroll-snap-align: start;
   text-align: center;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
+  box-shadow: none;
+  isolation: isolate;
 }
 
 .color-button {
@@ -2323,10 +2338,10 @@ label {
 .variant-chip--selected,
 .variant-button.is-selected,
 .color-button.is-selected {
-  border-color: transparent;
+  border-color: color-mix(in srgb, #ffffff 18%, #ed3cca);
   background: var(--marketplace-gradient);
   color: #ffffff;
-  box-shadow: 0 10px 22px rgba(124, 58, 237, 0.26);
+  box-shadow: none;
 }
 
 .variant-button span,
@@ -2338,7 +2353,7 @@ label {
 }
 
 .variant-chip:disabled {
-  opacity: 0.68;
+  opacity: 1;
 }
 
 .variant-chip--selected span,
@@ -2348,15 +2363,15 @@ label {
 }
 
 .variant-chip--unavailable {
-  border-color: color-mix(in srgb, var(--border) 48%, transparent);
-  background: color-mix(in srgb, var(--surface-elevated) 42%, transparent);
+  border-color: color-mix(in srgb, var(--border) 78%, var(--surface-elevated));
+  background: color-mix(in srgb, var(--surface-elevated) 76%, var(--surface-soft));
   color: color-mix(in srgb, var(--text) 62%, var(--muted));
   box-shadow: none;
 }
 
 .variant-chip--unavailable.is-selected {
   border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
-  background: color-mix(in srgb, var(--surface-elevated) 48%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 76%, var(--danger-soft));
   color: color-mix(in srgb, var(--text) 70%, var(--muted));
 }
 
