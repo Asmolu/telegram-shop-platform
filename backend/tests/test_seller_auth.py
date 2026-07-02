@@ -278,6 +278,27 @@ async def test_telegram_start_links_identity_and_sends_approval_request(
 
 
 @pytest.mark.asyncio
+async def test_telegram_start_sends_approval_request_to_orders_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _, telegram = _seller_auth_service()
+    await service.start_registration(_start_payload())
+
+    await service.handle_telegram_start(
+        SellerTelegramStartRequest(
+            start_payload="seller_start-token",
+            telegram_user_id=99,
+            telegram_chat_id=100,
+            telegram_username="@sellername",
+        )
+    )
+
+    assert telegram.messages[0][0] == "-200"
+
+
+@pytest.mark.asyncio
 async def test_telegram_start_rejects_username_mismatch() -> None:
     service, _, _, _ = _seller_auth_service()
     await service.start_registration(_start_payload())

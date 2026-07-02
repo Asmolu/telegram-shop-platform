@@ -379,6 +379,7 @@ async def test_return_notification_uses_returns_chat_with_seller_fallback(monkey
     assert fallback_telegram.sent_messages[0][0] == "seller-chat"
     assert "Новая заявка на возврат" in fallback_telegram.sent_messages[0][1]
 
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "orders-chat")
     monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
     returns_telegram = FakeTelegramService()
     returns_notifier = TelegramReturnSellerNotifier(telegram_service=returns_telegram)
@@ -386,6 +387,22 @@ async def test_return_notification_uses_returns_chat_with_seller_fallback(monkey
     await returns_notifier.notify_return_request_created(return_request)
 
     assert returns_telegram.sent_messages[0][0] == "returns-chat"
+
+
+@pytest.mark.asyncio
+async def test_return_notification_does_not_fall_back_to_orders_chat(monkeypatch) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "orders-chat")
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", None)
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", None)
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram)
+
+    await notifier.notify_return_request_created(return_request)
+
+    assert telegram.sent_messages == []
 
 
 @pytest.mark.asyncio

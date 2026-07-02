@@ -124,10 +124,9 @@ class ManualPaymentEventPublisher:
             ]
         }
         bot_token = getattr(self.telegram_service, "bot_token", settings.telegram_bot_token)
-        seller_chat_id = getattr(
-            self.telegram_service,
-            "seller_chat_id",
-            settings.telegram_seller_chat_id,
+        seller_chat_id = (
+            getattr(self.telegram_service, "seller_chat_id", None)
+            or settings.telegram_orders_notification_chat_id
         )
         receipt_path = self._receipt_path(notification_payload)
         logger.info(
@@ -247,7 +246,10 @@ class ManualPaymentEventPublisher:
         name: str,
         payload: Mapping[str, object],
     ) -> None:
-        chat_id = payload.get("seller_telegram_chat_id") or settings.telegram_seller_chat_id
+        chat_id = (
+            payload.get("seller_telegram_chat_id")
+            or settings.telegram_orders_notification_chat_id
+        )
         message_id = payload.get("seller_telegram_message_id")
         final_line = self._final_payment_line(name, payload)
         final_message = f"{self._review_message(payload)}\n\n{final_line}"

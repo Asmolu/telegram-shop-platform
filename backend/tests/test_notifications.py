@@ -12,7 +12,7 @@ from app.main import create_app
 from app.modules.notifications.router import get_notifications_service
 from app.modules.notifications.schemas import NotificationList, NotificationRead
 from app.modules.notifications.service import NotificationsService
-from app.modules.telegram.service import TelegramDeliveryError
+from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 
 
 class DummySession:
@@ -94,6 +94,26 @@ class FakeNotificationsRepository:
 
     async def get_by_id(self, notification_id: int) -> Notification | None:
         return self.notifications.get(notification_id)
+
+
+def test_telegram_service_defaults_to_orders_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-100-orders")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100-legacy")
+
+    telegram = TelegramService(bot_token="token")
+
+    assert telegram.seller_chat_id == "-100-orders"
+
+
+def test_telegram_service_defaults_to_seller_chat_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", None)
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100-legacy")
+
+    telegram = TelegramService(bot_token="token")
+
+    assert telegram.seller_chat_id == "-100-legacy"
 
 
 @pytest.mark.asyncio

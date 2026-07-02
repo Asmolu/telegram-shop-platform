@@ -268,7 +268,7 @@ class SellerBotService:
 
     async def get_status(self) -> SellerBotStatusResponse:
         configured = bool(settings.telegram_bot_token)
-        seller_chat_configured = bool(settings.telegram_seller_chat_id)
+        seller_chat_configured = bool(settings.telegram_orders_notification_chat_id)
         if not configured:
             return SellerBotStatusResponse(
                 configured=False,
@@ -1723,7 +1723,7 @@ XL / Черный / 5 / HERMES-XL-B
         return f"Seller #{user.id} has been {state}."
 
     def _require_seller_group(self, chat_id: int) -> None:
-        configured_chat_id = settings.telegram_seller_chat_id
+        configured_chat_id = settings.telegram_orders_notification_chat_id
         if not configured_chat_id or str(chat_id) != configured_chat_id.strip():
             raise AppError(SELLER_GROUP_ONLY_MESSAGE, 403)
 

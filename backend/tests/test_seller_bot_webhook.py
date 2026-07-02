@@ -109,11 +109,13 @@ class FakeManualPaymentsService:
         *,
         actor_user_id: int | None = 9,
         terminal_status: ManualPaymentStatus | None = None,
+        expected_chat_id: int = -100,
     ) -> None:
         self.actions: list[tuple[str, int, int | None, int]] = []
         self.actor_user_id = actor_user_id
         self.terminal_status = terminal_status
         self.current_status = terminal_status or ManualPaymentStatus.SUBMITTED
+        self.expected_chat_id = expected_chat_id
 
     async def actor_user_id_for_telegram(self, telegram_id: int) -> int | None:
         assert telegram_id == 500
@@ -130,7 +132,7 @@ class FakeManualPaymentsService:
         seller_message_id: int | None = None,
     ) -> SimpleNamespace:
         assert source == "seller_bot"
-        assert seller_chat_id == -100
+        assert seller_chat_id == self.expected_chat_id
         assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be approved", status.HTTP_409_CONFLICT)
@@ -157,7 +159,7 @@ class FakeManualPaymentsService:
     ) -> SimpleNamespace:
         assert source == "seller_bot"
         assert reject_reason == "Деньги не поступили"
-        assert seller_chat_id == -100
+        assert seller_chat_id == self.expected_chat_id
         assert seller_message_id == 11
         if self.terminal_status is not None:
             raise AppError("Payment cannot be rejected", status.HTTP_409_CONFLICT)
@@ -389,6 +391,28 @@ async def test_seller_bot_manual_payment_callback_uses_shared_service(
 
 
 @pytest.mark.asyncio
+async def test_seller_bot_manual_payment_callback_accepts_orders_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService(expected_chat_id=-200)
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    response = await service.handle_update(
+        _callback_update("manual_payment:approve:17", chat_id=-200)
+    )
+
+    assert response.result == "manual_payment_approved"
+    assert payments.actions == [("approve", 17, 9, 500)]
+
+
+@pytest.mark.asyncio
 async def test_seller_bot_manual_payment_callback_rejects_other_chat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -403,6 +427,30 @@ async def test_seller_bot_manual_payment_callback_rejects_other_chat(
 
     response = await service.handle_update(
         _callback_update("manual_payment:approve:17", chat_id=-200)
+    )
+
+    assert response.result == "approval_rejected_outside_seller_group"
+    assert payments.actions == []
+
+
+@pytest.mark.asyncio
+async def test_seller_bot_callback_rejects_returns_chat_when_orders_chat_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    monkeypatch.setattr(settings, "telegram_backup_chat_id", "-400")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    base_service, _, telegram = _webhook_service()
+    payments = FakeManualPaymentsService(expected_chat_id=-200)
+    service = SellerBotWebhookService(
+        seller_auth_service=base_service.seller_auth_service,
+        manual_payments_service=payments,
+        telegram_service=telegram,
+    )
+
+    response = await service.handle_update(
+        _callback_update("manual_payment:approve:17", chat_id=-300)
     )
 
     assert response.result == "approval_rejected_outside_seller_group"
@@ -530,6 +578,22 @@ async def test_help_command_is_routed(
 
     assert response.result == "help_sent"
     assert telegram.messages == [("-100", "Help for -100: /chetam /orders <ID>")]
+
+
+@pytest.mark.asyncio
+async def test_seller_group_command_accepts_orders_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, telegram = _seller_command_webhook_service()
+
+    response = await service.handle_update(
+        _seller_group_command_update("/help", chat_id=-200)
+    )
+
+    assert response.result == "help_sent"
+    assert telegram.messages == [("-200", "Help for -200: /chetam /orders <ID>")]
 
 
 @pytest.mark.asyncio
@@ -1074,20 +1138,20 @@ def _telegram_update_payload() -> dict[str, object]:
     }
 
 
-def _seller_group_command_payload(text: str) -> dict[str, object]:
+def _seller_group_command_payload(text: str, *, chat_id: int = -100) -> dict[str, object]:
     return {
         "update_id": 10,
         "message": {
             "message_id": 20,
             "text": text,
-            "chat": {"id": -100, "type": "supergroup"},
+            "chat": {"id": chat_id, "type": "supergroup"},
             "from": {"id": 500, "username": "approver"},
         },
     }
 
 
-def _seller_group_command_update(text: str) -> TelegramUpdate:
-    return TelegramUpdate.model_validate(_seller_group_command_payload(text))
+def _seller_group_command_update(text: str, *, chat_id: int = -100) -> TelegramUpdate:
+    return TelegramUpdate.model_validate(_seller_group_command_payload(text, chat_id=chat_id))
 
 
 def _seller_group_product_command_update() -> TelegramUpdate:

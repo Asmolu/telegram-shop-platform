@@ -734,6 +734,26 @@ async def test_submit_attempts_configured_seller_bot_notification(
 
 
 @pytest.mark.asyncio
+async def test_submit_uses_orders_chat_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "orders-chat")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "seller-chat")
+    service, repository, _, _, _, _ = _service(with_payment=True)
+    telegram = FakeTelegramService(seller_chat_id=None)
+    service.event_publisher = ManualPaymentEventPublisher(
+        service.session,
+        telegram_service=telegram,
+        customer_publisher=FakeEventPublisher(),
+    )
+    service.event_publisher.repository = repository
+
+    await service.submit(order_id=10, user_id=1)
+
+    assert telegram.messages[0][0] == "orders-chat"
+
+
+@pytest.mark.asyncio
 async def test_seller_bot_send_failure_does_not_rollback_submit() -> None:
     service, repository, session, _, _, _ = _service(with_payment=True)
     service.event_publisher = ManualPaymentEventPublisher(

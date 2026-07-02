@@ -145,6 +145,7 @@ class BackupConfig:
     restore_verify_enabled: bool
     telegram_notifications_enabled: bool
     telegram_bot_token: str | None
+    telegram_backup_chat_id: str | None
     telegram_seller_chat_id: str | None
     yandex_client_id: str | None
     yandex_client_secret: str | None
@@ -182,6 +183,7 @@ class BackupConfig:
                 values.get("BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED", "true")
             ),
             telegram_bot_token=blank_to_none(values.get("TELEGRAM_BOT_TOKEN")),
+            telegram_backup_chat_id=blank_to_none(values.get("TELEGRAM_BACKUP_CHAT_ID")),
             telegram_seller_chat_id=blank_to_none(values.get("TELEGRAM_SELLER_CHAT_ID")),
             yandex_client_id=blank_to_none(values.get("YANDEX_CLIENT_ID")),
             yandex_client_secret=blank_to_none(values.get("YANDEX_CLIENT_SECRET")),
@@ -191,6 +193,10 @@ class BackupConfig:
             compose_file=compose_file,
             env_file=env_file,
         )
+
+    @property
+    def telegram_notification_chat_id(self) -> str | None:
+        return self.telegram_backup_chat_id or self.telegram_seller_chat_id
 
     def validate(self, *, require_yandex: bool = True) -> tuple[list[str], list[str]]:
         errors: list[str] = []
@@ -215,11 +221,12 @@ class BackupConfig:
         if not self.env_file.exists():
             warnings.append(f"Environment file is missing: {self.env_file}")
         if self.telegram_notifications_enabled and (
-            not self.telegram_bot_token or not self.telegram_seller_chat_id
+            not self.telegram_bot_token or not self.telegram_notification_chat_id
         ):
             errors.append(
-                "TELEGRAM_BOT_TOKEN and TELEGRAM_SELLER_CHAT_ID are required for backup "
-                "notifications when BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true."
+                "TELEGRAM_BOT_TOKEN and TELEGRAM_BACKUP_CHAT_ID are required for backup "
+                "notifications when BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true. "
+                "TELEGRAM_SELLER_CHAT_ID is accepted only as a legacy fallback."
             )
 
         yandex_missing = [
@@ -1267,11 +1274,12 @@ def format_bytes(size: int) -> str:
 def notify(config: BackupConfig, result: BackupRunResult) -> None:
     if not config.telegram_notifications_enabled:
         return
-    if not config.telegram_bot_token or not config.telegram_seller_chat_id:
+    chat_id = config.telegram_notification_chat_id
+    if not config.telegram_bot_token or not chat_id:
         return
     notifier = TelegramNotifier(
         bot_token=config.telegram_bot_token,
-        chat_id=config.telegram_seller_chat_id,
+        chat_id=chat_id,
     )
     notifier.send(build_notification_message(result))
 

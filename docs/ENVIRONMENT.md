@@ -69,14 +69,28 @@ Production safety validation rejects the default JWT secret and wildcard CORS or
 | `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` | Bot 1 | Secret header for customer bot webhook | `<SECRET>` |
 | `TELEGRAM_BOT_TOKEN` | Bot 2 | Seller/admin/auth-related bot token | `<BOT_TOKEN>` |
 | `TELEGRAM_SELLER_BOT_USERNAME` | Bot 2 | Seller/admin bot username | `<SECRET>` |
-| `TELEGRAM_SELLER_CHAT_ID` | Bot 2 | Seller/admin notification chat id | `<SECRET>` |
-| `TELEGRAM_RETURNS_CHAT_ID` | Bot 2 | Optional returns notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
+| `TELEGRAM_ORDERS_CHAT_ID` | Bot 2 | Orders/seller/admin operational chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
+| `TELEGRAM_RETURNS_CHAT_ID` | Bot 2 | Return request notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
+| `TELEGRAM_BACKUP_CHAT_ID` | Bot 2 backup script | Backup success/failure notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
+| `TELEGRAM_SELLER_CHAT_ID` | Bot 2 | Legacy seller/admin notification chat id used only as a migration fallback | `<SECRET>` |
 | `TELEGRAM_SELLER_WEBHOOK_SECRET` | Bot 2 | Secret header for seller bot webhook | `<SECRET>` |
 | `TELEGRAM_MINI_APP_SHORT_NAME` | Bot 1 link builder | Optional short-name Mini App path for direct links | `<SECRET>` |
 | `TELEGRAM_CHANNEL_ENTRY_START_PARAM` | Bot 1 link builder | Channel entry start parameter | `channel_pin` |
 | `TELEGRAM_AUTH_MAX_AGE_SECONDS` | Auth | Maximum age for Telegram `auth_date` | `86400` |
 
 Bot 1 handles buyer-facing and channel-entry flows. Bot 2 handles seller/admin/auth-related flows. Do not swap these tokens.
+
+Bot 2 operational routing is split by chat purpose: orders/seller/admin commands and callbacks use `TELEGRAM_ORDERS_CHAT_ID`, return request notifications use `TELEGRAM_RETURNS_CHAT_ID`, and backup notifications use `TELEGRAM_BACKUP_CHAT_ID`. `TELEGRAM_SELLER_CHAT_ID` remains only as a legacy fallback while production env files are migrated. Telegram group topic/thread ids are not supported yet.
+
+Safe Telegram diagnostics:
+
+```bash
+cd backend
+python scripts/telegram_diagnostics.py --env-file .env.production
+python scripts/telegram_diagnostics.py --env-file .env.production --send
+```
+
+The diagnostic helper checks Bot 2 `getMe` and `getChat` for the configured orders, returns, backup, and legacy seller chats. It does not print bot tokens and sends messages only with `--send`.
 
 ## Cache, Rate Limit, and Telemetry Settings
 

@@ -65,20 +65,14 @@ class TelegramReturnSellerNotifier:
         telegram_service: TelegramService | None = None,
         chat_id: str | None = None,
     ) -> None:
-        self.chat_id = (
-            chat_id
-            or settings.telegram_returns_chat_id
-            or settings.telegram_seller_chat_id
+        self.chat_id = chat_id or settings.telegram_returns_notification_chat_id
+        self.telegram_service = telegram_service or TelegramService(
+            seller_chat_id=self.chat_id or ""
         )
-        self.telegram_service = telegram_service or TelegramService(seller_chat_id=self.chat_id)
 
     async def notify_return_request_created(self, return_request: ReturnRequest) -> None:
         bot_token = getattr(self.telegram_service, "bot_token", settings.telegram_bot_token)
-        chat_id = self.chat_id or getattr(
-            self.telegram_service,
-            "seller_chat_id",
-            settings.telegram_seller_chat_id,
-        )
+        chat_id = self.chat_id
         if not bot_token or not chat_id:
             return
 

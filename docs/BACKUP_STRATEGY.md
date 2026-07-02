@@ -73,6 +73,10 @@ sudo systemctl status telegram-shop-backup.service --no-pager
 sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
 ```
 
+## Telegram Notifications
+
+Backup success/failure notifications are routed only to `TELEGRAM_BACKUP_CHAT_ID` with `TELEGRAM_BOT_TOKEN`. `TELEGRAM_SELLER_CHAT_ID` remains a legacy fallback when the backup chat id is absent. Backup notifications must not be routed to the orders or returns chats.
+
 ## Restore Testing
 
 A restore drill should validate:

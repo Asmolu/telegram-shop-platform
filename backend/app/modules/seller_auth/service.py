@@ -425,14 +425,15 @@ class SellerAuthService:
             ) from exc
 
     async def _send_approval_request(self, registration: PendingSellerRegistration) -> None:
-        if not settings.telegram_seller_chat_id:
+        orders_chat_id = settings.telegram_orders_notification_chat_id
+        if not orders_chat_id:
             raise AppError(
                 "Seller approval chat is not configured",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         try:
             await self.telegram_service.send_message(
-                settings.telegram_seller_chat_id,
+                orders_chat_id,
                 self._approval_request_message(registration),
                 reply_markup=self._approval_reply_markup(registration.id),
             )
@@ -443,10 +444,11 @@ class SellerAuthService:
             ) from exc
 
     async def _send_seller_group_message(self, message: str) -> None:
-        if not settings.telegram_seller_chat_id:
+        orders_chat_id = settings.telegram_orders_notification_chat_id
+        if not orders_chat_id:
             return
         try:
-            await self.telegram_service.send_message(settings.telegram_seller_chat_id, message)
+            await self.telegram_service.send_message(orders_chat_id, message)
         except TelegramDeliveryError:
             return
 

@@ -39,6 +39,12 @@ Do not run a bare Python backup command on production for normal operations. Use
 
 The production env file itself contains secrets and must be protected separately. Do not include raw env values in shared backup reports.
 
+## Backup Telegram Notifications
+
+When `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true`, the standalone backup script sends success/failure messages with `TELEGRAM_BOT_TOKEN` to `TELEGRAM_BACKUP_CHAT_ID`. If `TELEGRAM_BACKUP_CHAT_ID` is not set, `TELEGRAM_SELLER_CHAT_ID` is accepted only as a legacy migration fallback.
+
+Backups do not use `TELEGRAM_ORDERS_CHAT_ID` or `TELEGRAM_RETURNS_CHAT_ID`.
+
 ## Pre-Migration Backup
 
 ```bash

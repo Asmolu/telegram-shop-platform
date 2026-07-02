@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -186,6 +187,77 @@ def test_config_validation_reports_missing_yandex_credentials() -> None:
     errors, _warnings = config.validate(require_yandex=True)
 
     assert any("YANDEX_CLIENT_ID" in error for error in errors)
+
+
+def test_backup_config_prefers_backup_chat_id() -> None:
+    config = BackupConfig.from_mapping(
+        {
+            "TELEGRAM_BOT_TOKEN": "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
+            "TELEGRAM_BACKUP_CHAT_ID": "-100-backup",
+            "TELEGRAM_SELLER_CHAT_ID": "-100-legacy",
+        }
+    )
+
+    assert config.telegram_notification_chat_id == "-100-backup"
+
+
+def test_backup_config_falls_back_to_legacy_seller_chat_id() -> None:
+    config = BackupConfig.from_mapping(
+        {
+            "TELEGRAM_BOT_TOKEN": "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
+            "TELEGRAM_SELLER_CHAT_ID": "-100-legacy",
+        }
+    )
+
+    assert config.telegram_notification_chat_id == "-100-legacy"
+
+
+def test_backup_config_validation_mentions_backup_chat_id_when_chat_missing() -> None:
+    config = BackupConfig.from_mapping(
+        {
+            "TELEGRAM_BOT_TOKEN": "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
+        }
+    )
+
+    errors, _warnings = config.validate(require_yandex=False)
+
+    assert any("TELEGRAM_BACKUP_CHAT_ID" in error for error in errors)
+
+
+def test_backup_notify_uses_backup_chat_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[tuple[str, str]] = []
+
+    class FakeTelegramNotifier:
+        def __init__(self, *, bot_token: str, chat_id: str) -> None:
+            sent.append((bot_token, chat_id))
+
+        def send(self, message: str) -> None:
+            sent.append(("message", message))
+
+    config = replace(
+        make_backup_config(tmp_path),
+        telegram_notifications_enabled=True,
+        telegram_bot_token="token",
+        telegram_backup_chat_id="-100-backup",
+        telegram_seller_chat_id="-100-legacy",
+    )
+    result = BackupRunResult(
+        backup_id="telegram-shop-prod-20260615-060011",
+        environment="production",
+        status="success",
+        restore_verification_status="passed",
+        remote_path="/TelegramShopPlatform/storage/backup.tar.gz",
+        archive_size=108_527_616,
+    )
+    monkeypatch.setattr(backup_module, "TelegramNotifier", FakeTelegramNotifier)
+
+    backup_module.notify(config, result)
+
+    assert sent[0] == ("token", "-100-backup")
+    assert sent[1][0] == "message"
 
 
 def test_sanitize_text_redacts_extra_secrets() -> None:
@@ -611,6 +683,7 @@ def make_backup_config(tmp_path: Path) -> BackupConfig:
         restore_verify_enabled=True,
         telegram_notifications_enabled=False,
         telegram_bot_token=None,
+        telegram_backup_chat_id=None,
         telegram_seller_chat_id=None,
         yandex_client_id="client-id",
         yandex_client_secret="client-secret",

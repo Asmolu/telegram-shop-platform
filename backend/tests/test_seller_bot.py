@@ -467,6 +467,29 @@ def test_help_command_lists_operator_commands(
     assert len(message) <= 4096
 
 
+def test_seller_commands_accept_orders_chat_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    message = service.format_help_command(chat_id=-200)
+
+    assert "/active_orders" in message
+
+
+def test_seller_commands_reject_legacy_seller_chat_when_orders_chat_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _, _ = _seller_bot_command_service()
+
+    with pytest.raises(AppError, match="seller group"):
+        service.format_help_command(chat_id=-100)
+
+
 @pytest.mark.asyncio
 async def test_chetam_command_lists_paid_unshipped_orders(
     monkeypatch: pytest.MonkeyPatch,

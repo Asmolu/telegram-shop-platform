@@ -52,6 +52,8 @@ sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
 
 Always run a backup before Alembic migrations.
 
+Backup Telegram notifications use `TELEGRAM_BACKUP_CHAT_ID`. `TELEGRAM_SELLER_CHAT_ID` is only a legacy fallback while production env files are migrated.
+
 ## Deployment
 
 The full deployment flow is documented in `docs/PRODUCTION_DEPLOYMENT.md`. The short version:

@@ -29,6 +29,13 @@ def join_public_url(base_url: str, path: str) -> str:
     return f"{base}/{suffix}"
 
 
+def _configured_chat_id(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
@@ -46,8 +53,10 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str | None = None
     telegram_webapp_bot_token: str | None = None
+    telegram_orders_chat_id: str | None = None
     telegram_seller_chat_id: str | None = None
     telegram_returns_chat_id: str | None = None
+    telegram_backup_chat_id: str | None = None
     telegram_seller_bot_username: str | None = None
     telegram_seller_webhook_secret: str | None = None
     telegram_customer_bot_token: str | None = None
@@ -142,6 +151,18 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
+
+    @property
+    def telegram_orders_notification_chat_id(self) -> str | None:
+        return _configured_chat_id(self.telegram_orders_chat_id, self.telegram_seller_chat_id)
+
+    @property
+    def telegram_returns_notification_chat_id(self) -> str | None:
+        return _configured_chat_id(self.telegram_returns_chat_id, self.telegram_seller_chat_id)
+
+    @property
+    def telegram_backup_notification_chat_id(self) -> str | None:
+        return _configured_chat_id(self.telegram_backup_chat_id, self.telegram_seller_chat_id)
 
     @field_validator(
         "public_uploads_url",

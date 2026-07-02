@@ -86,7 +86,9 @@ class TelegramService:
     ) -> None:
         self.bot_token = bot_token if bot_token is not None else settings.telegram_bot_token
         self.seller_chat_id = (
-            seller_chat_id if seller_chat_id is not None else settings.telegram_seller_chat_id
+            seller_chat_id
+            if seller_chat_id is not None
+            else settings.telegram_orders_notification_chat_id
         )
         self.timeout_seconds = timeout_seconds
 
@@ -1113,7 +1115,7 @@ class SellerBotWebhookService:
         return True
 
     def _is_seller_group_chat(self, chat_id: int) -> bool:
-        seller_chat_id = settings.telegram_seller_chat_id
+        seller_chat_id = settings.telegram_orders_notification_chat_id
         return bool(seller_chat_id and str(chat_id) == seller_chat_id.strip())
 
     def _parse_seller_id_arg(self, args: str, *, command: str) -> int:
