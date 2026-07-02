@@ -351,6 +351,89 @@ export type OrderList = {
   items: Order[];
 };
 
+export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type ReturnEligibilityItem = {
+  order_item_id: number;
+  product_name: string;
+  product_brand?: string | null;
+  image_url?: string | null;
+  sku?: string | null;
+  size?: string | null;
+  color?: string | null;
+  quantity: number;
+  is_returnable: boolean;
+  eligible: boolean;
+  ineligible_reason?: string | null;
+};
+
+export type ReturnEligibility = {
+  eligible: boolean;
+  reason_code?: string | null;
+  message: string;
+  return_window_until?: string | null;
+  order_id: number;
+  return_request_id?: number | null;
+  items: ReturnEligibilityItem[];
+};
+
+export type ReturnRequestItemPayload = {
+  order_item_id: number;
+  quantity: number;
+};
+
+export type ReturnRequestPayload = {
+  reason: string;
+  comment?: string | null;
+  items: ReturnRequestItemPayload[];
+};
+
+export type ReturnRequestItem = {
+  id: number;
+  order_item_id: number;
+  product_id?: number | null;
+  product_variant_id?: number | null;
+  product_name: string;
+  product_brand?: string | null;
+  sku?: string | null;
+  size?: string | null;
+  color?: string | null;
+  unit_price: string;
+  quantity: number;
+  created_at: string;
+};
+
+export type ReturnRequestAttachment = {
+  id: number;
+  file_path: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  media_type: 'image' | 'video';
+  position: number;
+  url: string;
+  created_at: string;
+};
+
+export type ReturnRequest = {
+  id: number;
+  return_number: string;
+  order_id: number;
+  order_number?: string | null;
+  user_id: number;
+  status: ReturnRequestStatus;
+  reason: string;
+  comment?: string | null;
+  items: ReturnRequestItem[];
+  attachments: ReturnRequestAttachment[];
+  decided_at?: string | null;
+  decided_by_user_id?: number | null;
+  decision_comment?: string | null;
+  message?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ManualPayment = {
   id: number;
   order_id: number;

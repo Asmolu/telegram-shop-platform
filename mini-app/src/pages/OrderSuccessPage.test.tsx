@@ -1,7 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getOrder, type Order } from '../shared/api';
+import { getOrder, getReturnEligibility, type Order, type ReturnEligibility } from '../shared/api';
 import { OrderSuccessPage } from './OrderSuccessPage';
 
 const routerMocks = vi.hoisted(() => ({
@@ -40,12 +40,14 @@ vi.mock('../shared/router/RouterProvider', () => ({
 vi.mock('../shared/api', () => ({
   getApiBaseUrl: vi.fn(() => ''),
   getOrder: vi.fn().mockResolvedValue(orderFixture()),
+  getReturnEligibility: vi.fn().mockResolvedValue(returnEligibilityFixture()),
   toApiErrorMessage: (error: unknown) => String(error),
 }));
 
 describe('OrderSuccessPage details', () => {
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
     routerMocks.navigate.mockClear();
     routerMocks.route = {
       currentPath: '/order-success/99',
@@ -53,6 +55,7 @@ describe('OrderSuccessPage details', () => {
       searchParams: new URLSearchParams(),
     };
     vi.mocked(getOrder).mockResolvedValue(orderFixture());
+    vi.mocked(getReturnEligibility).mockResolvedValue(returnEligibilityFixture());
   });
 
   it('renders order summary, payment status, product details, totals, and delivery data', async () => {
@@ -97,7 +100,70 @@ describe('OrderSuccessPage details', () => {
     expect(screen.getByText('Line Break Hoodie')).toBeTruthy();
     expect(screen.getByText('Артикул')).toBeTruthy();
   });
+
+  it('fetches eligibility and opens the return form from the action menu', async () => {
+    render(<OrderSuccessPage />);
+
+    expect(getReturnEligibility).toHaveBeenCalledWith(99);
+    const menuButton = await screen.findByLabelText('Действия с заказом');
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByText('Оформить возврат'));
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/orders/99/return');
+  });
+
+  it('hides the return action when the order is not eligible', async () => {
+    vi.mocked(getReturnEligibility).mockResolvedValueOnce(returnEligibilityFixture({
+      eligible: false,
+      reason_code: 'order_not_delivered',
+      message: 'Returns are available only after delivery',
+    }));
+
+    render(<OrderSuccessPage />);
+
+    expect(await screen.findByText('Заказ ORD-00000099')).toBeTruthy();
+    expect(screen.queryByLabelText('Действия с заказом')).toBeNull();
+  });
+
+  it('shows a small status block when a return request already exists', async () => {
+    vi.mocked(getReturnEligibility).mockResolvedValueOnce(returnEligibilityFixture({
+      eligible: false,
+      reason_code: 'return_request_exists',
+      return_request_id: 7,
+      message: 'Return request already exists for this order',
+    }));
+
+    render(<OrderSuccessPage />);
+
+    expect(await screen.findByText('Заявка на возврат уже создана')).toBeTruthy();
+    expect(screen.queryByText('Оформить возврат')).toBeNull();
+  });
 });
+
+function returnEligibilityFixture(overrides: Partial<ReturnEligibility> = {}): ReturnEligibility {
+  return {
+    eligible: true,
+    reason_code: null,
+    message: 'Order is eligible for return',
+    return_window_until: '2026-07-11T00:00:00Z',
+    order_id: 99,
+    return_request_id: null,
+    items: [{
+      order_item_id: 1,
+      product_name: 'Line Break Hoodie',
+      product_brand: 'ICON STORE',
+      image_url: '/uploads/products/thumb.webp',
+      sku: 'SKU-M',
+      size: 'M',
+      color: 'Black',
+      quantity: 2,
+      is_returnable: true,
+      eligible: true,
+      ineligible_reason: null,
+    }],
+    ...overrides,
+  };
+}
 
 function orderFixture(overrides: Partial<Order> = {}): Order {
   return {

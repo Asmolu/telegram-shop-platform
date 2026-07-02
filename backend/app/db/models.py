@@ -1366,6 +1366,22 @@ class ReturnRequest(Base):
         order_by="ReturnRequestAttachment.position",
     )
 
+    @property
+    def order_number(self) -> str | None:
+        return self.order.order_number if self.order is not None else None
+
+    @property
+    def order_status(self) -> OrderStatus | None:
+        return self.order.status if self.order is not None else None
+
+    @property
+    def customer_name(self) -> str | None:
+        return self.order.contact_name if self.order is not None else None
+
+    @property
+    def customer_phone(self) -> str | None:
+        return self.order.contact_phone if self.order is not None else None
+
 
 class ReturnRequestItem(Base):
     __tablename__ = "return_request_items"

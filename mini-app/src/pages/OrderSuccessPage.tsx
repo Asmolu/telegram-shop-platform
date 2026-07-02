@@ -1,5 +1,11 @@
 import React from 'react';
-import { getOrder, toApiErrorMessage, type Order } from '../shared/api';
+import {
+  getOrder,
+  getReturnEligibility,
+  toApiErrorMessage,
+  type Order,
+  type ReturnEligibility,
+} from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, PageLoader, TopBar } from '../shared/ui';
@@ -48,6 +54,7 @@ export function OrderSuccessPage() {
   const orderId = getNumericRouteParam(pathname, '/order-success/');
   const returnTo = getSafeReturnTo(searchParams.get('returnTo'));
   const [order, setOrder] = React.useState<Order | null>(null);
+  const [returnEligibility, setReturnEligibility] = React.useState<ReturnEligibility | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -77,6 +84,29 @@ export function OrderSuccessPage() {
     };
   }, [isAuthenticated, orderId]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    setReturnEligibility(null);
+
+    if (!isAuthenticated || !orderId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getReturnEligibility(orderId)
+      .then((result) => {
+        if (!cancelled) setReturnEligibility(result);
+      })
+      .catch(() => {
+        if (!cancelled) setReturnEligibility(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, orderId]);
+
   if (!isAuthenticated) {
     return (
       <div className="page">
@@ -93,13 +123,19 @@ export function OrderSuccessPage() {
 
   return (
     <div className="page">
-      <TopBar title="Заказ" />
+      <TopBar
+        title="Заказ"
+        right={order && returnEligibility?.eligible ? (
+          <ReturnActionMenu onCreateReturn={() => navigate(`/orders/${order.id}/return`)} />
+        ) : null}
+      />
       {loading ? <PageLoader text="Загружаем заказ..." /> : null}
       {!loading && error ? <ErrorState message={error} /> : null}
       {!loading && !error && order ? (
         <OrderDetailContent
           currentPath={currentPath}
           order={order}
+          returnEligibility={returnEligibility}
           onBackToShopping={() => navigate(returnTo)}
           onOpenOrders={() => navigate('/cart?tab=orders')}
         />
@@ -111,11 +147,13 @@ export function OrderSuccessPage() {
 function OrderDetailContent({
   currentPath,
   order,
+  returnEligibility,
   onBackToShopping,
   onOpenOrders,
 }: {
   currentPath: string;
   order: Order;
+  returnEligibility: ReturnEligibility | null;
   onBackToShopping: () => void;
   onOpenOrders: () => void;
 }) {
@@ -123,6 +161,8 @@ function OrderDetailContent({
   const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
   const paymentStatus = order.manual_payment?.status ?? null;
   const deliveryCommentLines = getDeliveryCommentLines(order.delivery_comment);
+  const hasReturnRequest = returnEligibility?.reason_code === 'return_request_exists'
+    || Boolean(returnEligibility?.return_request_id);
 
   return (
     <div className="order-detail">
@@ -143,6 +183,12 @@ function OrderDetailContent({
           </button>
         </div>
       </section>
+
+      {hasReturnRequest ? (
+        <section className="order-return-status">
+          <strong>Заявка на возврат уже создана</strong>
+        </section>
+      ) : null}
 
       <section className="order-detail-section">
         <h2>Сводка</h2>
@@ -191,6 +237,39 @@ function OrderDetailContent({
           ) : null}
         </dl>
       </section>
+    </div>
+  );
+}
+
+function ReturnActionMenu({ onCreateReturn }: { onCreateReturn: () => void }) {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div className="order-actions-menu" data-swipe-back-ignore>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Действия с заказом"
+        className="icon-button order-actions-menu__button"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        ⋯
+      </button>
+      {open ? (
+        <div className="order-actions-menu__panel" role="menu">
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onCreateReturn();
+            }}
+          >
+            Оформить возврат
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

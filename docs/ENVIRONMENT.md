@@ -70,6 +70,7 @@ Production safety validation rejects the default JWT secret and wildcard CORS or
 | `TELEGRAM_BOT_TOKEN` | Bot 2 | Seller/admin/auth-related bot token | `<BOT_TOKEN>` |
 | `TELEGRAM_SELLER_BOT_USERNAME` | Bot 2 | Seller/admin bot username | `<SECRET>` |
 | `TELEGRAM_SELLER_CHAT_ID` | Bot 2 | Seller/admin notification chat id | `<SECRET>` |
+| `TELEGRAM_RETURNS_CHAT_ID` | Bot 2 | Optional returns notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
 | `TELEGRAM_SELLER_WEBHOOK_SECRET` | Bot 2 | Secret header for seller bot webhook | `<SECRET>` |
 | `TELEGRAM_MINI_APP_SHORT_NAME` | Bot 1 link builder | Optional short-name Mini App path for direct links | `<SECRET>` |
 | `TELEGRAM_CHANNEL_ENTRY_START_PARAM` | Bot 1 link builder | Channel entry start parameter | `channel_pin` |

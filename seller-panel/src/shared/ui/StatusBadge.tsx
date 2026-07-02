@@ -1,10 +1,17 @@
-import type { ManualPaymentStatus, OrderStatus, ProductStatus, ReviewStatus } from '../api';
+import type {
+  ManualPaymentStatus,
+  OrderStatus,
+  ProductStatus,
+  ReturnRequestStatus,
+  ReviewStatus,
+} from '../api';
 import { labelForEnum, useI18n } from '../i18n';
 
 type StatusValue =
   | ProductStatus
   | OrderStatus
   | ReviewStatus
+  | ReturnRequestStatus
   | ManualPaymentStatus
   | 'ACTIVE'
   | 'INACTIVE';

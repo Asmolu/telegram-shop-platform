@@ -14,6 +14,7 @@ import { TaxonomyPage } from './pages/Taxonomy/TaxonomyPage';
 import { BannersPage } from './pages/Banners/BannersPage';
 import { PromoCodesPage } from './pages/PromoCodes/PromoCodesPage';
 import { ReviewsPage } from './pages/Reviews/ReviewsPage';
+import { ReturnsPage } from './pages/Returns/ReturnsPage';
 import { StatisticsPage } from './pages/Statistics/StatisticsPage';
 import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
 import { CustomerNotificationsPage } from './pages/CustomerNotifications/CustomerNotificationsPage';
@@ -29,6 +30,7 @@ const navItems: NavItem[] = [
   { path: '/banners', labelKey: 'nav.banners' },
   { path: '/promo-codes', labelKey: 'nav.promoCodes' },
   { path: '/reviews', labelKey: 'nav.reviews' },
+  { path: '/returns', labelKey: 'nav.returns' },
   { path: '/statistics', labelKey: 'nav.statistics' },
   { path: '/customer-notifications', labelKey: 'nav.customerNotifications' },
   { path: '/channel-entry', labelKey: 'nav.channelEntry' },
@@ -53,6 +55,7 @@ function getPageTitleKey(path: string): string {
   if (path.startsWith('/banners')) return 'nav.banners';
   if (path.startsWith('/promo-codes')) return 'nav.promoCodes';
   if (path.startsWith('/reviews')) return 'nav.reviews';
+  if (path.startsWith('/returns')) return 'nav.returns';
   if (path.startsWith('/statistics')) return 'nav.statistics';
   if (path.startsWith('/customer-notifications')) return 'nav.customerNotifications';
   if (path.startsWith('/channel-entry')) return 'nav.channelEntry';
@@ -190,6 +193,15 @@ function renderPage(
   if (path === '/banners') return <BannersPage {...sharedPageProps} />;
   if (path === '/promo-codes') return <PromoCodesPage {...sharedPageProps} />;
   if (path === '/reviews') return <ReviewsPage {...sharedPageProps} />;
+  if (path === '/returns' || /^\/returns\/\d+$/.test(path)) {
+    const match = path.match(/^\/returns\/(\d+)$/);
+    return (
+      <ReturnsPage
+        initialReturnRequestId={match ? Number(match[1]) : undefined}
+        {...sharedPageProps}
+      />
+    );
+  }
   if (path === '/statistics') return <StatisticsPage {...sharedPageProps} />;
   if (path === '/customer-notifications') return <CustomerNotificationsPage {...sharedPageProps} />;
   if (path === '/channel-entry') return <ChannelEntryPage {...sharedPageProps} />;

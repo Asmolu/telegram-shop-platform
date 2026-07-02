@@ -70,6 +70,7 @@ vi.mock('./pages/ProductDetailPage', createPageMock('ProductDetailPage', 'Produc
 vi.mock('./pages/CartPage', createPageMock('CartPage', 'Cart route loaded'));
 vi.mock('./pages/CheckoutPage', createPageMock('CheckoutPage', 'Checkout route loaded'));
 vi.mock('./pages/OrderSuccessPage', createPageMock('OrderSuccessPage', 'Order success route loaded'));
+vi.mock('./pages/ReturnRequestPage', createPageMock('ReturnRequestPage', 'Return request route loaded'));
 vi.mock('./pages/PaymentPage', createPageMock('PaymentPage', 'Payment route loaded'));
 vi.mock('./pages/ProfilePage', createPageMock('ProfilePage', 'Profile route loaded'));
 vi.mock('./pages/PersonalDataPage', createPageMock('PersonalDataPage', 'Personal data route loaded'));

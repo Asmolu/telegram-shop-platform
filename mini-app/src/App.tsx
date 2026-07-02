@@ -20,6 +20,7 @@ const routeLoaders = {
   cart: () => import('./pages/CartPage').then((module) => ({ default: module.CartPage })),
   checkout: () => import('./pages/CheckoutPage').then((module) => ({ default: module.CheckoutPage })),
   'order-success': () => import('./pages/OrderSuccessPage').then((module) => ({ default: module.OrderSuccessPage })),
+  'return-request': () => import('./pages/ReturnRequestPage').then((module) => ({ default: module.ReturnRequestPage })),
   payment: () => import('./pages/PaymentPage').then((module) => ({ default: module.PaymentPage })),
   profile: () => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })),
   'personal-data': () => import('./pages/PersonalDataPage').then((module) => ({ default: module.PersonalDataPage })),
@@ -62,6 +63,9 @@ function getFallbackTitle(routeId: LazyRouteId) {
   }
   if (routeId === 'payment') {
     return 'Оплата';
+  }
+  if (routeId === 'return-request') {
+    return 'Оформить возврат';
   }
   if (routeId === 'profile' || routeId === 'personal-data') {
     return 'Профиль';

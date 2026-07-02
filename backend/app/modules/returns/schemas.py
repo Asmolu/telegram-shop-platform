@@ -5,7 +5,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from app.core.config import settings
-from app.db.models import ReturnRequestStatus
+from app.db.models import OrderStatus, ReturnRequestStatus
 
 
 class ReturnRequestItemCreate(BaseModel):
@@ -95,7 +95,11 @@ class ReturnRequestRead(BaseModel):
     id: int
     return_number: str
     order_id: int
+    order_number: str | None = None
+    order_status: OrderStatus | None = None
     user_id: int
+    customer_name: str | None = None
+    customer_phone: str | None = None
     status: ReturnRequestStatus
     reason: str
     comment: str | None = None

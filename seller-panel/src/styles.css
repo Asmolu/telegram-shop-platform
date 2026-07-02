@@ -1496,6 +1496,115 @@ textarea:focus {
   margin-top: 18px;
 }
 
+.returns-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.returns-table-panel table {
+  min-width: 860px;
+}
+
+.returns-table-panel tbody tr {
+  cursor: pointer;
+}
+
+.returns-table-panel .selected-row {
+  background: #f5f3ff;
+}
+
+.returns-reason-preview {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.returns-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.returns-detail__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.returns-detail__header p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.returns-item-list {
+  display: grid;
+  gap: 8px;
+}
+
+.returns-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f9fafb;
+}
+
+.returns-item small {
+  color: #6b7280;
+}
+
+.returns-item span {
+  color: #111827;
+  font-weight: 800;
+}
+
+.returns-attachments {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+}
+
+.returns-attachment {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #374151;
+  text-decoration: none;
+}
+
+.returns-attachment img,
+.returns-attachment > span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #6d28d9;
+  font-weight: 800;
+  object-fit: cover;
+}
+
+.returns-attachment small {
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.returns-detail__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .order-status-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2141,7 +2250,8 @@ textarea:focus {
   .form-layout,
   .analytics-grid,
   .taxonomy-grid,
-  .payment-review-layout {
+  .payment-review-layout,
+  .returns-layout {
     grid-template-columns: 1fr;
   }
 

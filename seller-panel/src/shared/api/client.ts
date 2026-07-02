@@ -42,6 +42,9 @@ import type {
   ProductVariantSkuList,
   PromoCode,
   PromoCodePayload,
+  ReturnDecisionPayload,
+  ReturnRequest,
+  ReturnRequestStatus,
   Review,
   ReviewStatus,
   SellerPaymentSettings,
@@ -392,6 +395,25 @@ export const api = {
       apiRequest<Review>(`/reviews/admin/${reviewId}/approve`, { method: 'PATCH' }),
     reject: (reviewId: number) =>
       apiRequest<Review>(`/reviews/admin/${reviewId}/reject`, { method: 'PATCH' }),
+  },
+  returns: {
+    list: (query: QueryParams = {}) =>
+      apiRequest<PageList<ReturnRequest>>('/returns/admin', {
+        query: clampQueryLimit(query, 100),
+      }),
+    get: (returnRequestId: number) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}`),
+    approve: (returnRequestId: number, body: ReturnDecisionPayload = {}) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/approve`, {
+        method: 'POST',
+        body,
+      }),
+    reject: (returnRequestId: number, body: ReturnDecisionPayload = {}) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/reject`, {
+        method: 'POST',
+        body,
+      }),
+    statuses: ['PENDING', 'APPROVED', 'REJECTED'] satisfies ReturnRequestStatus[],
   },
   analytics: {
     summary: (query: QueryParams = {}) =>

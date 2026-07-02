@@ -28,6 +28,7 @@ describe('logical mini app back routes', () => {
     ['/checkout?returnTo=%2Fproduct%2F10', '/cart?tab=cart'],
     ['/payment/42', '/cart?tab=orders'],
     ['/order-success/42', '/cart?tab=orders'],
+    ['/orders/42/return', '/order-success/42'],
     ['/profile/personal-data', '/profile'],
   ])('returns the explicit logical parent for %s', (path, parent) => {
     expect(getLogicalBackPath(path)).toBe(parent);
@@ -47,5 +48,9 @@ describe('logical mini app back routes', () => {
       productSlug: 'line-break-hoodie',
     });
     expect(getRouteId(pathname)).toBe('product-detail');
+  });
+
+  it('resolves return request route ids', () => {
+    expect(getRouteId('/orders/42/return')).toBe('return-request');
   });
 });

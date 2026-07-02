@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 
 from app.common.deps import get_current_user
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     Order,
@@ -34,7 +35,11 @@ from app.modules.returns.schemas import (
     ReturnRequestCreate,
     ReturnRequestItemCreate,
 )
-from app.modules.returns.service import MAX_RETURN_ATTACHMENT_SIZE_BYTES, ReturnsService
+from app.modules.returns.service import (
+    MAX_RETURN_ATTACHMENT_SIZE_BYTES,
+    ReturnsService,
+    TelegramReturnSellerNotifier,
+)
 
 NOW = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
@@ -73,6 +78,33 @@ class FakeStorage:
     def delete(self, relative_path: str) -> None:
         self.deleted.append(relative_path)
         self.saved.pop(relative_path, None)
+
+
+class FakeReturnNotifier:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.session: DummySession | None = None
+        self.requests: list[ReturnRequest] = []
+        self.commit_counts: list[int] = []
+
+    async def notify_return_request_created(self, return_request: ReturnRequest) -> None:
+        if self.session is not None:
+            self.commit_counts.append(self.session.commit_count)
+        if self.fail:
+            raise RuntimeError("telegram unavailable")
+        self.requests.append(return_request)
+
+
+class FakeTelegramService:
+    bot_token = "token"
+    seller_chat_id = "seller-chat"
+
+    def __init__(self) -> None:
+        self.sent_messages: list[tuple[str, str]] = []
+
+    async def send_message(self, chat_id: str, message: str, **_kwargs) -> int:
+        self.sent_messages.append((chat_id, message))
+        return 1
 
 
 class FakeReturnsRepository:
@@ -300,6 +332,63 @@ async def test_customer_creates_return_request_for_one_item() -> None:
 
 
 @pytest.mark.asyncio
+async def test_return_creation_triggers_seller_notification_after_commit() -> None:
+    notifier = FakeReturnNotifier()
+    service, repository, session, _storage = _returns_service(seller_notifier=notifier)
+    notifier.session = session
+    repository.orders[1] = _order()
+
+    created = await service.create_return_request(
+        order_id=1,
+        user_id=1,
+        payload=_payload([(1, 1)]),
+    )
+
+    assert notifier.requests[0].id == created.id
+    assert notifier.commit_counts == [1]
+
+
+@pytest.mark.asyncio
+async def test_return_notification_failure_does_not_fail_request() -> None:
+    notifier = FakeReturnNotifier(fail=True)
+    service, repository, session, _storage = _returns_service(seller_notifier=notifier)
+    repository.orders[1] = _order()
+
+    created = await service.create_return_request(
+        order_id=1,
+        user_id=1,
+        payload=_payload([(1, 1)]),
+    )
+
+    assert created.status == ReturnRequestStatus.PENDING
+    assert session.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_return_notification_uses_returns_chat_with_seller_fallback(monkeypatch) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", None)
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "seller-chat")
+    fallback_telegram = FakeTelegramService()
+    fallback_notifier = TelegramReturnSellerNotifier(telegram_service=fallback_telegram)
+
+    await fallback_notifier.notify_return_request_created(return_request)
+
+    assert fallback_telegram.sent_messages[0][0] == "seller-chat"
+    assert "Новая заявка на возврат" in fallback_telegram.sent_messages[0][1]
+
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    returns_telegram = FakeTelegramService()
+    returns_notifier = TelegramReturnSellerNotifier(telegram_service=returns_telegram)
+
+    await returns_notifier.notify_return_request_created(return_request)
+
+    assert returns_telegram.sent_messages[0][0] == "returns-chat"
+
+
+@pytest.mark.asyncio
 async def test_customer_creates_return_request_with_multiple_items() -> None:
     service, repository, _session, _storage = _returns_service()
     repository.orders[1] = _order(
@@ -357,11 +446,13 @@ async def test_cannot_return_quantity_above_purchased_quantity() -> None:
 
 @pytest.mark.asyncio
 async def test_cannot_create_return_for_non_delivered_order() -> None:
-    service, repository, _session, _storage = _returns_service()
+    notifier = FakeReturnNotifier()
+    service, repository, _session, _storage = _returns_service(seller_notifier=notifier)
     repository.orders[1] = _order(status_value=OrderStatus.PROCESSING)
 
     with pytest.raises(AppError, match="only after delivery"):
         await service.create_return_request(order_id=1, user_id=1, payload=_payload([(1, 1)]))
+    assert notifier.requests == []
 
 
 @pytest.mark.asyncio
@@ -594,10 +685,16 @@ def test_regular_user_cannot_access_admin_return_endpoints() -> None:
 def _returns_service(
     *,
     storage: FakeStorage | None = None,
+    seller_notifier: FakeReturnNotifier | None = None,
 ) -> tuple[ReturnsService, FakeReturnsRepository, DummySession, FakeStorage]:
     session = DummySession()
     storage = storage or FakeStorage()
-    service = ReturnsService(session, storage=storage, now_factory=lambda: NOW)
+    service = ReturnsService(
+        session,
+        storage=storage,
+        seller_notifier=seller_notifier or FakeReturnNotifier(),
+        now_factory=lambda: NOW,
+    )
     repository = FakeReturnsRepository()
     service.repository = repository  # type: ignore[assignment]
     return service, repository, session, storage

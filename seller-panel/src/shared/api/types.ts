@@ -22,6 +22,7 @@ export type ManualPaymentStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
 export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
@@ -333,6 +334,59 @@ export interface CustomerOrderMessageResponse {
   telegram_message_id: number | null;
   sent_text: boolean;
   sent_photo: boolean;
+}
+
+export interface ReturnRequestItem {
+  id: number;
+  order_item_id: number;
+  product_id: number | null;
+  product_variant_id: number | null;
+  product_name: string;
+  product_brand: string | null;
+  sku: string | null;
+  size: string | null;
+  color: string | null;
+  unit_price: ApiDecimal;
+  quantity: number;
+  created_at: string;
+}
+
+export interface ReturnRequestAttachment {
+  id: number;
+  file_path: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  media_type: 'image' | 'video';
+  position: number;
+  url: string;
+  created_at: string;
+}
+
+export interface ReturnRequest {
+  id: number;
+  return_number: string;
+  order_id: number;
+  order_number: string | null;
+  order_status: OrderStatus | null;
+  user_id: number;
+  customer_name: string | null;
+  customer_phone: string | null;
+  status: ReturnRequestStatus;
+  reason: string;
+  comment: string | null;
+  items: ReturnRequestItem[];
+  attachments: ReturnRequestAttachment[];
+  decided_at: string | null;
+  decided_by_user_id: number | null;
+  decision_comment: string | null;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReturnDecisionPayload {
+  decision_comment?: string | null;
 }
 
 export interface SellerPaymentSettings {

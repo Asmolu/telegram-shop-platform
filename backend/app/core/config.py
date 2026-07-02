@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_webapp_bot_token: str | None = None
     telegram_seller_chat_id: str | None = None
+    telegram_returns_chat_id: str | None = None
     telegram_seller_bot_username: str | None = None
     telegram_seller_webhook_secret: str | None = None
     telegram_customer_bot_token: str | None = None

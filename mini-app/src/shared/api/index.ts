@@ -21,6 +21,9 @@ import type {
   ProductSearchSuggestionList,
   ProductSizeGrid,
   PromoValidation,
+  ReturnEligibility,
+  ReturnRequest,
+  ReturnRequestPayload,
   Review,
   ReviewList,
   Tag,
@@ -209,6 +212,24 @@ export function getOrders(options: ApiRequestOptions = {}) {
 
 export function getOrder(orderId: number, options: ApiRequestOptions = {}) {
   return apiRequest<Order>(`/orders/${orderId}`, options);
+}
+
+export function getReturnEligibility(orderId: number, options: ApiRequestOptions = {}) {
+  return apiRequest<ReturnEligibility>(`/orders/${orderId}/return-eligibility`, options);
+}
+
+export function createReturnRequest(
+  orderId: number,
+  payload: ReturnRequestPayload,
+  files: File[] = [],
+) {
+  const body = new FormData();
+  body.append('payload', JSON.stringify(payload));
+  files.forEach((file) => body.append('files', file));
+  return apiRequest<ReturnRequest>(`/orders/${orderId}/returns`, {
+    method: 'POST',
+    body,
+  });
 }
 
 export function getOrderPayment(orderId: number, options: ApiRequestOptions = {}) {

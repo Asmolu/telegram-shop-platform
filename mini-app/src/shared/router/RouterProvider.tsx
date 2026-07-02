@@ -94,6 +94,10 @@ export function getLogicalBackPath(path: string, fallback = '/main') {
   if (pathname === '/checkout') {
     return '/cart?tab=cart';
   }
+  const returnRequestMatch = pathname.match(/^\/orders\/(\d+)\/return$/);
+  if (returnRequestMatch) {
+    return `/order-success/${returnRequestMatch[1]}`;
+  }
   if (pathname.startsWith('/order-success/') || pathname.startsWith('/payment/')) {
     return '/cart?tab=orders';
   }
@@ -455,6 +459,9 @@ export function getRouteId(pathname: string) {
   }
   if (pathname.startsWith('/order-success/')) {
     return 'order-success';
+  }
+  if (/^\/orders\/\d+\/return$/.test(pathname)) {
+    return 'return-request';
   }
   if (pathname.startsWith('/payment/')) {
     return 'payment';

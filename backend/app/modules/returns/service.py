@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from secrets import token_hex
+from typing import Protocol
 
 from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import join_public_url, settings
 from app.core.errors import AppError
 from app.db.models import (
     Order,
@@ -29,7 +32,10 @@ from app.modules.returns.schemas import (
     ReturnRequestList,
     ReturnRequestRead,
 )
+from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.uploads.storage import LocalStorageService
+
+logger = logging.getLogger(__name__)
 
 RETURN_WINDOW_DAYS = 14
 RETURN_WINDOW = timedelta(days=RETURN_WINDOW_DAYS)
@@ -47,17 +53,54 @@ RETURN_ATTACHMENT_TYPES: dict[str, tuple[set[str], str]] = {
 }
 
 
+class ReturnSellerNotifier(Protocol):
+    async def notify_return_request_created(self, return_request: ReturnRequest) -> None:
+        """Deliver a seller-facing notification after the return request is committed."""
+
+
+class TelegramReturnSellerNotifier:
+    def __init__(
+        self,
+        *,
+        telegram_service: TelegramService | None = None,
+        chat_id: str | None = None,
+    ) -> None:
+        self.chat_id = (
+            chat_id
+            or settings.telegram_returns_chat_id
+            or settings.telegram_seller_chat_id
+        )
+        self.telegram_service = telegram_service or TelegramService(seller_chat_id=self.chat_id)
+
+    async def notify_return_request_created(self, return_request: ReturnRequest) -> None:
+        bot_token = getattr(self.telegram_service, "bot_token", settings.telegram_bot_token)
+        chat_id = self.chat_id or getattr(
+            self.telegram_service,
+            "seller_chat_id",
+            settings.telegram_seller_chat_id,
+        )
+        if not bot_token or not chat_id:
+            return
+
+        await self.telegram_service.send_message(
+            chat_id,
+            _return_request_created_message(return_request),
+        )
+
+
 class ReturnsService:
     def __init__(
         self,
         session,
         *,
         storage: LocalStorageService | None = None,
+        seller_notifier: ReturnSellerNotifier | None = None,
         now_factory=None,
     ) -> None:
         self.session = session
         self.repository = ReturnsRepository(session)
         self.storage = storage or LocalStorageService()
+        self.seller_notifier = seller_notifier or TelegramReturnSellerNotifier()
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
 
     async def get_return_eligibility(
@@ -154,6 +197,7 @@ class ReturnsService:
         created = await self.repository.get_by_id(return_request_id)
         if created is None:
             raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        await self._notify_seller(created)
         return ReturnRequestRead.model_validate(created).model_copy(
             update={"message": RETURN_CREATED_MESSAGE}
         )
@@ -430,6 +474,28 @@ class ReturnsService:
         for path in paths:
             self.storage.delete(path)
 
+    async def _notify_seller(self, return_request: ReturnRequest) -> None:
+        try:
+            await self.seller_notifier.notify_return_request_created(return_request)
+        except TelegramDeliveryError:
+            logger.warning(
+                "returns.seller_notification_delivery_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": return_request.id,
+                    "order_id": return_request.order_id,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "returns.seller_notification_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": return_request.id,
+                    "order_id": return_request.order_id,
+                },
+            )
+
 
 @dataclass(frozen=True)
 class ValidatedReturnAttachment:
@@ -454,6 +520,69 @@ def _product_image_url(product: Product | None) -> str | None:
         return product.thumbnail_image_url or product.image_url
     except Exception:
         return None
+
+
+def _return_request_created_message(return_request: ReturnRequest) -> str:
+    order = getattr(return_request, "order", None)
+    user = getattr(return_request, "user", None)
+    order_number = getattr(order, "order_number", None) or f"#{return_request.order_id}"
+    customer_name = (
+        getattr(order, "contact_name", None)
+        or _user_display_name(user)
+        or f"User #{return_request.user_id}"
+    )
+    customer_phone = getattr(order, "contact_phone", None) or getattr(user, "phone", None)
+    contact = f"{customer_name}, {customer_phone}" if customer_phone else customer_name
+    item_lines = [
+        _return_item_notification_line(item)
+        for item in sorted(return_request.items, key=lambda item: item.id or 0)
+    ]
+    seller_panel_url = join_public_url(
+        settings.public_seller_panel_base_url,
+        f"returns/{return_request.id}",
+    )
+
+    lines = [
+        "Новая заявка на возврат",
+        f"Заявка: {return_request.return_number}",
+        f"Заказ: {order_number}",
+        f"Клиент: {contact}",
+        f"Причина: {return_request.reason}",
+        "Позиции:",
+        *item_lines,
+        f"Вложений: {len(return_request.attachments)}",
+        f"Панель продавца: {seller_panel_url}",
+    ]
+    return "\n".join(lines)
+
+
+def _return_item_notification_line(item: ReturnRequestItem) -> str:
+    details = [
+        part
+        for part in (
+            item.product_brand,
+            item.sku,
+            item.size,
+            item.color,
+        )
+        if part
+    ]
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"- {item.product_name}{suffix} x{item.quantity}"
+
+
+def _user_display_name(user) -> str | None:
+    if user is None:
+        return None
+    parts = [
+        getattr(user, "first_name", None),
+        getattr(user, "last_name", None),
+    ]
+    name = " ".join(part for part in parts if part)
+    if name:
+        return name
+    username = getattr(user, "username", None)
+    return f"@{username}" if username else None
 
 
 def _safe_original_filename(filename: str | None) -> str:
