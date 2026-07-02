@@ -54,6 +54,12 @@ class ProductStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class LookStatus(StrEnum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+
+
 class ProductSizeGrid(StrEnum):
     CLOTHING_ALPHA = "clothing_alpha"
     SHOES_EU = "shoes_eu"
@@ -971,6 +977,7 @@ class Product(Base):
         cascade="all, delete-orphan",
         order_by="Favorite.id",
     )
+    look_items: Mapped[list["LookItem"]] = relationship(back_populates="product")
 
     @property
     def is_available(self) -> bool:
@@ -1655,6 +1662,166 @@ class ProductImage(Base):
             "card": self.card_url,
             "detail": self.detail_url,
         }
+
+
+class Look(Base):
+    __tablename__ = "looks"
+    __table_args__ = (
+        CheckConstraint(
+            "search_priority IN (1, 2, 3)",
+            name="ck_looks_search_priority_range",
+        ),
+        Index(
+            "ix_looks_public_listing",
+            "status",
+            "is_listed",
+            "search_priority",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[LookStatus] = mapped_column(
+        Enum(LookStatus, name="look_status", values_callable=_enum_values),
+        nullable=False,
+        default=LookStatus.DRAFT,
+        server_default=LookStatus.DRAFT.value,
+        index=True,
+    )
+    is_listed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        index=True,
+    )
+    search_priority: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    images: Mapped[list["LookImage"]] = relationship(
+        back_populates="look",
+        cascade="all, delete-orphan",
+        order_by="LookImage.position",
+    )
+    items: Mapped[list["LookItem"]] = relationship(
+        back_populates="look",
+        cascade="all, delete-orphan",
+        order_by="LookItem.position",
+    )
+
+    @property
+    def primary_image(self) -> "LookImage | None":
+        primary = next((image for image in self.images if image.is_primary), None)
+        return primary or (self.images[0] if self.images else None)
+
+    @property
+    def image_url(self) -> str | None:
+        image = self.primary_image
+        return image.url if image is not None else None
+
+
+class LookImage(Base):
+    __tablename__ = "look_images"
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_look_images_position_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    look_id: Mapped[int] = mapped_column(
+        ForeignKey("looks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    look: Mapped[Look] = relationship(back_populates="images")
+
+    @property
+    def url(self) -> str:
+        return f"/uploads/{self.file_path}"
+
+    @property
+    def image_url(self) -> str:
+        return self.url
+
+
+class LookItem(Base):
+    __tablename__ = "look_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_look_items_quantity_positive"),
+        UniqueConstraint("look_id", "product_id", name="uq_look_items_look_product"),
+        Index("ix_look_items_look_position", "look_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    look_id: Mapped[int] = mapped_column(
+        ForeignKey("looks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    is_default_selected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    look: Mapped[Look] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship(back_populates="look_items")
 
 
 class Banner(Base):

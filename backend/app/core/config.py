@@ -77,6 +77,7 @@ class Settings(BaseSettings):
         "customer_campaigns",
         "payment_receipts",
         "returns",
+        "looks",
         "temp",
     )
 

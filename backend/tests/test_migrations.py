@@ -12,6 +12,10 @@ from app.db.models import (
     BroadcastDeliveryStatus,
     Category,
     CustomerTelegramSubscription,
+    Look,
+    LookImage,
+    LookItem,
+    LookStatus,
     ManualPayment,
     ManualPaymentCurrency,
     ManualPaymentMethod,
@@ -469,6 +473,36 @@ def test_return_requests_migration_contract() -> None:
     assert ReturnRequestItem.__table__.c.quantity.nullable is False
     assert ReturnRequestAttachment.__table__.c.file_path.nullable is False
     assert ReturnRequestAttachment.__table__.c.media_type.nullable is False
+
+
+def test_looks_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260702_0042_add_looks.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_looks_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text(encoding="utf-8")
+
+    assert migration.LOOK_STATUS_ENUM.name == "look_status"
+    assert migration.LOOK_STATUS_ENUM.enums == ["DRAFT", "ACTIVE", "ARCHIVED"]
+    assert migration.LOOK_STATUS_ENUM.create_type is False
+    assert "looks" in content
+    assert "look_items" in content
+    assert "look_images" in content
+    assert "uq_look_items_look_product" in content
+    assert "ck_look_items_quantity_positive" in content
+    assert "ix_looks_public_listing" in content
+    assert Look.__table__.c.status.default.arg is LookStatus.DRAFT
+    assert Look.__table__.c.slug.unique is True
+    assert Look.__table__.c.is_listed.nullable is False
+    assert LookItem.__table__.c.quantity.nullable is False
+    assert LookImage.__table__.c.file_path.nullable is False
 
 
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:
