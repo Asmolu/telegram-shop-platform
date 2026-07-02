@@ -140,6 +140,11 @@ class ReturnRequestStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class ReturnRefundStatus(StrEnum):
+    PENDING = "PENDING"
+    RECORDED = "RECORDED"
+
+
 class DiscountType(StrEnum):
     PERCENT = "PERCENT"
     FIXED = "FIXED"
@@ -325,6 +330,16 @@ class User(Base):
         back_populates="cancelled_by",
         foreign_keys="ReturnRequest.cancelled_by_user_id",
         order_by="ReturnRequest.id",
+    )
+    processed_return_refunds: Mapped[list["ReturnRefund"]] = relationship(
+        back_populates="processed_by",
+        foreign_keys="ReturnRefund.processed_by_user_id",
+        order_by="ReturnRefund.id",
+    )
+    restocked_return_items: Mapped[list["ReturnRequestItem"]] = relationship(
+        back_populates="restocked_by",
+        foreign_keys="ReturnRequestItem.restocked_by_user_id",
+        order_by="ReturnRequestItem.id",
     )
 
 
@@ -1404,6 +1419,11 @@ class ReturnRequest(Base):
         cascade="all, delete-orphan",
         order_by="ReturnRequestAttachment.position",
     )
+    refund: Mapped["ReturnRefund | None"] = relationship(
+        back_populates="return_request",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     @property
     def order_number(self) -> str | None:
@@ -1430,12 +1450,21 @@ class ReturnRequestItem(Base):
             "unit_price >= 0",
             name="ck_return_request_items_unit_price_non_negative",
         ),
+        CheckConstraint(
+            "restocked_quantity >= 0",
+            name="ck_return_request_items_restocked_quantity_non_negative",
+        ),
+        CheckConstraint(
+            "restocked_quantity <= quantity",
+            name="ck_return_request_items_restocked_quantity_not_above_quantity",
+        ),
         UniqueConstraint(
             "return_request_id",
             "order_item_id",
             name="uq_return_request_items_request_order_item",
         ),
         Index("ix_return_request_items_return_request_id", "return_request_id"),
+        Index("ix_return_request_items_product_variant_id", "product_variant_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1462,6 +1491,18 @@ class ReturnRequestItem(Base):
     color: Mapped[str | None] = mapped_column(String(64), nullable=True)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    restocked_quantity: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    restocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    restocked_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1470,6 +1511,20 @@ class ReturnRequestItem(Base):
 
     return_request: Mapped[ReturnRequest] = relationship(back_populates="items")
     order_item: Mapped[OrderItem] = relationship(back_populates="return_request_items")
+    restocked_by: Mapped[User | None] = relationship(
+        back_populates="restocked_return_items",
+        foreign_keys=[restocked_by_user_id],
+    )
+
+    @property
+    def remaining_restockable_quantity(self) -> int:
+        if self.product_variant_id is None:
+            return 0
+        return max(self.quantity - (self.restocked_quantity or 0), 0)
+
+    @property
+    def can_restock(self) -> bool:
+        return self.remaining_restockable_quantity > 0
 
 
 class ReturnRequestAttachment(Base):
@@ -1508,6 +1563,65 @@ class ReturnRequestAttachment(Base):
     )
 
     return_request: Mapped[ReturnRequest] = relationship(back_populates="attachments")
+
+
+class ReturnRefund(Base):
+    __tablename__ = "return_refunds"
+    __table_args__ = (
+        UniqueConstraint(
+            "return_request_id",
+            name="uq_return_refunds_return_request_id",
+        ),
+        CheckConstraint("amount >= 0", name="ck_return_refunds_amount_non_negative"),
+        CheckConstraint(
+            "status IN ('PENDING', 'RECORDED')",
+            name="ck_return_refunds_status",
+        ),
+        Index("ix_return_refunds_processed_by_user_id", "processed_by_user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    return_request_id: Mapped[int] = mapped_column(
+        ForeignKey("return_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="RUB",
+        server_default="RUB",
+    )
+    method: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[ReturnRefundStatus] = mapped_column(
+        String(32),
+        nullable=False,
+        default=ReturnRefundStatus.PENDING,
+        server_default=ReturnRefundStatus.PENDING.value,
+    )
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    return_request: Mapped[ReturnRequest] = relationship(back_populates="refund")
+    processed_by: Mapped[User | None] = relationship(
+        back_populates="processed_return_refunds",
+        foreign_keys=[processed_by_user_id],
+    )
 
 
 class SellerPaymentSettings(Base):

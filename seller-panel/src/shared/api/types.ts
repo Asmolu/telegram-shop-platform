@@ -28,6 +28,7 @@ export type ReturnRequestStatus =
   | 'REJECTED'
   | 'COMPLETED'
   | 'CANCELLED';
+export type ReturnRefundStatus = 'PENDING' | 'RECORDED';
 export type LookStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
@@ -354,6 +355,11 @@ export interface ReturnRequestItem {
   color: string | null;
   unit_price: ApiDecimal;
   quantity: number;
+  restocked_quantity: number;
+  restocked_at: string | null;
+  restocked_by_user_id: number | null;
+  remaining_restockable_quantity: number;
+  can_restock: boolean;
   created_at: string;
 }
 
@@ -367,6 +373,20 @@ export interface ReturnRequestAttachment {
   position: number;
   url: string;
   created_at: string;
+}
+
+export interface ReturnRefund {
+  id: number;
+  return_request_id: number;
+  amount: ApiDecimal;
+  currency: string;
+  method: string | null;
+  status: ReturnRefundStatus;
+  comment: string | null;
+  processed_at: string | null;
+  processed_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ReturnRequest {
@@ -383,6 +403,10 @@ export interface ReturnRequest {
   comment: string | null;
   items: ReturnRequestItem[];
   attachments: ReturnRequestAttachment[];
+  refund: ReturnRefund | null;
+  total_return_amount: ApiDecimal;
+  can_process: boolean;
+  can_complete: boolean;
   decided_at: string | null;
   decided_by_user_id: number | null;
   decision_comment: string | null;
@@ -402,6 +426,21 @@ export interface ReturnDecisionPayload {
 }
 
 export interface ReturnLifecyclePayload {
+  comment?: string | null;
+}
+
+export interface ReturnProcessPayload {
+  refund?: {
+    amount?: ApiDecimal | null;
+    currency?: string;
+    method?: string | null;
+    comment?: string | null;
+  } | null;
+  restock_items?: Array<{
+    return_request_item_id: number;
+    quantity: number;
+  }>;
+  complete?: boolean;
   comment?: string | null;
 }
 

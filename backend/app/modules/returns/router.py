@@ -12,6 +12,7 @@ from app.modules.returns.schemas import (
     ReturnDecisionRequest,
     ReturnEligibilityRead,
     ReturnLifecycleCommentRequest,
+    ReturnProcessRequest,
     ReturnRequestCreate,
     ReturnRequestList,
     ReturnRequestRead,
@@ -143,6 +144,20 @@ async def complete_return_request(
         return_request_id=return_request_id,
         actor_user_id=current_user.id,
         payload=payload or ReturnLifecycleCommentRequest(),
+    )
+
+
+@admin_router.post("/{return_request_id}/process", response_model=ReturnRequestRead)
+async def process_return_request(
+    return_request_id: int,
+    payload: ReturnProcessRequest,
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[ReturnsService, Depends(get_returns_service)],
+) -> ReturnRequestRead:
+    return await service.process(
+        return_request_id=return_request_id,
+        actor_user_id=current_user.id,
+        payload=payload,
     )
 
 

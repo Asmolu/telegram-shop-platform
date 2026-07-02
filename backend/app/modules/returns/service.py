@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from secrets import token_hex
 from typing import Protocol
@@ -18,6 +19,9 @@ from app.db.models import (
     OrderItem,
     OrderStatus,
     Product,
+    ProductVariant,
+    ReturnRefund,
+    ReturnRefundStatus,
     ReturnRequest,
     ReturnRequestAttachment,
     ReturnRequestItem,
@@ -29,6 +33,7 @@ from app.modules.returns.schemas import (
     ReturnEligibilityItemRead,
     ReturnEligibilityRead,
     ReturnLifecycleCommentRequest,
+    ReturnProcessRequest,
     ReturnRequestCreate,
     ReturnRequestList,
     ReturnRequestRead,
@@ -418,11 +423,69 @@ class ReturnsService:
                 status.HTTP_409_CONFLICT,
             )
 
-        return_request.status = ReturnRequestStatus.COMPLETED
-        return_request.completed_at = self._now()
-        return_request.completed_by_user_id = actor_user_id
-        return_request.completion_comment = payload.comment
+        self._mark_completed(
+            return_request,
+            actor_user_id=actor_user_id,
+            comment=payload.comment,
+        )
         await self._commit("Return request completion failed")
+        return await self._read_updated(return_request_id)
+
+    async def process(
+        self,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        payload: ReturnProcessRequest,
+    ) -> ReturnRequestRead:
+        try:
+            return_request = await self.repository.get_by_id(
+                return_request_id,
+                for_update=True,
+            )
+            if return_request is None:
+                raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+            if return_request.status != ReturnRequestStatus.APPROVED:
+                raise AppError(
+                    "Return request can be processed only after approval",
+                    status.HTTP_409_CONFLICT,
+                )
+
+            restock_plan = self._validate_restock_plan(return_request, payload)
+            variants_by_id = await self.repository.lock_variants_by_ids(
+                variant_id for _item, variant_id, delta, _target in restock_plan if delta > 0
+            )
+            self._validate_locked_variants(restock_plan, variants_by_id)
+
+            refund_amount = (
+                payload.refund.amount
+                if payload.refund is not None and payload.refund.amount is not None
+                else self._total_return_amount(return_request)
+            )
+            self._validate_refund_amount(return_request, refund_amount)
+            self._record_refund(
+                return_request,
+                payload=payload,
+                amount=refund_amount,
+                actor_user_id=actor_user_id,
+            )
+            self._apply_restock_plan(
+                restock_plan,
+                variants_by_id=variants_by_id,
+                actor_user_id=actor_user_id,
+            )
+            if payload.complete:
+                self._mark_completed(
+                    return_request,
+                    actor_user_id=actor_user_id,
+                    comment=payload.comment,
+                )
+
+            await self._commit("Return request processing failed")
+        except AppError:
+            await self.session.rollback()
+            raise
+
         return await self._read_updated(return_request_id)
 
     async def cancel_admin(
@@ -451,6 +514,117 @@ class ReturnsService:
         )
         await self._commit("Return request cancellation failed")
         return await self._read_updated(return_request_id)
+
+    def _validate_restock_plan(
+        self,
+        return_request: ReturnRequest,
+        payload: ReturnProcessRequest,
+    ) -> list[tuple[ReturnRequestItem, int, int, int]]:
+        items_by_id = {item.id: item for item in return_request.items}
+        restock_plan: list[tuple[ReturnRequestItem, int, int, int]] = []
+        for selected in payload.restock_items:
+            item = items_by_id.get(selected.return_request_item_id)
+            if item is None:
+                raise AppError(
+                    "Return item does not belong to this return request",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+
+            already_restocked = getattr(item, "restocked_quantity", 0) or 0
+            target_quantity = selected.quantity
+            if target_quantity > item.quantity:
+                raise AppError(
+                    "Restock quantity exceeds returned quantity",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if target_quantity < already_restocked:
+                raise AppError(
+                    "Restock quantity cannot be below already restocked quantity",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if item.product_variant_id is None:
+                if target_quantity > 0:
+                    raise AppError(
+                        "Return item has no product variant to restock",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                continue
+
+            delta = target_quantity - already_restocked
+            restock_plan.append((item, item.product_variant_id, delta, target_quantity))
+        return restock_plan
+
+    def _validate_locked_variants(
+        self,
+        restock_plan: list[tuple[ReturnRequestItem, int, int, int]],
+        variants_by_id: dict[int, ProductVariant],
+    ) -> None:
+        for _item, variant_id, delta, _target_quantity in restock_plan:
+            if delta > 0 and variant_id not in variants_by_id:
+                raise AppError("Product variant not found", status.HTTP_404_NOT_FOUND)
+
+    def _validate_refund_amount(
+        self,
+        return_request: ReturnRequest,
+        amount: Decimal,
+    ) -> None:
+        if amount < 0:
+            raise AppError("Refund amount cannot be negative", status.HTTP_400_BAD_REQUEST)
+        if amount > self._total_return_amount(return_request):
+            raise AppError(
+                "Refund amount exceeds returned items total",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+    def _record_refund(
+        self,
+        return_request: ReturnRequest,
+        *,
+        payload: ReturnProcessRequest,
+        amount: Decimal,
+        actor_user_id: int,
+    ) -> None:
+        refund_payload = payload.refund
+        refund = return_request.refund
+        if refund is None:
+            refund = ReturnRefund(
+                return_request_id=return_request.id,
+                return_request=return_request,
+                amount=amount,
+            )
+            return_request.refund = refund
+            self.repository.add(refund)
+
+        refund.amount = amount
+        refund.currency = refund_payload.currency if refund_payload is not None else "RUB"
+        refund.method = refund_payload.method if refund_payload is not None else None
+        refund.comment = refund_payload.comment if refund_payload is not None else None
+        refund.status = ReturnRefundStatus.RECORDED
+        refund.processed_at = self._now()
+        refund.processed_by_user_id = actor_user_id
+
+    def _apply_restock_plan(
+        self,
+        restock_plan: list[tuple[ReturnRequestItem, int, int, int]],
+        *,
+        variants_by_id: dict[int, ProductVariant],
+        actor_user_id: int,
+    ) -> None:
+        now = self._now()
+        for item, variant_id, delta, target_quantity in restock_plan:
+            if delta <= 0:
+                continue
+            variant = variants_by_id[variant_id]
+            variant.stock_quantity += delta
+            item.restocked_quantity = target_quantity
+            item.restocked_at = now
+            item.restocked_by_user_id = actor_user_id
+
+    def _total_return_amount(self, return_request: ReturnRequest) -> Decimal:
+        return sum(
+            (item.unit_price * item.quantity for item in return_request.items),
+            Decimal("0.00"),
+        )
 
     async def _decide(
         self,
@@ -491,6 +665,18 @@ class ReturnsService:
         return_request.cancelled_at = self._now()
         return_request.cancelled_by_user_id = actor_user_id
         return_request.cancellation_comment = comment
+
+    def _mark_completed(
+        self,
+        return_request: ReturnRequest,
+        *,
+        actor_user_id: int,
+        comment: str | None,
+    ) -> None:
+        return_request.status = ReturnRequestStatus.COMPLETED
+        return_request.completed_at = self._now()
+        return_request.completed_by_user_id = actor_user_id
+        return_request.completion_comment = comment
 
     def _build_eligibility(
         self,

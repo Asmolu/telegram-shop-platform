@@ -48,6 +48,7 @@ import type {
   PromoCodePayload,
   ReturnDecisionPayload,
   ReturnLifecyclePayload,
+  ReturnProcessPayload,
   ReturnRequest,
   ReturnRequestStatus,
   Review,
@@ -421,6 +422,11 @@ export const api = {
       }),
     complete: (returnRequestId: number, body: ReturnLifecyclePayload = {}) =>
       apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/complete`, {
+        method: 'POST',
+        body,
+      }),
+    process: (returnRequestId: number, body: ReturnProcessPayload) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/process`, {
         method: 'POST',
         body,
       }),

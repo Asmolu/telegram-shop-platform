@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
-import type { ReturnRequest, ReturnRequestStatus } from '../../shared/api';
+import type {
+  ReturnProcessPayload,
+  ReturnRequest,
+  ReturnRequestItem,
+  ReturnRequestStatus,
+} from '../../shared/api';
 import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
@@ -170,6 +175,24 @@ export function ReturnsPage({
     }
   }
 
+  async function processReturn(payload: ReturnProcessPayload) {
+    if (!selectedReturn || selectedReturn.status !== 'APPROVED') {
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const updated = await api.returns.process(selectedReturn.id, payload);
+      applyReturnUpdate(updated);
+    } catch (requestError) {
+      setActionError(formatRequestError(requestError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function cancelReturn() {
     if (!selectedReturn || !['PENDING', 'APPROVED'].includes(selectedReturn.status)) {
       return;
@@ -287,6 +310,7 @@ export function ReturnsPage({
             onApprove={() => void decideReturn('APPROVED')}
             onCancel={() => void cancelReturn()}
             onComplete={() => void completeReturn()}
+            onProcess={(payload) => processReturn(payload)}
             onReject={() => void decideReturn('REJECTED')}
             onOpenOrder={() => onNavigate('/orders')}
             returnRequest={selectedReturn}
@@ -305,6 +329,7 @@ function ReturnDetail({
   onCancel,
   onComplete,
   onReject,
+  onProcess,
   onOpenOrder,
   returnRequest,
 }: {
@@ -315,16 +340,124 @@ function ReturnDetail({
   onCancel: () => void;
   onComplete: () => void;
   onReject: () => void;
+  onProcess: (payload: ReturnProcessPayload) => Promise<void>;
   onOpenOrder: () => void;
   returnRequest: ReturnRequest | null;
 }) {
   const { language, t } = useI18n();
+  const [refundAmount, setRefundAmount] = useState('0.00');
+  const [refundMethod, setRefundMethod] = useState('manual_cash');
+  const [refundComment, setRefundComment] = useState('');
+  const [restockQuantities, setRestockQuantities] = useState<Record<number, number>>({});
+  const [completeAfterProcessing, setCompleteAfterProcessing] = useState(true);
+  const [processingComment, setProcessingComment] = useState('');
+  const [processingValidationError, setProcessingValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!returnRequest) {
+      return;
+    }
+
+    setRefundAmount(
+      toMoneyInputValue(
+        returnRequest.refund?.amount
+          ?? returnRequest.total_return_amount
+          ?? calculateReturnTotal(returnRequest),
+      ),
+    );
+    setRefundMethod(returnRequest.refund?.method ?? 'manual_cash');
+    setRefundComment(returnRequest.refund?.comment ?? '');
+    setRestockQuantities(
+      Object.fromEntries(returnRequest.items.map((item) => [item.id, 0])),
+    );
+    setCompleteAfterProcessing(true);
+    setProcessingComment('');
+    setProcessingValidationError(null);
+  }, [returnRequest?.id, returnRequest?.status, returnRequest?.updated_at]);
 
   if (detailLoading) {
     return <div className="detail-drawer"><LoadingState title={t('returns.detailLoading')} /></div>;
   }
   if (!returnRequest) {
     return <div className="detail-drawer empty-drawer">{t('returns.selectRequest')}</div>;
+  }
+
+  const canProcess = returnRequest.status === 'APPROVED' && (returnRequest.can_process ?? true);
+  const hasRestockAudit = returnRequest.items.some((item) => itemRestockedQuantity(item) > 0);
+
+  async function submitProcessing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const detail = returnRequest;
+    if (!detail) {
+      return;
+    }
+    const amount = parseMoneyInput(refundAmount);
+    const total = Number(detail.total_return_amount ?? calculateReturnTotal(detail));
+    if (amount === null) {
+      setProcessingValidationError(t('returns.refundAmountInvalid'));
+      return;
+    }
+    if (amount < 0) {
+      setProcessingValidationError(t('returns.refundAmountNegative'));
+      return;
+    }
+    if (amount > total) {
+      setProcessingValidationError(t('returns.refundAmountTooHigh'));
+      return;
+    }
+
+    const restockItems: ReturnProcessPayload['restock_items'] = [];
+    for (const item of detail.items) {
+      const additionalQuantity = Number(restockQuantities[item.id] ?? 0);
+      const remainingQuantity = itemRemainingRestockableQuantity(item);
+      if (additionalQuantity < 0) {
+        setProcessingValidationError(t('returns.restockQuantityNegative'));
+        return;
+      }
+      if (additionalQuantity > remainingQuantity) {
+        setProcessingValidationError(t('returns.restockQuantityTooHigh'));
+        return;
+      }
+      if (additionalQuantity > 0 && !item.product_variant_id) {
+        setProcessingValidationError(t('returns.restockNoVariant'));
+        return;
+      }
+      if (additionalQuantity > 0) {
+        restockItems.push({
+          return_request_item_id: item.id,
+          quantity: itemRestockedQuantity(item) + additionalQuantity,
+        });
+      }
+    }
+
+    setProcessingValidationError(null);
+    await onProcess({
+      refund: {
+        amount: amount.toFixed(2),
+        currency: 'RUB',
+        method: refundMethod,
+        comment: refundComment.trim() || null,
+      },
+      restock_items: restockItems,
+      complete: completeAfterProcessing,
+      comment: processingComment.trim() || null,
+    });
+  }
+
+  function setItemRestockChecked(item: ReturnRequestItem, checked: boolean) {
+    setRestockQuantities((current) => ({
+      ...current,
+      [item.id]: checked ? Math.min(itemRemainingRestockableQuantity(item), 1) : 0,
+    }));
+    setProcessingValidationError(null);
+  }
+
+  function setItemRestockQuantity(item: ReturnRequestItem, quantity: number) {
+    setRestockQuantities((current) => ({
+      ...current,
+      [item.id]: Number.isFinite(quantity) ? quantity : 0,
+    }));
+    setProcessingValidationError(null);
   }
 
   return (
@@ -393,6 +526,126 @@ function ReturnDetail({
       ) : (
         <p className="muted-text">{t('returns.noAttachments')}</p>
       )}
+
+      {canProcess ? (
+        <form className="returns-processing" onSubmit={submitProcessing}>
+          <h3>{t('returns.processing')}</h3>
+          <div className="returns-processing__grid">
+            <label>
+              <span>{t('returns.refundAmount')}</span>
+              <input
+                min="0"
+                step="0.01"
+                type="number"
+                value={refundAmount}
+                onChange={(event) => {
+                  setRefundAmount(event.target.value);
+                  setProcessingValidationError(null);
+                }}
+              />
+            </label>
+            <label>
+              <span>{t('returns.refundMethod')}</span>
+              <select
+                value={refundMethod}
+                onChange={(event) => setRefundMethod(event.target.value)}
+              >
+                <option value="manual_cash">{t('returns.refundMethod.cash')}</option>
+                <option value="manual_transfer">{t('returns.refundMethod.transfer')}</option>
+                <option value="other">{t('returns.refundMethod.other')}</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>{t('returns.refundComment')}</span>
+            <textarea
+              rows={3}
+              value={refundComment}
+              onChange={(event) => setRefundComment(event.target.value)}
+            />
+          </label>
+
+          <div className="returns-processing__items">
+            {returnRequest.items.map((item) => {
+              const alreadyRestocked = itemRestockedQuantity(item);
+              const remainingQuantity = itemRemainingRestockableQuantity(item);
+              const restockQuantity = Number(restockQuantities[item.id] ?? 0);
+              const disabled = !itemCanRestock(item);
+              const checked = restockQuantity > 0;
+              return (
+                <article
+                  className={`returns-processing-item${disabled ? ' is-disabled' : ''}`}
+                  key={item.id}
+                >
+                  <div className="returns-processing-item__summary">
+                    <div>
+                      <strong>{item.product_name}</strong>
+                      <small>{[item.sku, item.color, item.size].filter(Boolean).join(' В· ')}</small>
+                    </div>
+                    <span>{formatMoney(item.unit_price, language)}</span>
+                  </div>
+                  <div className="returns-processing-item__metrics">
+                    <span>{t('returns.returnedQuantity')}: {item.quantity}</span>
+                    <span>{t('returns.alreadyRestocked')}: {alreadyRestocked}</span>
+                    <span>{t('returns.remainingRestockable')}: {remainingQuantity}</span>
+                  </div>
+                  <div className="returns-processing-item__controls">
+                    <label className="returns-processing-check">
+                      <input
+                        checked={checked}
+                        disabled={disabled || actionBusy}
+                        type="checkbox"
+                        onChange={(event) => setItemRestockChecked(item, event.target.checked)}
+                      />
+                      <span>{t('returns.restockItem')}</span>
+                    </label>
+                    <label>
+                      <span>{t('returns.restockQuantity')}</span>
+                      <input
+                        disabled={disabled || !checked || actionBusy}
+                        max={remainingQuantity}
+                        min="0"
+                        type="number"
+                        value={restockQuantity}
+                        onChange={(event) => (
+                          setItemRestockQuantity(item, Number(event.target.value))
+                        )}
+                      />
+                    </label>
+                  </div>
+                  {!item.product_variant_id ? (
+                    <small className="muted-text">{t('returns.notRestockable')}</small>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+
+          <label className="returns-processing-check">
+            <input
+              checked={completeAfterProcessing}
+              disabled={actionBusy}
+              type="checkbox"
+              onChange={(event) => setCompleteAfterProcessing(event.target.checked)}
+            />
+            <span>{t('returns.completeAfterProcessing')}</span>
+          </label>
+          <label>
+            <span>{t('returns.processingComment')}</span>
+            <textarea
+              rows={3}
+              value={processingComment}
+              onChange={(event) => setProcessingComment(event.target.value)}
+            />
+          </label>
+          {processingValidationError ? (
+            <p className="form-error">{processingValidationError}</p>
+          ) : null}
+          <button className="button button-primary" disabled={actionBusy} type="submit">
+            {completeAfterProcessing ? t('returns.finishProcessing') : t('returns.saveProcessing')}
+          </button>
+        </form>
+      ) : null}
 
       {returnRequest.status === 'PENDING' ? (
         <div className="returns-detail__actions">
@@ -468,6 +721,30 @@ function ReturnDetail({
         </dl>
       ) : null}
 
+      {returnRequest.refund ? (
+        <dl className="details-list">
+          <div><dt>{t('returns.refundAudit')}</dt><dd>{formatMoney(returnRequest.refund.amount, language)} {returnRequest.refund.currency}</dd></div>
+          <div><dt>{t('returns.refundMethod')}</dt><dd>{compactText(returnRequest.refund.method, t('common.notProvided'))}</dd></div>
+          <div><dt>{t('returns.refundComment')}</dt><dd>{compactText(returnRequest.refund.comment, t('common.notProvided'))}</dd></div>
+          <div><dt>{t('returns.refundProcessedAt')}</dt><dd>{formatDate(returnRequest.refund.processed_at, language)}</dd></div>
+          <div><dt>{t('returns.refundProcessedBy')}</dt><dd>{returnRequest.refund.processed_by_user_id ?? t('common.notProvided')}</dd></div>
+        </dl>
+      ) : null}
+
+      {hasRestockAudit ? (
+        <div className="returns-restock-audit">
+          <h3>{t('returns.restockAudit')}</h3>
+          {returnRequest.items.map((item) => (
+            itemRestockedQuantity(item) > 0 ? (
+              <div className="returns-restock-audit__row" key={item.id}>
+                <span>{item.product_name}</span>
+                <strong>{itemRestockedQuantity(item)} / {item.quantity}</strong>
+              </div>
+            ) : null
+          ))}
+        </div>
+      ) : null}
+
       {actionError ? <p className="form-error">{actionError}</p> : null}
     </aside>
   );
@@ -475,6 +752,50 @@ function ReturnDetail({
 
 function returnStatusLabel(status: ReturnRequestStatus, language: 'ru' | 'en'): string {
   return returnStatusLabels[language][status];
+}
+
+function toMoneyInputValue(value: unknown): string {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+}
+
+function parseMoneyInput(value: string): number | null {
+  const normalized = value.trim().replace(',', '.');
+  if (!normalized) {
+    return null;
+  }
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function calculateReturnTotal(returnRequest: ReturnRequest | null): number {
+  if (!returnRequest) {
+    return 0;
+  }
+  return returnRequest.items.reduce(
+    (total, item) => total + Number(item.unit_price ?? 0) * item.quantity,
+    0,
+  );
+}
+
+function itemRestockedQuantity(item: ReturnRequestItem): number {
+  const quantity = Number(item.restocked_quantity ?? 0);
+  return Number.isFinite(quantity) ? quantity : 0;
+}
+
+function itemRemainingRestockableQuantity(item: ReturnRequestItem): number {
+  if (!item.product_variant_id) {
+    return 0;
+  }
+  const remaining = Number(
+    item.remaining_restockable_quantity
+      ?? Math.max(item.quantity - itemRestockedQuantity(item), 0),
+  );
+  return Number.isFinite(remaining) ? Math.max(remaining, 0) : 0;
+}
+
+function itemCanRestock(item: ReturnRequestItem): boolean {
+  return Boolean(item.product_variant_id) && itemRemainingRestockableQuantity(item) > 0;
 }
 
 function formatRequestError(error: unknown): string {

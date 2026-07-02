@@ -21,6 +21,8 @@ from app.db.models import (
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
+    ReturnRefund,
+    ReturnRefundStatus,
     ReturnRequest,
     ReturnRequestAttachment,
     ReturnRequestItem,
@@ -33,6 +35,7 @@ from app.modules.returns.router import get_returns_service
 from app.modules.returns.schemas import (
     ReturnDecisionRequest,
     ReturnLifecycleCommentRequest,
+    ReturnProcessRequest,
     ReturnRequestCreate,
     ReturnRequestItemCreate,
 )
@@ -173,9 +176,11 @@ class FakeReturnsRepository:
     def __init__(self) -> None:
         self.orders: dict[int, Order] = {}
         self.return_requests: dict[int, ReturnRequest] = {}
+        self.product_variants: dict[int, ProductVariant] = {}
         self.next_return_id = 1
         self.next_item_id = 1
         self.next_attachment_id = 1
+        self.next_refund_id = 1
 
     async def get_order_for_user(
         self,
@@ -188,6 +193,9 @@ class FakeReturnsRepository:
         order = self.orders.get(order_id)
         if order is None or order.user_id != user_id:
             return None
+        for item in order.items:
+            if item.product_variant is not None:
+                self.product_variants[item.product_variant.id] = item.product_variant
         return order
 
     async def get_return_for_order(self, order_id: int) -> ReturnRequest | None:
@@ -235,13 +243,22 @@ class FakeReturnsRepository:
             self._persist_graph(item)
         return items[offset : offset + limit]
 
+    async def lock_variants_by_ids(self, variant_ids: Iterable[int]) -> dict[int, ProductVariant]:
+        return {
+            variant_id: self.product_variants[variant_id]
+            for variant_id in sorted(set(variant_ids))
+            if variant_id in self.product_variants
+        }
+
     def add(
         self,
-        instance: ReturnRequest | ReturnRequestItem | ReturnRequestAttachment,
+        instance: ReturnRequest | ReturnRequestItem | ReturnRequestAttachment | ReturnRefund,
     ) -> None:
         if isinstance(instance, ReturnRequest):
             self._persist_graph(instance)
             self.return_requests[instance.id] = instance
+        elif isinstance(instance, ReturnRefund):
+            self._persist_refund(instance)
 
     def _persist_graph(self, return_request: ReturnRequest) -> None:
         if getattr(return_request, "id", None) is None:
@@ -255,6 +272,7 @@ class FakeReturnsRepository:
                 item.id = self.next_item_id
                 self.next_item_id += 1
             item.return_request_id = return_request.id
+            item.restocked_quantity = getattr(item, "restocked_quantity", None) or 0
             item.created_at = getattr(item, "created_at", None) or NOW
         for attachment in return_request.attachments:
             if getattr(attachment, "id", None) is None:
@@ -262,6 +280,16 @@ class FakeReturnsRepository:
                 self.next_attachment_id += 1
             attachment.return_request_id = return_request.id
             attachment.created_at = getattr(attachment, "created_at", None) or NOW
+        if return_request.refund is not None:
+            return_request.refund.return_request_id = return_request.id
+            self._persist_refund(return_request.refund)
+
+    def _persist_refund(self, refund: ReturnRefund) -> None:
+        if getattr(refund, "id", None) is None:
+            refund.id = self.next_refund_id
+            self.next_refund_id += 1
+        refund.created_at = getattr(refund, "created_at", None) or NOW
+        refund.updated_at = getattr(refund, "updated_at", None) or NOW
 
 
 @pytest.mark.asyncio
@@ -1112,6 +1140,246 @@ async def test_seller_admin_cannot_complete_non_approved_return_request(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status_value",
+    [
+        ReturnRequestStatus.PENDING,
+        ReturnRequestStatus.REJECTED,
+        ReturnRequestStatus.COMPLETED,
+        ReturnRequestStatus.CANCELLED,
+    ],
+)
+async def test_cannot_process_non_approved_return_request(
+    status_value: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=status_value))
+
+    with pytest.raises(AppError, match="after approval"):
+        await service.process(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnProcessRequest(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_approved_return_records_default_refund_without_completion() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    processed = await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(complete=False),
+    )
+
+    assert processed.status == ReturnRequestStatus.APPROVED
+    assert processed.refund is not None
+    assert processed.refund.amount == Decimal("59.90")
+    assert processed.refund.currency == "RUB"
+    assert processed.refund.status == ReturnRefundStatus.RECORDED
+    assert processed.refund.processed_at == NOW
+    assert processed.refund.processed_by_user_id == 10
+    assert processed.total_return_amount == Decimal("59.90")
+    assert processed.can_process is True
+    assert processed.can_complete is True
+
+
+@pytest.mark.asyncio
+async def test_process_rejects_refund_amount_above_return_total() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    with pytest.raises(AppError, match="exceeds returned items total"):
+        await service.process(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnProcessRequest(
+                refund={"amount": Decimal("60.00"), "currency": "RUB"},
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_restocks_variant_and_completes_return_request() -> None:
+    service, repository, _session, _storage = _returns_service()
+    variant = _variant(stock_quantity=3)
+    repository.product_variants[1] = variant
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    processed = await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(
+            refund={
+                "amount": Decimal("49.90"),
+                "currency": "RUB",
+                "method": "manual_cash",
+                "comment": "Cash refund",
+            },
+            restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            complete=True,
+            comment="Return processed",
+        ),
+    )
+
+    assert variant.stock_quantity == 4
+    assert processed.status == ReturnRequestStatus.COMPLETED
+    assert processed.completed_at == NOW
+    assert processed.completed_by_user_id == 10
+    assert processed.completion_comment == "Return processed"
+    assert processed.refund is not None
+    assert processed.refund.amount == Decimal("49.90")
+    assert processed.refund.method == "manual_cash"
+    assert processed.refund.comment == "Cash refund"
+    assert processed.items[0].restocked_quantity == 1
+    assert processed.items[0].restocked_at == NOW
+    assert processed.items[0].restocked_by_user_id == 10
+    assert processed.items[0].remaining_restockable_quantity == 0
+    assert processed.items[0].can_restock is False
+    assert processed.can_process is False
+    assert processed.can_complete is False
+
+
+@pytest.mark.asyncio
+async def test_process_restock_is_transactional_when_variant_is_missing() -> None:
+    service, repository, session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    with pytest.raises(AppError, match="Product variant not found"):
+        await service.process(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnProcessRequest(
+                refund={"amount": Decimal("10.00"), "currency": "RUB"},
+                restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            ),
+        )
+
+    stored = repository.return_requests[1]
+    assert stored.status == ReturnRequestStatus.APPROVED
+    assert stored.refund is None
+    assert stored.items[0].restocked_quantity == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_process_cannot_restock_more_than_returned_quantity() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.product_variants[1] = _variant(stock_quantity=3)
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    with pytest.raises(AppError, match="exceeds returned quantity"):
+        await service.process(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnProcessRequest(
+                restock_items=[{"return_request_item_id": 1, "quantity": 2}],
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_does_not_double_restock_same_quantity() -> None:
+    service, repository, _session, _storage = _returns_service()
+    variant = _variant(stock_quantity=3)
+    repository.product_variants[1] = variant
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(
+            restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            complete=False,
+        ),
+    )
+    await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(
+            restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            complete=False,
+        ),
+    )
+
+    assert variant.stock_quantity == 4
+    assert repository.return_requests[1].items[0].restocked_quantity == 1
+
+
+@pytest.mark.asyncio
+async def test_process_partial_restock_uses_only_additional_delta() -> None:
+    service, repository, _session, _storage = _returns_service()
+    variant = _variant(stock_quantity=3)
+    return_request = _return_request(
+        order_id=1,
+        user_id=1,
+        status_value=ReturnRequestStatus.APPROVED,
+    )
+    return_request.items[0].quantity = 3
+    repository.product_variants[1] = variant
+    repository.add(return_request)
+
+    await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(
+            restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            complete=False,
+        ),
+    )
+    await service.process(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnProcessRequest(
+            restock_items=[{"return_request_item_id": 1, "quantity": 3}],
+            complete=False,
+        ),
+    )
+
+    assert variant.stock_quantity == 6
+    assert repository.return_requests[1].items[0].restocked_quantity == 3
+
+
+@pytest.mark.asyncio
+async def test_process_cannot_restock_item_without_variant() -> None:
+    service, repository, _session, _storage = _returns_service()
+    return_request = _return_request(
+        order_id=1,
+        user_id=1,
+        status_value=ReturnRequestStatus.APPROVED,
+    )
+    return_request.items[0].product_variant_id = None
+    repository.add(return_request)
+
+    detail = await service.get_admin_return_request(1)
+    assert detail.items[0].remaining_restockable_quantity == 0
+    assert detail.items[0].can_restock is False
+
+    with pytest.raises(AppError, match="no product variant"):
+        await service.process(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnProcessRequest(
+                restock_items=[{"return_request_item_id": 1, "quantity": 1}],
+            ),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_value",
     [ReturnRequestStatus.PENDING, ReturnRequestStatus.APPROVED],
 )
 async def test_seller_admin_can_cancel_pending_or_approved_return_request(
@@ -1264,6 +1532,73 @@ def test_admin_complete_cancel_routes_return_lifecycle_fields() -> None:
     assert cancel_response.json()["cancellation_comment"] == "Cancelled by seller"
 
 
+def test_admin_process_route_records_refund_restock_and_completion() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.product_variants[1] = _variant(stock_quantity=2)
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    async def current_user() -> User:
+        return _user(role=UserRole.SELLER, user_id=10)
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/api/v1/returns/admin/1/process",
+            json={
+                "refund": {
+                    "amount": "59.90",
+                    "currency": "rub",
+                    "method": "manual_transfer",
+                    "comment": "Manual transfer",
+                },
+                "restock_items": [{"return_request_item_id": 1, "quantity": 1}],
+                "complete": True,
+                "comment": "Processed through route",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "COMPLETED"
+    assert payload["completed_by_user_id"] == 10
+    assert payload["completion_comment"] == "Processed through route"
+    assert payload["refund"]["amount"] == "59.90"
+    assert payload["refund"]["currency"] == "RUB"
+    assert payload["refund"]["method"] == "manual_transfer"
+    assert payload["items"][0]["restocked_quantity"] == 1
+    assert payload["items"][0]["remaining_restockable_quantity"] == 0
+    assert repository.product_variants[1].stock_quantity == 3
+
+
+def test_admin_process_route_rejects_negative_refund_amount() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    async def current_user() -> User:
+        return _user(role=UserRole.ADMIN, user_id=10)
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/api/v1/returns/admin/1/process",
+            json={"refund": {"amount": "-1.00", "currency": "RUB"}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
 def test_regular_user_cannot_access_admin_return_endpoints() -> None:
     app = create_app()
 
@@ -1273,11 +1608,17 @@ def test_regular_user_cannot_access_admin_return_endpoints() -> None:
     app.dependency_overrides[get_current_user] = current_user
     app.dependency_overrides[get_returns_service] = lambda: object()
     try:
-        response = TestClient(app).get("/api/v1/returns/admin")
+        client = TestClient(app)
+        response = client.get("/api/v1/returns/admin")
+        process_response = client.post(
+            "/api/v1/returns/admin/1/process",
+            json={"refund": {"amount": "0.00", "currency": "RUB"}},
+        )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 403
+    assert process_response.status_code == 403
 
 
 def _returns_service(
@@ -1415,17 +1756,12 @@ def _order_item(
     is_returnable: bool = True,
 ) -> OrderItem:
     product = _product(product_id=product_id, name=product_name, brand=brand)
-    variant = ProductVariant(
-        id=variant_id,
+    variant = _variant(
+        variant_id=variant_id,
         product_id=product_id,
         size=size,
         color=color,
         sku=sku,
-        stock_quantity=1,
-        reserved_quantity=0,
-        is_active=True,
-        created_at=NOW,
-        updated_at=NOW,
     )
     return OrderItem(
         id=item_id,
@@ -1444,6 +1780,30 @@ def _order_item(
         subtotal=unit_price * quantity,
         is_returnable=is_returnable,
         created_at=NOW,
+    )
+
+
+def _variant(
+    *,
+    variant_id: int = 1,
+    product_id: int = 1,
+    size: str = "M",
+    color: str | None = "Black",
+    sku: str = "SKU-1",
+    stock_quantity: int = 1,
+    reserved_quantity: int = 0,
+) -> ProductVariant:
+    return ProductVariant(
+        id=variant_id,
+        product_id=product_id,
+        size=size,
+        color=color,
+        sku=sku,
+        stock_quantity=stock_quantity,
+        reserved_quantity=reserved_quantity,
+        is_active=True,
+        created_at=NOW,
+        updated_at=NOW,
     )
 
 

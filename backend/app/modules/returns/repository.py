@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import select
@@ -8,6 +9,8 @@ from app.db.models import (
     Order,
     OrderItem,
     Product,
+    ProductVariant,
+    ReturnRefund,
     ReturnRequest,
     ReturnRequestAttachment,
     ReturnRequestItem,
@@ -54,6 +57,18 @@ class ReturnsRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def lock_variants_by_ids(self, variant_ids: Iterable[int]) -> dict[int, ProductVariant]:
+        unique_ids = sorted(set(variant_ids))
+        if not unique_ids:
+            return {}
+
+        result = await self.session.execute(
+            select(ProductVariant)
+            .where(ProductVariant.id.in_(unique_ids))
+            .with_for_update()
+        )
+        return {variant.id: variant for variant in result.scalars()}
+
     async def list_all(
         self,
         *,
@@ -88,7 +103,7 @@ class ReturnsRepository:
 
     def add(
         self,
-        instance: ReturnRequest | ReturnRequestItem | ReturnRequestAttachment,
+        instance: ReturnRequest | ReturnRequestItem | ReturnRequestAttachment | ReturnRefund,
     ) -> None:
         self.session.add(instance)
 
@@ -107,4 +122,5 @@ class ReturnsRepository:
             selectinload(ReturnRequest.user),
             selectinload(ReturnRequest.items),
             selectinload(ReturnRequest.attachments),
+            selectinload(ReturnRequest.refund),
         )

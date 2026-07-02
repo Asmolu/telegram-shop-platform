@@ -38,6 +38,8 @@ from app.db.models import (
     ProductRelatedProduct,
     ProductSizeGrid,
     ProductVariant,
+    ReturnRefund,
+    ReturnRefundStatus,
     ReturnRequest,
     ReturnRequestAttachment,
     ReturnRequestItem,
@@ -501,6 +503,43 @@ def test_return_lifecycle_statuses_migration_contract() -> None:
     assert table.c.cancelled_at.nullable is True
     assert table.c.cancelled_by_user_id.nullable is True
     assert table.c.cancellation_comment.nullable is True
+
+
+def test_return_refund_and_restock_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260702_0044_add_return_refunds_and_restock.py"
+    )
+    content = migration_path.read_text(encoding="utf-8")
+    refund_table = ReturnRefund.__table__
+    item_table = ReturnRequestItem.__table__
+    refund_constraint_names = {constraint.name for constraint in refund_table.constraints}
+    item_constraint_names = {constraint.name for constraint in item_table.constraints}
+
+    assert "return_refunds" in content
+    assert "return_request_id" in content
+    assert "processed_by_user_id" in content
+    assert "restocked_quantity" in content
+    assert "restocked_at" in content
+    assert "restocked_by_user_id" in content
+    assert "ck_return_refunds_amount_non_negative" in refund_constraint_names
+    assert "ck_return_refunds_status" in refund_constraint_names
+    assert "uq_return_refunds_return_request_id" in refund_constraint_names
+    assert refund_table.c.status.default.arg is ReturnRefundStatus.PENDING
+    assert refund_table.c.currency.default.arg == "RUB"
+    assert refund_table.c.amount.nullable is False
+    assert refund_table.c.processed_at.nullable is True
+    assert item_table.c.restocked_quantity.nullable is False
+    assert item_table.c.restocked_quantity.default.arg == 0
+    assert item_table.c.restocked_at.nullable is True
+    assert item_table.c.restocked_by_user_id.nullable is True
+    assert "ck_return_request_items_restocked_quantity_non_negative" in item_constraint_names
+    assert (
+        "ck_return_request_items_restocked_quantity_not_above_quantity"
+        in item_constraint_names
+    )
 
 
 def test_looks_migration_contract() -> None:

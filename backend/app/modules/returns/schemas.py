@@ -5,7 +5,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from app.core.config import settings
-from app.db.models import OrderStatus, ReturnRequestStatus
+from app.db.models import OrderStatus, ReturnRefundStatus, ReturnRequestStatus
 
 
 class ReturnRequestItemCreate(BaseModel):
@@ -66,6 +66,79 @@ class ReturnLifecycleCommentRequest(BaseModel):
         return trimmed or None
 
 
+class ReturnRefundProcessRequest(BaseModel):
+    amount: Decimal | None = None
+    currency: str = Field(default="RUB", min_length=1, max_length=3)
+    method: str | None = Field(default=None, max_length=64)
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and value < 0:
+            raise ValueError("amount must be greater than or equal to 0")
+        return value
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("currency is required")
+        return normalized
+
+    @field_validator("method", "comment")
+    @classmethod
+    def trim_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+
+class ReturnRestockItemProcessRequest(BaseModel):
+    return_request_item_id: int = Field(gt=0)
+    quantity: int = Field(ge=0)
+
+
+class ReturnProcessRequest(BaseModel):
+    refund: ReturnRefundProcessRequest | None = None
+    restock_items: list[ReturnRestockItemProcessRequest] = Field(default_factory=list)
+    complete: bool = True
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("comment")
+    @classmethod
+    def trim_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    @model_validator(mode="after")
+    def reject_duplicate_restock_items(self) -> Self:
+        item_ids = [item.return_request_item_id for item in self.restock_items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("duplicate return request items are not allowed")
+        return self
+
+
+class ReturnRefundRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    return_request_id: int
+    amount: Decimal
+    currency: str
+    method: str | None = None
+    status: ReturnRefundStatus
+    comment: str | None = None
+    processed_at: datetime | None = None
+    processed_by_user_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ReturnRequestItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,7 +153,27 @@ class ReturnRequestItemRead(BaseModel):
     color: str | None = None
     unit_price: Decimal
     quantity: int
+    restocked_quantity: int = 0
+    restocked_at: datetime | None = None
+    restocked_by_user_id: int | None = None
     created_at: datetime
+
+    @field_validator("restocked_quantity", mode="before")
+    @classmethod
+    def default_restocked_quantity(cls, value: int | None) -> int:
+        return value or 0
+
+    @computed_field
+    @property
+    def remaining_restockable_quantity(self) -> int:
+        if self.product_variant_id is None:
+            return 0
+        return max(self.quantity - self.restocked_quantity, 0)
+
+    @computed_field
+    @property
+    def can_restock(self) -> bool:
+        return self.remaining_restockable_quantity > 0
 
 
 class ReturnRequestAttachmentRead(BaseModel):
@@ -117,6 +210,7 @@ class ReturnRequestRead(BaseModel):
     comment: str | None = None
     items: list[ReturnRequestItemRead]
     attachments: list[ReturnRequestAttachmentRead]
+    refund: ReturnRefundRead | None = None
     decided_at: datetime | None = None
     decided_by_user_id: int | None = None
     decision_comment: str | None = None
@@ -129,6 +223,24 @@ class ReturnRequestRead(BaseModel):
     message: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    @computed_field
+    @property
+    def total_return_amount(self) -> Decimal:
+        return sum(
+            (item.unit_price * item.quantity for item in self.items),
+            Decimal("0.00"),
+        )
+
+    @computed_field
+    @property
+    def can_process(self) -> bool:
+        return self.status == ReturnRequestStatus.APPROVED
+
+    @computed_field
+    @property
+    def can_complete(self) -> bool:
+        return self.status == ReturnRequestStatus.APPROVED
 
 
 class ReturnRequestList(BaseModel):
