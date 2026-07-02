@@ -11,7 +11,7 @@ from typing import Protocol
 from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 
-from app.core.config import join_public_url, settings
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     Order,
@@ -31,6 +31,11 @@ from app.modules.returns.schemas import (
     ReturnRequestCreate,
     ReturnRequestList,
     ReturnRequestRead,
+)
+from app.modules.returns.telegram_notifications import (
+    build_return_attachment_caption,
+    build_return_request_action_reply_markup,
+    build_return_request_notification_message,
 )
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.uploads.storage import LocalStorageService
@@ -64,11 +69,13 @@ class TelegramReturnSellerNotifier:
         *,
         telegram_service: TelegramService | None = None,
         chat_id: str | None = None,
+        storage: LocalStorageService | None = None,
     ) -> None:
         self.chat_id = chat_id or settings.telegram_returns_notification_chat_id
         self.telegram_service = telegram_service or TelegramService(
             seller_chat_id=self.chat_id or ""
         )
+        self.storage = storage or LocalStorageService()
 
     async def notify_return_request_created(self, return_request: ReturnRequest) -> None:
         bot_token = getattr(self.telegram_service, "bot_token", settings.telegram_bot_token)
@@ -76,10 +83,128 @@ class TelegramReturnSellerNotifier:
         if not bot_token or not chat_id:
             return
 
-        await self.telegram_service.send_message(
+        message_id = await self._send_text_notification(chat_id, return_request)
+        await self._send_media_attachments(
             chat_id,
-            _return_request_created_message(return_request),
+            return_request,
+            reply_to_message_id=message_id,
         )
+
+    async def _send_text_notification(
+        self,
+        chat_id: str,
+        return_request: ReturnRequest,
+    ) -> int | None:
+        try:
+            return await self.telegram_service.send_message(
+                chat_id,
+                build_return_request_notification_message(return_request),
+                reply_markup=build_return_request_action_reply_markup(return_request.id),
+            )
+        except TelegramDeliveryError:
+            logger.warning(
+                "returns.seller_notification_text_delivery_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": return_request.id,
+                    "order_id": return_request.order_id,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "returns.seller_notification_text_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": return_request.id,
+                    "order_id": return_request.order_id,
+                },
+            )
+        return None
+
+    async def _send_media_attachments(
+        self,
+        chat_id: str,
+        return_request: ReturnRequest,
+        *,
+        reply_to_message_id: int | None,
+    ) -> None:
+        caption = build_return_attachment_caption(return_request)
+        attachments = sorted(
+            return_request.attachments,
+            key=lambda attachment: attachment.position,
+        )
+        for attachment in attachments:
+            allowed = RETURN_ATTACHMENT_TYPES.get(attachment.mime_type)
+            if allowed is None:
+                logger.warning(
+                    "returns.seller_notification_attachment_unsupported",
+                    extra={
+                        "return_request_id": return_request.id,
+                        "attachment_id": attachment.id,
+                        "media_type": attachment.media_type,
+                        "mime_type": attachment.mime_type,
+                    },
+                )
+                continue
+
+            try:
+                content = self.storage.read_bytes(attachment.file_path)
+            except OSError:
+                logger.warning(
+                    "returns.seller_notification_attachment_read_failed",
+                    exc_info=True,
+                    extra={
+                        "return_request_id": return_request.id,
+                        "attachment_id": attachment.id,
+                        "media_type": attachment.media_type,
+                        "mime_type": attachment.mime_type,
+                        "has_file_path": bool(attachment.file_path),
+                    },
+                )
+                continue
+
+            filename = _telegram_attachment_filename(attachment)
+            try:
+                if attachment.media_type == "image":
+                    await self.telegram_service.send_photo_bytes(
+                        chat_id,
+                        content,
+                        filename=filename,
+                        mime_type=attachment.mime_type,
+                        caption=caption,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                else:
+                    await self.telegram_service.send_video_bytes(
+                        chat_id,
+                        content,
+                        filename=filename,
+                        mime_type=attachment.mime_type,
+                        caption=caption,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+            except TelegramDeliveryError:
+                logger.warning(
+                    "returns.seller_notification_attachment_delivery_failed",
+                    exc_info=True,
+                    extra={
+                        "return_request_id": return_request.id,
+                        "attachment_id": attachment.id,
+                        "media_type": attachment.media_type,
+                        "mime_type": attachment.mime_type,
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "returns.seller_notification_attachment_failed",
+                    exc_info=True,
+                    extra={
+                        "return_request_id": return_request.id,
+                        "attachment_id": attachment.id,
+                        "media_type": attachment.media_type,
+                        "mime_type": attachment.mime_type,
+                    },
+                )
 
 
 class ReturnsService:
@@ -516,67 +641,14 @@ def _product_image_url(product: Product | None) -> str | None:
         return None
 
 
-def _return_request_created_message(return_request: ReturnRequest) -> str:
-    order = getattr(return_request, "order", None)
-    user = getattr(return_request, "user", None)
-    order_number = getattr(order, "order_number", None) or f"#{return_request.order_id}"
-    customer_name = (
-        getattr(order, "contact_name", None)
-        or _user_display_name(user)
-        or f"User #{return_request.user_id}"
-    )
-    customer_phone = getattr(order, "contact_phone", None) or getattr(user, "phone", None)
-    contact = f"{customer_name}, {customer_phone}" if customer_phone else customer_name
-    item_lines = [
-        _return_item_notification_line(item)
-        for item in sorted(return_request.items, key=lambda item: item.id or 0)
-    ]
-    seller_panel_url = join_public_url(
-        settings.public_seller_panel_base_url,
-        f"returns/{return_request.id}",
-    )
-
-    lines = [
-        "Новая заявка на возврат",
-        f"Заявка: {return_request.return_number}",
-        f"Заказ: {order_number}",
-        f"Клиент: {contact}",
-        f"Причина: {return_request.reason}",
-        "Позиции:",
-        *item_lines,
-        f"Вложений: {len(return_request.attachments)}",
-        f"Панель продавца: {seller_panel_url}",
-    ]
-    return "\n".join(lines)
-
-
-def _return_item_notification_line(item: ReturnRequestItem) -> str:
-    details = [
-        part
-        for part in (
-            item.product_brand,
-            item.sku,
-            item.size,
-            item.color,
-        )
-        if part
-    ]
-    suffix = f" ({', '.join(details)})" if details else ""
-    return f"- {item.product_name}{suffix} x{item.quantity}"
-
-
-def _user_display_name(user) -> str | None:
-    if user is None:
-        return None
-    parts = [
-        getattr(user, "first_name", None),
-        getattr(user, "last_name", None),
-    ]
-    name = " ".join(part for part in parts if part)
-    if name:
-        return name
-    username = getattr(user, "username", None)
-    return f"@{username}" if username else None
+def _telegram_attachment_filename(attachment: ReturnRequestAttachment) -> str:
+    original_filename = _safe_original_filename(attachment.original_filename)
+    if Path(original_filename).suffix:
+        return original_filename
+    stored_suffix = Path(attachment.file_path).suffix
+    if stored_suffix:
+        return f"{original_filename}{stored_suffix}"
+    return f"return-attachment-{attachment.id or 'file'}"
 
 
 def _safe_original_filename(filename: str | None) -> str:

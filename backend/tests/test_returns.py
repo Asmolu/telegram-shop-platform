@@ -40,6 +40,7 @@ from app.modules.returns.service import (
     ReturnsService,
     TelegramReturnSellerNotifier,
 )
+from app.modules.telegram.service import TelegramDeliveryError
 
 NOW = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
@@ -79,6 +80,14 @@ class FakeStorage:
         self.deleted.append(relative_path)
         self.saved.pop(relative_path, None)
 
+    def read_bytes(self, relative_path: str) -> bytes:
+        if ".." in relative_path.replace("\\", "/").split("/"):
+            raise FileNotFoundError(relative_path)
+        try:
+            return self.saved[relative_path]
+        except KeyError as exc:
+            raise FileNotFoundError(relative_path) from exc
+
 
 class FakeReturnNotifier:
     def __init__(self, *, fail: bool = False) -> None:
@@ -99,12 +108,64 @@ class FakeTelegramService:
     bot_token = "token"
     seller_chat_id = "seller-chat"
 
-    def __init__(self) -> None:
-        self.sent_messages: list[tuple[str, str]] = []
+    def __init__(
+        self,
+        *,
+        fail_message: bool = False,
+        fail_photo: bool = False,
+        fail_video: bool = False,
+    ) -> None:
+        self.fail_message = fail_message
+        self.fail_photo = fail_photo
+        self.fail_video = fail_video
+        self.sent_messages: list[tuple[str, str, dict[str, object] | None]] = []
+        self.photos: list[tuple[str, bytes, str, str, str | None, int | None]] = []
+        self.videos: list[tuple[str, bytes, str, str, str | None, int | None]] = []
 
-    async def send_message(self, chat_id: str, message: str, **_kwargs) -> int:
-        self.sent_messages.append((chat_id, message))
-        return 1
+    async def send_message(
+        self,
+        chat_id: str,
+        message: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+        **_kwargs,
+    ) -> int:
+        if self.fail_message:
+            raise TelegramDeliveryError("sendMessage failed")
+        self.sent_messages.append((chat_id, message, reply_markup))
+        return 101
+
+    async def send_photo_bytes(
+        self,
+        chat_id: str,
+        photo: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+        reply_to_message_id: int | None = None,
+        **_kwargs,
+    ) -> int:
+        if self.fail_photo:
+            raise TelegramDeliveryError("sendPhoto failed")
+        self.photos.append((chat_id, photo, filename, mime_type, caption, reply_to_message_id))
+        return 201
+
+    async def send_video_bytes(
+        self,
+        chat_id: str,
+        video: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+        reply_to_message_id: int | None = None,
+        **_kwargs,
+    ) -> int:
+        if self.fail_video:
+            raise TelegramDeliveryError("sendVideo failed")
+        self.videos.append((chat_id, video, filename, mime_type, caption, reply_to_message_id))
+        return 301
 
 
 class FakeReturnsRepository:
@@ -406,6 +467,237 @@ async def test_return_notification_does_not_fall_back_to_orders_chat(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_return_notification_without_attachments_sends_text_with_inline_buttons(
+    monkeypatch,
+) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram)
+
+    await notifier.notify_return_request_created(return_request)
+
+    assert len(telegram.sent_messages) == 1
+    assert telegram.photos == []
+    assert telegram.videos == []
+    _chat_id, message, reply_markup = telegram.sent_messages[0]
+    assert "Новая заявка на возврат" in message
+    assert "Статус: Ожидает решения" in message
+    assert reply_markup == {
+        "inline_keyboard": [
+            [
+                {"text": "Подтвердить", "callback_data": "return:approve:7"},
+                {"text": "Отклонить", "callback_data": "return:reject:7"},
+            ]
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_return_notification_sends_image_attachment_upload(monkeypatch) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.append(
+        _return_attachment(
+            file_path="returns/proof.jpg",
+            original_filename="proof.jpg",
+            mime_type="image/jpeg",
+            media_type="image",
+        )
+    )
+    storage = FakeStorage()
+    storage.saved["returns/proof.jpg"] = b"image-bytes"
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram, storage=storage)
+
+    await notifier.notify_return_request_created(return_request)
+
+    assert telegram.photos == [
+        (
+            "returns-chat",
+            b"image-bytes",
+            "proof.jpg",
+            "image/jpeg",
+            "Вложение к возврату #RET-00000001",
+            101,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_return_notification_sends_video_attachment_upload(monkeypatch) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.append(
+        _return_attachment(
+            file_path="returns/proof.mp4",
+            original_filename="proof.mp4",
+            mime_type="video/mp4",
+            media_type="video",
+        )
+    )
+    storage = FakeStorage()
+    storage.saved["returns/proof.mp4"] = b"video-bytes"
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram, storage=storage)
+
+    await notifier.notify_return_request_created(return_request)
+
+    assert telegram.videos == [
+        (
+            "returns-chat",
+            b"video-bytes",
+            "proof.mp4",
+            "video/mp4",
+            "Вложение к возврату #RET-00000001",
+            101,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_missing_return_media_file_is_logged_and_does_not_fail(
+    monkeypatch,
+    caplog,
+) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.append(
+        _return_attachment(
+            file_path="returns/missing.jpg",
+            original_filename="missing.jpg",
+            mime_type="image/jpeg",
+            media_type="image",
+        )
+    )
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(
+        telegram_service=telegram,
+        storage=FakeStorage(),
+    )
+
+    with caplog.at_level("WARNING"):
+        await notifier.notify_return_request_created(return_request)
+
+    assert len(telegram.sent_messages) == 1
+    assert telegram.photos == []
+    assert "returns.seller_notification_attachment_read_failed" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_return_media_send_failure_is_logged_and_remaining_media_continues(
+    monkeypatch,
+    caplog,
+) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.extend(
+        [
+            _return_attachment(
+                file_path="returns/proof.jpg",
+                original_filename="proof.jpg",
+                mime_type="image/jpeg",
+                media_type="image",
+                position=0,
+            ),
+            _return_attachment(
+                attachment_id=2,
+                file_path="returns/proof.mp4",
+                original_filename="proof.mp4",
+                mime_type="video/mp4",
+                media_type="video",
+                position=1,
+            ),
+        ]
+    )
+    storage = FakeStorage()
+    storage.saved["returns/proof.jpg"] = b"image-bytes"
+    storage.saved["returns/proof.mp4"] = b"video-bytes"
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService(fail_photo=True)
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram, storage=storage)
+
+    with caplog.at_level("WARNING"):
+        await notifier.notify_return_request_created(return_request)
+
+    assert telegram.videos == [
+        (
+            "returns-chat",
+            b"video-bytes",
+            "proof.mp4",
+            "video/mp4",
+            "Вложение к возврату #RET-00000001",
+            101,
+        )
+    ]
+    assert "returns.seller_notification_attachment_delivery_failed" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_return_text_send_failure_does_not_fail_media_upload(monkeypatch) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.append(
+        _return_attachment(
+            file_path="returns/proof.jpg",
+            original_filename="proof.jpg",
+            mime_type="image/jpeg",
+            media_type="image",
+        )
+    )
+    storage = FakeStorage()
+    storage.saved["returns/proof.jpg"] = b"image-bytes"
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService(fail_message=True)
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram, storage=storage)
+
+    await notifier.notify_return_request_created(return_request)
+
+    assert telegram.sent_messages == []
+    assert telegram.photos == [
+        (
+            "returns-chat",
+            b"image-bytes",
+            "proof.jpg",
+            "image/jpeg",
+            "Вложение к возврату #RET-00000001",
+            None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_return_notification_text_does_not_expose_raw_attachment_path(
+    monkeypatch,
+) -> None:
+    return_request = _return_request(order_id=1, user_id=1)
+    return_request.id = 7
+    return_request.attachments.append(
+        _return_attachment(
+            file_path="returns/proof.jpg",
+            original_filename="proof.jpg",
+            mime_type="image/jpeg",
+            media_type="image",
+        )
+    )
+    storage = FakeStorage()
+    storage.saved["returns/proof.jpg"] = b"image-bytes"
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "returns-chat")
+    telegram = FakeTelegramService()
+    notifier = TelegramReturnSellerNotifier(telegram_service=telegram, storage=storage)
+
+    await notifier.notify_return_request_created(return_request)
+
+    message = telegram.sent_messages[0][1]
+    assert "returns/proof.jpg" not in message
+    assert "proof.jpg" not in message
+
+
+@pytest.mark.asyncio
 async def test_customer_creates_return_request_with_multiple_items() -> None:
     service, repository, _session, _storage = _returns_service()
     repository.orders[1] = _order(
@@ -683,6 +975,55 @@ async def test_cannot_decide_already_decided_return_request() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_seller_panel_list_sees_return_decision_status() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1))
+
+    await service.approve(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnDecisionRequest(decision_comment="Approved"),
+    )
+    listed = await service.list_admin_return_requests(limit=20, offset=0)
+
+    assert listed.items[0].status == ReturnRequestStatus.APPROVED
+    assert listed.items[0].decided_by_user_id == 10
+
+
+def test_admin_approve_reject_routes_still_use_shared_return_service() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1))
+    repository.add(_return_request(order_id=2, user_id=1))
+
+    async def current_user() -> User:
+        return _user(role=UserRole.SELLER, user_id=10)
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        client = TestClient(app)
+        approve_response = client.post(
+            "/api/v1/returns/admin/1/approve",
+            json={"decision_comment": "Approved through route"},
+        )
+        reject_response = client.post(
+            "/api/v1/returns/admin/2/reject",
+            json={"decision_comment": "Rejected through route"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "APPROVED"
+    assert approve_response.json()["decided_by_user_id"] == 10
+    assert approve_response.json()["decision_comment"] == "Approved through route"
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "REJECTED"
+    assert reject_response.json()["decision_comment"] == "Rejected through route"
+
+
 def test_regular_user_cannot_access_admin_return_endpoints() -> None:
     app = create_app()
 
@@ -759,6 +1100,28 @@ def _return_request(
         decided_at=None,
         decided_by_user_id=None,
         decision_comment=None,
+    )
+
+
+def _return_attachment(
+    *,
+    file_path: str,
+    original_filename: str,
+    mime_type: str,
+    media_type: str,
+    attachment_id: int = 1,
+    position: int = 0,
+) -> ReturnRequestAttachment:
+    return ReturnRequestAttachment(
+        id=attachment_id,
+        return_request_id=1,
+        file_path=file_path,
+        original_filename=original_filename,
+        mime_type=mime_type,
+        size_bytes=12,
+        media_type=media_type,
+        position=position,
+        created_at=NOW,
     )
 
 
@@ -887,9 +1250,9 @@ def _upload_file(filename: str, content: bytes, content_type: str) -> UploadFile
     )
 
 
-def _user(*, role: UserRole) -> User:
+def _user(*, role: UserRole, user_id: int = 1) -> User:
     return User(
-        id=1,
+        id=user_id,
         telegram_id=1001,
         username="user",
         first_name="User",

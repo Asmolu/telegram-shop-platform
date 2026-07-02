@@ -490,6 +490,10 @@ class SellerBotService:
             ]
         }
 
+    async def actor_user_id_for_telegram(self, telegram_user_id: int) -> int | None:
+        actor = await self.repository.get_active_actor_user(telegram_user_id)
+        return actor.id if actor is not None else None
+
     async def mark_order_shipped_command(
         self,
         *,

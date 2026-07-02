@@ -10,6 +10,12 @@ import httpx
 from app.common.labels import payment_status_label
 from app.core.config import settings
 from app.core.errors import AppError
+from app.modules.returns.schemas import ReturnDecisionRequest
+from app.modules.returns.telegram_notifications import (
+    RETURN_APPROVE_COMMENT,
+    RETURN_REJECT_COMMENT,
+    build_return_request_notification_message,
+)
 from app.modules.seller_auth.callbacks import parse_seller_registration_callback_data
 from app.modules.seller_auth.schemas import SellerTelegramStartRequest
 from app.modules.telegram.schemas import SellerBotWebhookResponse, TelegramUpdate
@@ -28,6 +34,9 @@ MANUAL_PAYMENT_CALLBACK_RE = re.compile(
 )
 SELLER_ORDER_CALLBACK_RE = re.compile(
     r"^seller_order:(?P<action>ship|cancel):(?P<order_id>[1-9][0-9]*)$"
+)
+RETURN_REQUEST_CALLBACK_RE = re.compile(
+    r"^return:(?P<action>approve|reject):(?P<return_request_id>[1-9][0-9]*)$"
 )
 POSTGRES_INT32_MAX = 2_147_483_647
 TELEGRAM_ID_HINT_MAX = 20_000_000_000
@@ -178,16 +187,50 @@ class TelegramService:
         mime_type: str,
         caption: str | None = None,
         reply_markup: dict[str, object] | None = None,
+        reply_to_message_id: int | None = None,
     ) -> int | None:
         data: dict[str, str] = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
         if reply_markup is not None:
             data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        if reply_to_message_id is not None:
+            data["reply_to_message_id"] = str(reply_to_message_id)
         body = await self._post_multipart(
             "sendPhoto",
             data=data,
             files={"photo": (filename, photo, mime_type)},
+        )
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, dict):
+            return None
+        message_id = result.get("message_id")
+        return int(message_id) if isinstance(message_id, int) else None
+
+    async def send_video_bytes(
+        self,
+        chat_id: str,
+        video: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        caption: str | None = None,
+        reply_markup: dict[str, object] | None = None,
+        reply_to_message_id: int | None = None,
+    ) -> int | None:
+        data: dict[str, str] = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        if reply_to_message_id is not None:
+            data["reply_to_message_id"] = str(reply_to_message_id)
+        body = await self._post_multipart(
+            "sendVideo",
+            data=data,
+            files={"video": (filename, video, mime_type)},
         )
         if not body.get("ok", False):
             raise self._delivery_error_from_body(body)
@@ -537,11 +580,13 @@ class SellerBotWebhookService:
         seller_auth_service,
         seller_bot_service=None,
         manual_payments_service=None,
+        returns_service=None,
         telegram_service: TelegramService | None = None,
     ) -> None:
         self.seller_auth_service = seller_auth_service
         self.seller_bot_service = seller_bot_service
         self.manual_payments_service = manual_payments_service
+        self.returns_service = returns_service
         self.telegram_service = telegram_service or seller_auth_service.telegram_service
 
     async def handle_update(self, update: TelegramUpdate) -> SellerBotWebhookResponse:
@@ -615,6 +660,15 @@ class SellerBotWebhookService:
             return self._response(handled=False, result="unsupported_callback")
         if callback_query.message is None:
             return self._response(handled=False, result="callback_without_message")
+
+        return_callback = RETURN_REQUEST_CALLBACK_RE.fullmatch(callback_query.data)
+        if return_callback is not None:
+            return await self._handle_return_request_callback(
+                callback_query=callback_query,
+                action=return_callback.group("action"),
+                return_request_id=int(return_callback.group("return_request_id")),
+            )
+
         if not self._is_seller_group_chat(callback_query.message.chat.id):
             await self._send_chat_message(
                 callback_query.message.chat.id,
@@ -799,6 +853,148 @@ class SellerBotWebhookService:
             for response_text in response_parts[1:]:
                 await self._send_chat_message(callback_query.message.chat.id, response_text)
         return self._response(handled=True, result="order_shipped")
+
+    async def _handle_return_request_callback(
+        self,
+        *,
+        callback_query,
+        action: str,
+        return_request_id: int,
+    ) -> SellerBotWebhookResponse:
+        if not self._is_returns_group_chat(callback_query.message.chat.id):
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Недостаточно прав",
+            )
+            return self._response(
+                handled=True,
+                result="return_request_callback_rejected_outside_returns_chat",
+            )
+
+        if self.returns_service is None:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Возвраты не настроены",
+            )
+            return self._response(handled=True, result="return_requests_unconfigured")
+
+        actor_user_id = await self._actor_user_id_for_return_callback(
+            callback_query.from_user.id
+        )
+        if actor_user_id is None:
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text="Недостаточно прав",
+            )
+            return self._response(handled=True, result="return_request_callback_unauthorized")
+
+        decision_comment = (
+            RETURN_APPROVE_COMMENT if action == "approve" else RETURN_REJECT_COMMENT
+        )
+        try:
+            if action == "approve":
+                return_request = await self.returns_service.approve(
+                    return_request_id=return_request_id,
+                    actor_user_id=actor_user_id,
+                    payload=ReturnDecisionRequest(decision_comment=decision_comment),
+                )
+            else:
+                return_request = await self.returns_service.reject(
+                    return_request_id=return_request_id,
+                    actor_user_id=actor_user_id,
+                    payload=ReturnDecisionRequest(decision_comment=decision_comment),
+                )
+        except AppError as exc:
+            if exc.status_code == 404:
+                await self.telegram_service.answer_callback_query(
+                    callback_query.id,
+                    text="Заявка не найдена",
+                )
+                return self._response(handled=True, result="return_request_not_found")
+            if exc.status_code == 409:
+                await self.telegram_service.answer_callback_query(
+                    callback_query.id,
+                    text="Заявка уже обработана",
+                )
+                await self._refresh_return_callback_message(
+                    callback_query=callback_query,
+                    return_request_id=return_request_id,
+                )
+                return self._response(
+                    handled=True,
+                    result="return_request_already_decided",
+                )
+            await self.telegram_service.answer_callback_query(
+                callback_query.id,
+                text=exc.message[:180],
+            )
+            return self._response(handled=True, result="return_request_callback_error")
+
+        await self.telegram_service.answer_callback_query(
+            callback_query.id,
+            text="Возврат подтверждён" if action == "approve" else "Возврат отклонён",
+        )
+        await self._edit_return_callback_message(callback_query, return_request)
+        result = "return_request_approved" if action == "approve" else "return_request_rejected"
+        return self._response(handled=True, result=result)
+
+    async def _actor_user_id_for_return_callback(self, telegram_user_id: int) -> int | None:
+        resolver = getattr(self.seller_bot_service, "actor_user_id_for_telegram", None)
+        if resolver is not None:
+            return await resolver(telegram_user_id)
+        fallback_resolver = getattr(
+            self.manual_payments_service,
+            "actor_user_id_for_telegram",
+            None,
+        )
+        if fallback_resolver is not None:
+            return await fallback_resolver(telegram_user_id)
+        return None
+
+    async def _refresh_return_callback_message(
+        self,
+        *,
+        callback_query,
+        return_request_id: int,
+    ) -> None:
+        try:
+            return_request = await self.returns_service.get_admin_return_request(
+                return_request_id
+            )
+        except AppError:
+            return
+        await self._edit_return_callback_message(callback_query, return_request)
+
+    async def _edit_return_callback_message(self, callback_query, return_request) -> None:
+        if callback_query.message.message_id is None:
+            return
+        try:
+            await self.telegram_service.edit_message_text(
+                str(callback_query.message.chat.id),
+                callback_query.message.message_id,
+                build_return_request_notification_message(return_request),
+                reply_markup={"inline_keyboard": []},
+            )
+        except TelegramDeliveryError:
+            logger.warning(
+                "returns.seller_bot_callback_edit_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": getattr(return_request, "id", None),
+                    "chat_id": callback_query.message.chat.id,
+                    "message_id": callback_query.message.message_id,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "returns.seller_bot_callback_edit_failed",
+                exc_info=True,
+                extra={
+                    "return_request_id": getattr(return_request, "id", None),
+                    "chat_id": callback_query.message.chat.id,
+                    "message_id": callback_query.message.message_id,
+                },
+            )
 
     async def _finalize_payment_callback_message(self, callback_query, payment) -> None:
         status_value = payment.status.value
@@ -1117,6 +1313,10 @@ class SellerBotWebhookService:
     def _is_seller_group_chat(self, chat_id: int) -> bool:
         seller_chat_id = settings.telegram_orders_notification_chat_id
         return bool(seller_chat_id and str(chat_id) == seller_chat_id.strip())
+
+    def _is_returns_group_chat(self, chat_id: int) -> bool:
+        returns_chat_id = settings.telegram_returns_notification_chat_id
+        return bool(returns_chat_id and str(chat_id) == returns_chat_id.strip())
 
     def _parse_seller_id_arg(self, args: str, *, command: str) -> int:
         seller_id_text = args.strip()

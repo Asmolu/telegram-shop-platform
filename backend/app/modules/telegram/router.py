@@ -28,6 +28,8 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 def get_seller_bot_webhook_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> SellerBotWebhookService:
+    from app.modules.returns.service import ReturnsService
+
     seller_auth_service = SellerAuthService(session)
     seller_bot_service = SellerBotService(
         session,
@@ -40,6 +42,7 @@ def get_seller_bot_webhook_service(
             session,
             audit_service=AuditService(session),
         ),
+        returns_service=ReturnsService(session),
     )
 
 

@@ -13,7 +13,12 @@ from app.core.log_sanitization import (
     redact_sensitive_path,
     redact_sensitive_text,
 )
-from app.db.models import ManualPaymentStatus, PendingSellerRegistration, SellerRegistrationStatus
+from app.db.models import (
+    ManualPaymentStatus,
+    PendingSellerRegistration,
+    ReturnRequestStatus,
+    SellerRegistrationStatus,
+)
 from app.main import create_app
 from app.modules.seller_auth.callbacks import build_seller_registration_callback_data
 from app.modules.seller_auth.schemas import SellerRegistrationStartRequest
@@ -181,6 +186,109 @@ class FakeManualPaymentsService:
             order_number="ORD-17",
             status=self.terminal_status,
             reject_reason=None,
+        )
+
+
+class FakeReturnRequestsService:
+    def __init__(
+        self,
+        *,
+        initial_status: ReturnRequestStatus = ReturnRequestStatus.PENDING,
+    ) -> None:
+        self.actions: list[tuple[str, int, int, str | None]] = []
+        self.requests: dict[int, SimpleNamespace] = {
+            7: self._request(7, initial_status=initial_status)
+        }
+
+    async def approve(
+        self,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        payload,
+    ) -> SimpleNamespace:
+        return await self._decide(
+            "approve",
+            return_request_id=return_request_id,
+            actor_user_id=actor_user_id,
+            decision_comment=payload.decision_comment,
+            next_status=ReturnRequestStatus.APPROVED,
+        )
+
+    async def reject(
+        self,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        payload,
+    ) -> SimpleNamespace:
+        return await self._decide(
+            "reject",
+            return_request_id=return_request_id,
+            actor_user_id=actor_user_id,
+            decision_comment=payload.decision_comment,
+            next_status=ReturnRequestStatus.REJECTED,
+        )
+
+    async def get_admin_return_request(self, return_request_id: int) -> SimpleNamespace:
+        request = self.requests.get(return_request_id)
+        if request is None:
+            raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        return request
+
+    async def _decide(
+        self,
+        action: str,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        decision_comment: str | None,
+        next_status: ReturnRequestStatus,
+    ) -> SimpleNamespace:
+        request = self.requests.get(return_request_id)
+        if request is None:
+            raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        if request.status != ReturnRequestStatus.PENDING:
+            raise AppError("Return request is already decided", status.HTTP_409_CONFLICT)
+        self.actions.append((action, return_request_id, actor_user_id, decision_comment))
+        request.status = next_status
+        request.decided_by_user_id = actor_user_id
+        request.decision_comment = decision_comment
+        request.decided_at = _now()
+        return request
+
+    def _request(
+        self,
+        return_request_id: int,
+        *,
+        initial_status: ReturnRequestStatus,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=return_request_id,
+            return_number="RET-00000007",
+            order_id=17,
+            order_number="ORD-00000017",
+            user_id=3,
+            customer_name="Ada",
+            customer_phone="+79999999999",
+            status=initial_status,
+            reason="Не подошёл размер",
+            comment="Комментарий клиента",
+            items=[
+                SimpleNamespace(
+                    id=1,
+                    product_name="Hoodie",
+                    product_brand="ICON",
+                    sku="SKU-1",
+                    size="M",
+                    color="Black",
+                    quantity=1,
+                )
+            ],
+            attachments=[SimpleNamespace(id=1)],
+            decided_at=None,
+            decided_by_user_id=None,
+            decision_comment=None,
         )
 
 
@@ -683,6 +791,139 @@ async def test_order_cancel_callback_only_closes_interaction(
 
 
 @pytest.mark.asyncio
+async def test_return_approve_callback_updates_status_and_removes_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, seller_bot, returns, telegram = _return_action_webhook_service()
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-300))
+
+    assert response.result == "return_request_approved"
+    assert seller_bot.actor_lookup_ids == [500]
+    assert returns.actions == [("approve", 7, 42, "Одобрено через Telegram")]
+    assert returns.requests[7].status == ReturnRequestStatus.APPROVED
+    assert telegram.callback_answers == [("callback-id", "Возврат подтверждён")]
+    assert telegram.edits[0][0:2] == ("-300", 11)
+    assert "Статус: Одобрено" in telegram.edits[0][2]
+    assert "Решил: пользователь #42" in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+async def test_return_reject_callback_updates_status_and_removes_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service()
+
+    response = await service.handle_update(_callback_update("return:reject:7", chat_id=-300))
+
+    assert response.result == "return_request_rejected"
+    assert returns.actions == [("reject", 7, 42, "Отклонено через Telegram")]
+    assert returns.requests[7].status == ReturnRequestStatus.REJECTED
+    assert telegram.callback_answers == [("callback-id", "Возврат отклонён")]
+    assert "Статус: Отклонено" in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+async def test_return_callback_uses_seller_chat_fallback_when_returns_chat_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", None)
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service()
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-100))
+
+    assert response.result == "return_request_approved"
+    assert returns.requests[7].status == ReturnRequestStatus.APPROVED
+    assert telegram.callback_answers == [("callback-id", "Возврат подтверждён")]
+
+
+@pytest.mark.asyncio
+async def test_return_callbacks_are_rejected_from_orders_and_backup_chats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_orders_chat_id", "-200")
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    monkeypatch.setattr(settings, "telegram_backup_chat_id", "-400")
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service()
+
+    orders_response = await service.handle_update(
+        _callback_update("return:approve:7", chat_id=-200)
+    )
+    backup_response = await service.handle_update(
+        _callback_update("return:approve:7", chat_id=-400)
+    )
+
+    assert orders_response.result == "return_request_callback_rejected_outside_returns_chat"
+    assert backup_response.result == "return_request_callback_rejected_outside_returns_chat"
+    assert returns.actions == []
+    assert returns.requests[7].status == ReturnRequestStatus.PENDING
+    assert telegram.callback_answers == [
+        ("callback-id", "Недостаточно прав"),
+        ("callback-id", "Недостаточно прав"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_return_callback_requires_authorized_seller_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    service, seller_bot, returns, telegram = _return_action_webhook_service(actor_user_id=None)
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-300))
+
+    assert response.result == "return_request_callback_unauthorized"
+    assert seller_bot.actor_lookup_ids == [500]
+    assert returns.actions == []
+    assert returns.requests[7].status == ReturnRequestStatus.PENDING
+    assert telegram.callback_answers == [("callback-id", "Недостаточно прав")]
+
+
+@pytest.mark.asyncio
+async def test_return_callback_for_already_decided_request_refreshes_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service(
+        initial_status=ReturnRequestStatus.APPROVED
+    )
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-300))
+
+    assert response.result == "return_request_already_decided"
+    assert returns.actions == []
+    assert returns.requests[7].status == ReturnRequestStatus.APPROVED
+    assert telegram.callback_answers == [("callback-id", "Заявка уже обработана")]
+    assert "Статус: Одобрено" in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+async def test_return_callback_for_missing_request_answers_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service()
+    returns.requests.clear()
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-300))
+
+    assert response.result == "return_request_not_found"
+    assert telegram.callback_answers == [("callback-id", "Заявка не найдена")]
+    assert telegram.edits == []
+
+
+@pytest.mark.asyncio
 async def test_new_product_help_command_is_routed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -972,6 +1213,8 @@ class FakeSellerBotCommandService:
         self.chetam_actor_ids: list[int | None] = []
         self.order_detail_requests: list[tuple[int, int | None]] = []
         self.shipped_order_ids: list[tuple[int, int | None]] = []
+        self.actor_lookup_ids: list[int] = []
+        self.actor_user_id: int | None = 42
         self.product_messages: list[str] = []
         self.product_exception: Exception | None = None
 
@@ -1013,6 +1256,10 @@ class FakeSellerBotCommandService:
                 ]
             ]
         }
+
+    async def actor_user_id_for_telegram(self, telegram_user_id: int) -> int | None:
+        self.actor_lookup_ids.append(telegram_user_id)
+        return self.actor_user_id
 
     async def mark_order_shipped_command(
         self,
@@ -1115,6 +1362,37 @@ def _seller_command_webhook_service() -> tuple[
             telegram_service=telegram,
         ),
         seller_bot,
+        telegram,
+    )
+
+
+def _return_action_webhook_service(
+    *,
+    initial_status: ReturnRequestStatus = ReturnRequestStatus.PENDING,
+    actor_user_id: int | None = 42,
+) -> tuple[
+    SellerBotWebhookService,
+    FakeSellerBotCommandService,
+    FakeReturnRequestsService,
+    FakeTelegramService,
+]:
+    telegram = FakeTelegramService()
+
+    class FakeSellerAuthService:
+        telegram_service = telegram
+
+    seller_bot = FakeSellerBotCommandService()
+    seller_bot.actor_user_id = actor_user_id
+    returns = FakeReturnRequestsService(initial_status=initial_status)
+    return (
+        SellerBotWebhookService(
+            seller_auth_service=FakeSellerAuthService(),
+            seller_bot_service=seller_bot,
+            returns_service=returns,
+            telegram_service=telegram,
+        ),
+        seller_bot,
+        returns,
         telegram,
     )
 
