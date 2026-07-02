@@ -23,8 +23,15 @@ test('seller API exposes returns list detail and decisions', () => {
   assert.match(apiSource, /\/returns\/admin/);
   assert.match(apiSource, /\/returns\/admin\/\$\{returnRequestId\}\/approve/);
   assert.match(apiSource, /\/returns\/admin\/\$\{returnRequestId\}\/reject/);
+  assert.match(apiSource, /\/returns\/admin\/\$\{returnRequestId\}\/complete/);
+  assert.match(apiSource, /\/returns\/admin\/\$\{returnRequestId\}\/cancel/);
+  assert.match(apiSource, /'COMPLETED'/);
+  assert.match(apiSource, /'CANCELLED'/);
   assert.match(typesSource, /export interface ReturnRequest/);
   assert.match(typesSource, /export type ReturnRequestStatus/);
+  assert.match(typesSource, /completed_at: string \| null/);
+  assert.match(typesSource, /cancelled_at: string \| null/);
+  assert.match(typesSource, /cancellation_comment: string \| null/);
 });
 
 test('returns page renders list detail attachments and decision actions', () => {
@@ -32,8 +39,16 @@ test('returns page renders list detail attachments and decision actions', () => 
   assert.match(pageSource, /api\.returns\.get/);
   assert.match(pageSource, /api\.returns\.approve/);
   assert.match(pageSource, /api\.returns\.reject/);
+  assert.match(pageSource, /api\.returns\.complete/);
+  assert.match(pageSource, /api\.returns\.cancel/);
   assert.match(pageSource, /returns\.attachments/);
   assert.match(pageSource, /returns\.approve/);
   assert.match(pageSource, /returns\.reject/);
-  assert.match(pageSource, /StatusBadge status=\{returnRequest\.status\}/);
+  assert.match(pageSource, /returns\.complete/);
+  assert.match(pageSource, /returns\.cancel/);
+  assert.match(pageSource, /returnRequest\.status === 'APPROVED'/);
+  assert.match(pageSource, /returnRequest\.status === 'PENDING'/);
+  assert.match(pageSource, /completed_at/);
+  assert.match(pageSource, /cancelled_at/);
+  assert.match(pageSource, /status=\{returnRequest\.status\}/);
 });

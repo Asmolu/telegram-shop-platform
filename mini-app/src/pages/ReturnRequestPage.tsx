@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  cancelReturnRequest,
   createReturnRequest,
   getOrder,
   getReturnEligibility,
@@ -7,6 +8,7 @@ import {
   type Order,
   type ReturnEligibility,
   type ReturnEligibilityItem,
+  type ReturnRequest,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, useRouter } from '../shared/router/RouterProvider';
@@ -38,9 +40,14 @@ export function ReturnRequestPage() {
   const [files, setFiles] = React.useState<File[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
+  const [canceling, setCanceling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
+  const [createdReturnRequest, setCreatedReturnRequest] = React.useState<ReturnRequest | null>(
+    null,
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -100,6 +107,20 @@ export function ReturnRequestPage() {
         <section className="success-card return-success-card">
           <div className="success-icon">✓</div>
           <h1>{successMessage}</h1>
+          {createdReturnRequest ? (
+            <p>Статус: {formatReturnRequestStatus(createdReturnRequest.status)}</p>
+          ) : null}
+          {cancelError ? <p className="form-error">{cancelError}</p> : null}
+          {createdReturnRequest?.status === 'PENDING' ? (
+            <button
+              className="secondary-button"
+              disabled={canceling}
+              type="button"
+              onClick={cancelCreatedReturnRequest}
+            >
+              {canceling ? 'Отменяем...' : 'Отменить заявку'}
+            </button>
+          ) : null}
           <button className="primary-button" type="button" onClick={() => navigate(backPath)}>
             Вернуться к заказу
           </button>
@@ -275,6 +296,7 @@ export function ReturnRequestPage() {
         },
         files,
       );
+      setCreatedReturnRequest(result);
       setSuccessMessage(result.message ?? 'Заявка отправлена. Продавец свяжется с вами.');
     } catch (submitRequestError) {
       setSubmitError(toApiErrorMessage(submitRequestError));
@@ -282,6 +304,40 @@ export function ReturnRequestPage() {
       setSubmitting(false);
     }
   }
+
+  async function cancelCreatedReturnRequest() {
+    if (!createdReturnRequest || createdReturnRequest.status !== 'PENDING') {
+      return;
+    }
+    if (!window.confirm('Отменить заявку на возврат?')) {
+      return;
+    }
+
+    setCanceling(true);
+    setCancelError(null);
+    try {
+      const updated = await cancelReturnRequest(createdReturnRequest.id);
+      setCreatedReturnRequest(updated);
+      if (updated.status === 'CANCELLED') {
+        setSuccessMessage('Заявка отменена.');
+      }
+    } catch (cancelRequestError) {
+      setCancelError(toApiErrorMessage(cancelRequestError));
+    } finally {
+      setCanceling(false);
+    }
+  }
+}
+
+function formatReturnRequestStatus(status: ReturnRequest['status']) {
+  const labels: Record<ReturnRequest['status'], string> = {
+    PENDING: 'Ожидает',
+    APPROVED: 'Одобрено',
+    REJECTED: 'Отклонено',
+    COMPLETED: 'Завершено',
+    CANCELLED: 'Отменено',
+  };
+  return labels[status];
 }
 
 function ReturnItemCard({

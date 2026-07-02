@@ -475,6 +475,34 @@ def test_return_requests_migration_contract() -> None:
     assert ReturnRequestAttachment.__table__.c.media_type.nullable is False
 
 
+def test_return_lifecycle_statuses_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260702_0043_add_return_lifecycle_statuses.py"
+    )
+    content = migration_path.read_text(encoding="utf-8")
+    table = ReturnRequest.__table__
+
+    assert "ALTER TYPE return_request_status ADD VALUE IF NOT EXISTS 'COMPLETED'" in content
+    assert "ALTER TYPE return_request_status ADD VALUE IF NOT EXISTS 'CANCELLED'" in content
+    assert "completed_at" in content
+    assert "completed_by_user_id" in content
+    assert "completion_comment" in content
+    assert "cancelled_at" in content
+    assert "cancelled_by_user_id" in content
+    assert "cancellation_comment" in content
+    assert "PostgreSQL cannot drop enum values" in content
+    assert table.c.status.type.enums == [status.value for status in ReturnRequestStatus]
+    assert table.c.completed_at.nullable is True
+    assert table.c.completed_by_user_id.nullable is True
+    assert table.c.completion_comment.nullable is True
+    assert table.c.cancelled_at.nullable is True
+    assert table.c.cancelled_by_user_id.nullable is True
+    assert table.c.cancellation_comment.nullable is True
+
+
 def test_looks_migration_contract() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

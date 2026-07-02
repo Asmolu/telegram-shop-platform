@@ -11,6 +11,7 @@ from app.db.models import ReturnRequestStatus, User, UserRole
 from app.modules.returns.schemas import (
     ReturnDecisionRequest,
     ReturnEligibilityRead,
+    ReturnLifecycleCommentRequest,
     ReturnRequestCreate,
     ReturnRequestList,
     ReturnRequestRead,
@@ -18,6 +19,7 @@ from app.modules.returns.schemas import (
 from app.modules.returns.service import ReturnsService
 
 customer_router = APIRouter(prefix="/orders", tags=["returns"])
+return_customer_router = APIRouter(prefix="/returns", tags=["returns"])
 admin_router = APIRouter(prefix="/returns/admin", tags=["returns"])
 
 
@@ -53,6 +55,20 @@ async def create_return_request(
         user_id=current_user.id,
         payload=payload,
         files=files,
+    )
+
+
+@return_customer_router.post("/{return_request_id}/cancel", response_model=ReturnRequestRead)
+async def cancel_customer_return_request(
+    return_request_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[ReturnsService, Depends(get_returns_service)],
+    payload: ReturnLifecycleCommentRequest | None = None,
+) -> ReturnRequestRead:
+    return await service.cancel_customer(
+        return_request_id=return_request_id,
+        user_id=current_user.id,
+        payload=payload or ReturnLifecycleCommentRequest(),
     )
 
 
@@ -113,6 +129,34 @@ async def reject_return_request(
         return_request_id=return_request_id,
         actor_user_id=current_user.id,
         payload=payload,
+    )
+
+
+@admin_router.post("/{return_request_id}/complete", response_model=ReturnRequestRead)
+async def complete_return_request(
+    return_request_id: int,
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[ReturnsService, Depends(get_returns_service)],
+    payload: ReturnLifecycleCommentRequest | None = None,
+) -> ReturnRequestRead:
+    return await service.complete(
+        return_request_id=return_request_id,
+        actor_user_id=current_user.id,
+        payload=payload or ReturnLifecycleCommentRequest(),
+    )
+
+
+@admin_router.post("/{return_request_id}/cancel", response_model=ReturnRequestRead)
+async def cancel_admin_return_request(
+    return_request_id: int,
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[ReturnsService, Depends(get_returns_service)],
+    payload: ReturnLifecycleCommentRequest | None = None,
+) -> ReturnRequestRead:
+    return await service.cancel_admin(
+        return_request_id=return_request_id,
+        actor_user_id=current_user.id,
+        payload=payload or ReturnLifecycleCommentRequest(),
     )
 
 

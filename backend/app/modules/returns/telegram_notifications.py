@@ -114,6 +114,10 @@ def return_request_status_label(status: object) -> str:
         return "Одобрено"
     if status_value == ReturnRequestStatus.REJECTED.value:
         return "Отклонено"
+    if status_value == ReturnRequestStatus.COMPLETED.value:
+        return "Завершено"
+    if status_value == ReturnRequestStatus.CANCELLED.value:
+        return "Отменено"
     return "Ожидает решения"
 
 

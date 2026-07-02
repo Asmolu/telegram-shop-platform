@@ -19,6 +19,7 @@ type StatusValue =
 const toneByStatus: Record<string, string> = {
   ACTIVE: 'success',
   APPROVED: 'success',
+  COMPLETED: 'success',
   DELIVERED: 'success',
   PROCESSING: 'info',
   SHIPPED: 'info',

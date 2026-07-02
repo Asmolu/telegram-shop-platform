@@ -32,6 +32,7 @@ from app.main import create_app
 from app.modules.returns.router import get_returns_service
 from app.modules.returns.schemas import (
     ReturnDecisionRequest,
+    ReturnLifecycleCommentRequest,
     ReturnRequestCreate,
     ReturnRequestItemCreate,
 )
@@ -928,6 +929,11 @@ async def test_seller_admin_can_list_and_read_return_requests() -> None:
     assert detail.order_id == 1
 
 
+def test_return_request_status_enum_includes_lifecycle_statuses() -> None:
+    assert ReturnRequestStatus.COMPLETED.value == "COMPLETED"
+    assert ReturnRequestStatus.CANCELLED.value == "CANCELLED"
+
+
 @pytest.mark.asyncio
 async def test_seller_admin_can_approve_pending_return_request() -> None:
     service, repository, _session, _storage = _returns_service()
@@ -972,6 +978,180 @@ async def test_cannot_decide_already_decided_return_request() -> None:
             return_request_id=1,
             actor_user_id=10,
             payload=ReturnDecisionRequest(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        ReturnRequestStatus.APPROVED,
+        ReturnRequestStatus.REJECTED,
+        ReturnRequestStatus.COMPLETED,
+        ReturnRequestStatus.CANCELLED,
+    ],
+)
+async def test_approve_reject_still_only_work_from_pending(
+    terminal_status: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=terminal_status))
+
+    with pytest.raises(AppError, match="already decided"):
+        await service.approve(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnDecisionRequest(),
+        )
+    with pytest.raises(AppError, match="already decided"):
+        await service.reject(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnDecisionRequest(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_can_cancel_own_pending_return_request() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1))
+
+    cancelled = await service.cancel_customer(
+        return_request_id=1,
+        user_id=1,
+        payload=ReturnLifecycleCommentRequest(comment="Changed mind"),
+    )
+
+    assert cancelled.status == ReturnRequestStatus.CANCELLED
+    assert cancelled.cancelled_at == NOW
+    assert cancelled.cancelled_by_user_id == 1
+    assert cancelled.cancellation_comment == "Changed mind"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_value",
+    [
+        ReturnRequestStatus.APPROVED,
+        ReturnRequestStatus.REJECTED,
+        ReturnRequestStatus.COMPLETED,
+        ReturnRequestStatus.CANCELLED,
+    ],
+)
+async def test_customer_cannot_cancel_non_pending_return_request(
+    status_value: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=status_value))
+
+    with pytest.raises(AppError, match="pending"):
+        await service.cancel_customer(
+            return_request_id=1,
+            user_id=1,
+            payload=ReturnLifecycleCommentRequest(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_cannot_cancel_another_users_return_request() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=2))
+
+    with pytest.raises(AppError, match="not found"):
+        await service.cancel_customer(
+            return_request_id=1,
+            user_id=1,
+            payload=ReturnLifecycleCommentRequest(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_seller_admin_can_complete_approved_return_request() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+
+    completed = await service.complete(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnLifecycleCommentRequest(comment="Done manually"),
+    )
+
+    assert completed.status == ReturnRequestStatus.COMPLETED
+    assert completed.completed_at == NOW
+    assert completed.completed_by_user_id == 10
+    assert completed.completion_comment == "Done manually"
+    assert completed.cancelled_at is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_value",
+    [
+        ReturnRequestStatus.PENDING,
+        ReturnRequestStatus.REJECTED,
+        ReturnRequestStatus.COMPLETED,
+        ReturnRequestStatus.CANCELLED,
+    ],
+)
+async def test_seller_admin_cannot_complete_non_approved_return_request(
+    status_value: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=status_value))
+
+    with pytest.raises(AppError, match="after approval"):
+        await service.complete(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnLifecycleCommentRequest(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_value",
+    [ReturnRequestStatus.PENDING, ReturnRequestStatus.APPROVED],
+)
+async def test_seller_admin_can_cancel_pending_or_approved_return_request(
+    status_value: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=status_value))
+
+    cancelled = await service.cancel_admin(
+        return_request_id=1,
+        actor_user_id=10,
+        payload=ReturnLifecycleCommentRequest(comment="Operational cancel"),
+    )
+
+    assert cancelled.status == ReturnRequestStatus.CANCELLED
+    assert cancelled.cancelled_at == NOW
+    assert cancelled.cancelled_by_user_id == 10
+    assert cancelled.cancellation_comment == "Operational cancel"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_value",
+    [
+        ReturnRequestStatus.REJECTED,
+        ReturnRequestStatus.COMPLETED,
+        ReturnRequestStatus.CANCELLED,
+    ],
+)
+async def test_seller_admin_cannot_cancel_final_return_request(
+    status_value: ReturnRequestStatus,
+) -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1, status_value=status_value))
+
+    with pytest.raises(AppError, match="pending or approved"):
+        await service.cancel_admin(
+            return_request_id=1,
+            actor_user_id=10,
+            payload=ReturnLifecycleCommentRequest(),
         )
 
 
@@ -1022,6 +1202,66 @@ def test_admin_approve_reject_routes_still_use_shared_return_service() -> None:
     assert reject_response.status_code == 200
     assert reject_response.json()["status"] == "REJECTED"
     assert reject_response.json()["decision_comment"] == "Rejected through route"
+
+
+def test_customer_cancel_route_uses_authenticated_owner() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.add(_return_request(order_id=1, user_id=1))
+
+    async def current_user() -> User:
+        return _user(role=UserRole.USER, user_id=1)
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/api/v1/returns/1/cancel",
+            json={"comment": "No longer needed"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+    assert response.json()["cancelled_by_user_id"] == 1
+    assert response.json()["cancellation_comment"] == "No longer needed"
+
+
+def test_admin_complete_cancel_routes_return_lifecycle_fields() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.add(
+        _return_request(order_id=1, user_id=1, status_value=ReturnRequestStatus.APPROVED)
+    )
+    repository.add(_return_request(order_id=2, user_id=1))
+
+    async def current_user() -> User:
+        return _user(role=UserRole.SELLER, user_id=10)
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        client = TestClient(app)
+        complete_response = client.post(
+            "/api/v1/returns/admin/1/complete",
+            json={"comment": "Completed by hand"},
+        )
+        cancel_response = client.post(
+            "/api/v1/returns/admin/2/cancel",
+            json={"comment": "Cancelled by seller"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "COMPLETED"
+    assert complete_response.json()["completed_by_user_id"] == 10
+    assert complete_response.json()["completion_comment"] == "Completed by hand"
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "CANCELLED"
+    assert cancel_response.json()["cancelled_by_user_id"] == 10
+    assert cancel_response.json()["cancellation_comment"] == "Cancelled by seller"
 
 
 def test_regular_user_cannot_access_admin_return_endpoints() -> None:

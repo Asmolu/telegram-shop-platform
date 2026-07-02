@@ -136,6 +136,8 @@ class ReturnRequestStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
 
 
 class DiscountType(StrEnum):
@@ -312,6 +314,16 @@ class User(Base):
     decided_return_requests: Mapped[list["ReturnRequest"]] = relationship(
         back_populates="decided_by",
         foreign_keys="ReturnRequest.decided_by_user_id",
+        order_by="ReturnRequest.id",
+    )
+    completed_return_requests: Mapped[list["ReturnRequest"]] = relationship(
+        back_populates="completed_by",
+        foreign_keys="ReturnRequest.completed_by_user_id",
+        order_by="ReturnRequest.id",
+    )
+    cancelled_return_requests: Mapped[list["ReturnRequest"]] = relationship(
+        back_populates="cancelled_by",
+        foreign_keys="ReturnRequest.cancelled_by_user_id",
         order_by="ReturnRequest.id",
     )
 
@@ -1340,6 +1352,18 @@ class ReturnRequest(Base):
         nullable=True,
     )
     decision_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completion_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    cancellation_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1361,6 +1385,14 @@ class ReturnRequest(Base):
     decided_by: Mapped[User | None] = relationship(
         back_populates="decided_return_requests",
         foreign_keys=[decided_by_user_id],
+    )
+    completed_by: Mapped[User | None] = relationship(
+        back_populates="completed_return_requests",
+        foreign_keys=[completed_by_user_id],
+    )
+    cancelled_by: Mapped[User | None] = relationship(
+        back_populates="cancelled_return_requests",
+        foreign_keys=[cancelled_by_user_id],
     )
     items: Mapped[list["ReturnRequestItem"]] = relationship(
         back_populates="return_request",

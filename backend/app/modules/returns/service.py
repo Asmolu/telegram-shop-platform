@@ -28,6 +28,7 @@ from app.modules.returns.schemas import (
     ReturnDecisionRequest,
     ReturnEligibilityItemRead,
     ReturnEligibilityRead,
+    ReturnLifecycleCommentRequest,
     ReturnRequestCreate,
     ReturnRequestList,
     ReturnRequestRead,
@@ -377,6 +378,80 @@ class ReturnsService:
             next_status=ReturnRequestStatus.REJECTED,
         )
 
+    async def cancel_customer(
+        self,
+        *,
+        return_request_id: int,
+        user_id: int,
+        payload: ReturnLifecycleCommentRequest,
+    ) -> ReturnRequestRead:
+        return_request = await self.repository.get_by_id(return_request_id, for_update=True)
+        if return_request is None or return_request.user_id != user_id:
+            raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        if return_request.status != ReturnRequestStatus.PENDING:
+            raise AppError(
+                "Customer can cancel only a pending return request",
+                status.HTTP_409_CONFLICT,
+            )
+
+        self._mark_cancelled(
+            return_request,
+            actor_user_id=user_id,
+            comment=payload.comment,
+        )
+        await self._commit("Return request cancellation failed")
+        return await self._read_updated(return_request_id)
+
+    async def complete(
+        self,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        payload: ReturnLifecycleCommentRequest,
+    ) -> ReturnRequestRead:
+        return_request = await self.repository.get_by_id(return_request_id, for_update=True)
+        if return_request is None:
+            raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        if return_request.status != ReturnRequestStatus.APPROVED:
+            raise AppError(
+                "Return request can be completed only after approval",
+                status.HTTP_409_CONFLICT,
+            )
+
+        return_request.status = ReturnRequestStatus.COMPLETED
+        return_request.completed_at = self._now()
+        return_request.completed_by_user_id = actor_user_id
+        return_request.completion_comment = payload.comment
+        await self._commit("Return request completion failed")
+        return await self._read_updated(return_request_id)
+
+    async def cancel_admin(
+        self,
+        *,
+        return_request_id: int,
+        actor_user_id: int,
+        payload: ReturnLifecycleCommentRequest,
+    ) -> ReturnRequestRead:
+        return_request = await self.repository.get_by_id(return_request_id, for_update=True)
+        if return_request is None:
+            raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
+        if return_request.status not in {
+            ReturnRequestStatus.PENDING,
+            ReturnRequestStatus.APPROVED,
+        }:
+            raise AppError(
+                "Return request can be cancelled only while pending or approved",
+                status.HTTP_409_CONFLICT,
+            )
+
+        self._mark_cancelled(
+            return_request,
+            actor_user_id=actor_user_id,
+            comment=payload.comment,
+        )
+        await self._commit("Return request cancellation failed")
+        return await self._read_updated(return_request_id)
+
     async def _decide(
         self,
         *,
@@ -397,10 +472,25 @@ class ReturnsService:
         return_request.decision_comment = payload.decision_comment
         await self._commit("Return request decision failed")
 
+        return await self._read_updated(return_request_id)
+
+    async def _read_updated(self, return_request_id: int) -> ReturnRequestRead:
         updated = await self.repository.get_by_id(return_request_id)
         if updated is None:
             raise AppError("Return request not found", status.HTTP_404_NOT_FOUND)
         return ReturnRequestRead.model_validate(updated)
+
+    def _mark_cancelled(
+        self,
+        return_request: ReturnRequest,
+        *,
+        actor_user_id: int,
+        comment: str | None,
+    ) -> None:
+        return_request.status = ReturnRequestStatus.CANCELLED
+        return_request.cancelled_at = self._now()
+        return_request.cancelled_by_user_id = actor_user_id
+        return_request.cancellation_comment = comment
 
     def _build_eligibility(
         self,

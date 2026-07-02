@@ -289,6 +289,12 @@ class FakeReturnRequestsService:
             decided_at=None,
             decided_by_user_id=None,
             decision_comment=None,
+            completed_at=None,
+            completed_by_user_id=None,
+            completion_comment=None,
+            cancelled_at=None,
+            cancelled_by_user_id=None,
+            cancellation_comment=None,
         )
 
 
@@ -905,6 +911,29 @@ async def test_return_callback_for_already_decided_request_refreshes_message(
     assert returns.requests[7].status == ReturnRequestStatus.APPROVED
     assert telegram.callback_answers == [("callback-id", "Заявка уже обработана")]
     assert "Статус: Одобрено" in telegram.edits[0][2]
+    assert telegram.edits[0][3] == {"inline_keyboard": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initial_status",
+    [ReturnRequestStatus.COMPLETED, ReturnRequestStatus.CANCELLED],
+)
+async def test_return_callback_for_completed_or_cancelled_request_is_already_processed(
+    monkeypatch: pytest.MonkeyPatch,
+    initial_status: ReturnRequestStatus,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_returns_chat_id", "-300")
+    service, _seller_bot, returns, telegram = _return_action_webhook_service(
+        initial_status=initial_status
+    )
+
+    response = await service.handle_update(_callback_update("return:approve:7", chat_id=-300))
+
+    assert response.result == "return_request_already_decided"
+    assert returns.actions == []
+    assert returns.requests[7].status == initial_status
+    assert telegram.callback_answers == [("callback-id", "Заявка уже обработана")]
     assert telegram.edits[0][3] == {"inline_keyboard": []}
 
 

@@ -1627,6 +1627,34 @@ Object.assign(dictionaries.en, {
   'looks.status.ARCHIVED': 'Archive',
 });
 
+Object.assign(dictionaries.ru, {
+  'enum.COMPLETED': '\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043d',
+  'returns.complete': '\u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c',
+  'returns.cancel': '\u041e\u0442\u043c\u0435\u043d\u0438\u0442\u044c',
+  'returns.completePrompt': '\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439 \u043a \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044e',
+  'returns.cancelPrompt': '\u041f\u0440\u0438\u0447\u0438\u043d\u0430 \u043e\u0442\u043c\u0435\u043d\u044b',
+  'returns.completedAt': '\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u043e',
+  'returns.completedBy': '\u041a\u0435\u043c',
+  'returns.completionComment': '\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f',
+  'returns.cancelledAt': '\u041e\u0442\u043c\u0435\u043d\u0435\u043d\u043e',
+  'returns.cancelledBy': '\u041a\u0435\u043c',
+  'returns.cancellationComment': '\u041f\u0440\u0438\u0447\u0438\u043d\u0430 \u043e\u0442\u043c\u0435\u043d\u044b',
+});
+
+Object.assign(dictionaries.en, {
+  'enum.COMPLETED': 'Completed',
+  'returns.complete': 'Complete',
+  'returns.cancel': 'Cancel',
+  'returns.completePrompt': 'Completion comment',
+  'returns.cancelPrompt': 'Cancellation reason',
+  'returns.completedAt': 'Completed',
+  'returns.completedBy': 'By',
+  'returns.completionComment': 'Completion comment',
+  'returns.cancelledAt': 'Cancelled',
+  'returns.cancelledBy': 'By',
+  'returns.cancellationComment': 'Cancellation reason',
+});
+
 interface I18nContextValue {
   language: Language;
   setLanguage: (language: Language) => void;

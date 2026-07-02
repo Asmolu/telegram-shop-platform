@@ -54,6 +54,18 @@ class ReturnDecisionRequest(BaseModel):
         return trimmed or None
 
 
+class ReturnLifecycleCommentRequest(BaseModel):
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("comment")
+    @classmethod
+    def trim_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+
 class ReturnRequestItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -108,6 +120,12 @@ class ReturnRequestRead(BaseModel):
     decided_at: datetime | None = None
     decided_by_user_id: int | None = None
     decision_comment: str | None = None
+    completed_at: datetime | None = None
+    completed_by_user_id: int | None = None
+    completion_comment: str | None = None
+    cancelled_at: datetime | None = None
+    cancelled_by_user_id: int | None = None
+    cancellation_comment: str | None = None
     message: str | None = None
     created_at: datetime
     updated_at: datetime

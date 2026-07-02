@@ -437,7 +437,12 @@ export type OrderList = {
   items: Order[];
 };
 
-export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ReturnRequestStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'COMPLETED'
+  | 'CANCELLED';
 
 export type ReturnEligibilityItem = {
   order_item_id: number;
@@ -515,6 +520,12 @@ export type ReturnRequest = {
   decided_at?: string | null;
   decided_by_user_id?: number | null;
   decision_comment?: string | null;
+  completed_at?: string | null;
+  completed_by_user_id?: number | null;
+  completion_comment?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by_user_id?: number | null;
+  cancellation_comment?: string | null;
   message?: string | null;
   created_at: string;
   updated_at: string;

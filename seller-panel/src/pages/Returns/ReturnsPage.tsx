@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type { ReturnRequest, ReturnRequestStatus } from '../../shared/api';
-import { labelForEnum, useI18n } from '../../shared/i18n';
+import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { compactText, formatDate, formatMoney } from '../../shared/utils/format';
@@ -12,7 +12,30 @@ interface PageProps {
   onAuthExpired: () => void;
 }
 
-const returnStatuses: ReturnRequestStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
+const returnStatuses: ReturnRequestStatus[] = [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'COMPLETED',
+  'CANCELLED',
+];
+
+const returnStatusLabels: Record<'ru' | 'en', Record<ReturnRequestStatus, string>> = {
+  ru: {
+    PENDING: 'Ожидает',
+    APPROVED: 'Одобрено',
+    REJECTED: 'Отклонено',
+    COMPLETED: 'Завершено',
+    CANCELLED: 'Отменено',
+  },
+  en: {
+    PENDING: 'Pending',
+    APPROVED: 'Approved',
+    REJECTED: 'Rejected',
+    COMPLETED: 'Completed',
+    CANCELLED: 'Cancelled',
+  },
+};
 
 export function ReturnsPage({
   initialReturnRequestId,
@@ -90,7 +113,18 @@ export function ReturnsPage({
     }
   }
 
-  async function decideReturn(nextStatus: Exclude<ReturnRequestStatus, 'PENDING'>) {
+  function applyReturnUpdate(updated: ReturnRequest) {
+    setSelectedReturn(updated);
+    setReturnRequests((current) => (
+      current.map((request) => (request.id === updated.id ? updated : request))
+    ));
+    setNotice(t('returns.decisionSaved', {
+      number: updated.return_number,
+      status: returnStatusLabel(updated.status, language).toLowerCase(),
+    }));
+  }
+
+  async function decideReturn(nextStatus: 'APPROVED' | 'REJECTED') {
     if (!selectedReturn || selectedReturn.status !== 'PENDING') {
       return;
     }
@@ -106,14 +140,51 @@ export function ReturnsPage({
       const updated = nextStatus === 'APPROVED'
         ? await api.returns.approve(selectedReturn.id, { decision_comment: decisionComment })
         : await api.returns.reject(selectedReturn.id, { decision_comment: decisionComment });
-      setSelectedReturn(updated);
-      setReturnRequests((current) => (
-        current.map((request) => (request.id === updated.id ? updated : request))
-      ));
-      setNotice(t('returns.decisionSaved', {
-        number: updated.return_number,
-        status: labelForEnum(updated.status, t).toLowerCase(),
-      }));
+      applyReturnUpdate(updated);
+    } catch (requestError) {
+      setActionError(formatRequestError(requestError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function completeReturn() {
+    if (!selectedReturn || selectedReturn.status !== 'APPROVED') {
+      return;
+    }
+    const comment = window.prompt(t('returns.completePrompt'), '') ?? null;
+    if (comment === null) {
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const updated = await api.returns.complete(selectedReturn.id, { comment });
+      applyReturnUpdate(updated);
+    } catch (requestError) {
+      setActionError(formatRequestError(requestError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function cancelReturn() {
+    if (!selectedReturn || !['PENDING', 'APPROVED'].includes(selectedReturn.status)) {
+      return;
+    }
+    const comment = window.prompt(t('returns.cancelPrompt'), '') ?? null;
+    if (comment === null) {
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const updated = await api.returns.cancel(selectedReturn.id, { comment });
+      applyReturnUpdate(updated);
     } catch (requestError) {
       setActionError(formatRequestError(requestError));
     } finally {
@@ -133,7 +204,7 @@ export function ReturnsPage({
             <option value="">{t('common.all')}</option>
             {returnStatuses.map((status) => (
               <option value={status} key={status}>
-                {labelForEnum(status, t)}
+                {returnStatusLabel(status, language)}
               </option>
             ))}
           </select>
@@ -193,7 +264,12 @@ export function ReturnsPage({
                         <strong>{compactText(returnRequest.customer_name, t('common.notProvided'))}</strong>
                         <small>{compactText(returnRequest.customer_phone, t('common.notProvided'))}</small>
                       </td>
-                      <td><StatusBadge status={returnRequest.status} /></td>
+                      <td>
+                        <StatusBadge
+                          status={returnRequest.status}
+                          label={returnStatusLabel(returnRequest.status, language)}
+                        />
+                      </td>
                       <td>{formatDate(returnRequest.created_at, language)}</td>
                       <td>{returnRequest.items.length}</td>
                       <td className="returns-reason-preview">{returnRequest.reason}</td>
@@ -209,6 +285,8 @@ export function ReturnsPage({
             actionError={actionError}
             detailLoading={detailLoading}
             onApprove={() => void decideReturn('APPROVED')}
+            onCancel={() => void cancelReturn()}
+            onComplete={() => void completeReturn()}
             onReject={() => void decideReturn('REJECTED')}
             onOpenOrder={() => onNavigate('/orders')}
             returnRequest={selectedReturn}
@@ -224,6 +302,8 @@ function ReturnDetail({
   actionError,
   detailLoading,
   onApprove,
+  onCancel,
+  onComplete,
   onReject,
   onOpenOrder,
   returnRequest,
@@ -232,6 +312,8 @@ function ReturnDetail({
   actionError: string | null;
   detailLoading: boolean;
   onApprove: () => void;
+  onCancel: () => void;
+  onComplete: () => void;
   onReject: () => void;
   onOpenOrder: () => void;
   returnRequest: ReturnRequest | null;
@@ -252,7 +334,10 @@ function ReturnDetail({
           <h2>{returnRequest.return_number}</h2>
           <p>{t('orders.order')} {returnRequest.order_number ?? `#${returnRequest.order_id}`}</p>
         </div>
-        <StatusBadge status={returnRequest.status} />
+        <StatusBadge
+          status={returnRequest.status}
+          label={returnStatusLabel(returnRequest.status, language)}
+        />
       </div>
 
       <dl className="details-list">
@@ -327,18 +412,69 @@ function ReturnDetail({
           >
             {t('returns.reject')}
           </button>
+          <button
+            className="button button-secondary"
+            disabled={actionBusy}
+            type="button"
+            onClick={onCancel}
+          >
+            {t('returns.cancel')}
+          </button>
         </div>
-      ) : (
+      ) : null}
+
+      {returnRequest.status === 'APPROVED' ? (
+        <div className="returns-detail__actions">
+          <button
+            className="button button-primary"
+            disabled={actionBusy}
+            type="button"
+            onClick={onComplete}
+          >
+            {t('returns.complete')}
+          </button>
+          <button
+            className="button button-secondary"
+            disabled={actionBusy}
+            type="button"
+            onClick={onCancel}
+          >
+            {t('returns.cancel')}
+          </button>
+        </div>
+      ) : null}
+
+      {returnRequest.decided_at || returnRequest.decided_by_user_id || returnRequest.decision_comment ? (
         <dl className="details-list">
           <div><dt>{t('returns.decidedAt')}</dt><dd>{formatDate(returnRequest.decided_at, language)}</dd></div>
           <div><dt>{t('returns.decidedBy')}</dt><dd>{returnRequest.decided_by_user_id ?? t('common.notProvided')}</dd></div>
           <div><dt>{t('returns.decisionComment')}</dt><dd>{compactText(returnRequest.decision_comment, t('common.notProvided'))}</dd></div>
         </dl>
-      )}
+      ) : null}
+
+      {returnRequest.completed_at || returnRequest.completed_by_user_id || returnRequest.completion_comment ? (
+        <dl className="details-list">
+          <div><dt>{t('returns.completedAt')}</dt><dd>{formatDate(returnRequest.completed_at, language)}</dd></div>
+          <div><dt>{t('returns.completedBy')}</dt><dd>{returnRequest.completed_by_user_id ?? t('common.notProvided')}</dd></div>
+          <div><dt>{t('returns.completionComment')}</dt><dd>{compactText(returnRequest.completion_comment, t('common.notProvided'))}</dd></div>
+        </dl>
+      ) : null}
+
+      {returnRequest.cancelled_at || returnRequest.cancelled_by_user_id || returnRequest.cancellation_comment ? (
+        <dl className="details-list">
+          <div><dt>{t('returns.cancelledAt')}</dt><dd>{formatDate(returnRequest.cancelled_at, language)}</dd></div>
+          <div><dt>{t('returns.cancelledBy')}</dt><dd>{returnRequest.cancelled_by_user_id ?? t('common.notProvided')}</dd></div>
+          <div><dt>{t('returns.cancellationComment')}</dt><dd>{compactText(returnRequest.cancellation_comment, t('common.notProvided'))}</dd></div>
+        </dl>
+      ) : null}
 
       {actionError ? <p className="form-error">{actionError}</p> : null}
     </aside>
   );
+}
+
+function returnStatusLabel(status: ReturnRequestStatus, language: 'ru' | 'en'): string {
+  return returnStatusLabels[language][status];
 }
 
 function formatRequestError(error: unknown): string {

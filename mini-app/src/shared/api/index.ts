@@ -262,6 +262,13 @@ export function createReturnRequest(
   });
 }
 
+export function cancelReturnRequest(returnRequestId: number, comment?: string | null) {
+  return apiRequest<ReturnRequest>(`/returns/${returnRequestId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ comment: comment ?? null }),
+  });
+}
+
 export function getOrderPayment(orderId: number, options: ApiRequestOptions = {}) {
   return apiRequest<ManualPayment>(`/orders/${orderId}/payment`, options);
 }

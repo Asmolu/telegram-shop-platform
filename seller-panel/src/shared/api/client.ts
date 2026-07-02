@@ -47,6 +47,7 @@ import type {
   PromoCode,
   PromoCodePayload,
   ReturnDecisionPayload,
+  ReturnLifecyclePayload,
   ReturnRequest,
   ReturnRequestStatus,
   Review,
@@ -418,7 +419,23 @@ export const api = {
         method: 'POST',
         body,
       }),
-    statuses: ['PENDING', 'APPROVED', 'REJECTED'] satisfies ReturnRequestStatus[],
+    complete: (returnRequestId: number, body: ReturnLifecyclePayload = {}) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/complete`, {
+        method: 'POST',
+        body,
+      }),
+    cancel: (returnRequestId: number, body: ReturnLifecyclePayload = {}) =>
+      apiRequest<ReturnRequest>(`/returns/admin/${returnRequestId}/cancel`, {
+        method: 'POST',
+        body,
+      }),
+    statuses: [
+      'PENDING',
+      'APPROVED',
+      'REJECTED',
+      'COMPLETED',
+      'CANCELLED',
+    ] satisfies ReturnRequestStatus[],
   },
   looks: {
     listAdmin: (query: QueryParams = {}) =>

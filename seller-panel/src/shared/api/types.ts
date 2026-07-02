@@ -22,7 +22,12 @@ export type ManualPaymentStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ReturnRequestStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'COMPLETED'
+  | 'CANCELLED';
 export type LookStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
@@ -381,6 +386,12 @@ export interface ReturnRequest {
   decided_at: string | null;
   decided_by_user_id: number | null;
   decision_comment: string | null;
+  completed_at: string | null;
+  completed_by_user_id: number | null;
+  completion_comment: string | null;
+  cancelled_at: string | null;
+  cancelled_by_user_id: number | null;
+  cancellation_comment: string | null;
   message: string | null;
   created_at: string;
   updated_at: string;
@@ -388,6 +399,10 @@ export interface ReturnRequest {
 
 export interface ReturnDecisionPayload {
   decision_comment?: string | null;
+}
+
+export interface ReturnLifecyclePayload {
+  comment?: string | null;
 }
 
 export interface LookImage {

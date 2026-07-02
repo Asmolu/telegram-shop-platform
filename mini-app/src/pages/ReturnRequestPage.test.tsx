@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  cancelReturnRequest,
   createReturnRequest,
   getOrder,
   getReturnEligibility,
@@ -37,6 +38,7 @@ vi.mock('../shared/router/RouterProvider', () => ({
 }));
 
 vi.mock('../shared/api', () => ({
+  cancelReturnRequest: vi.fn().mockResolvedValue(returnRequestFixture({ status: 'CANCELLED' })),
   createReturnRequest: vi.fn().mockResolvedValue(returnRequestFixture()),
   getApiBaseUrl: vi.fn(() => ''),
   getOrder: vi.fn().mockResolvedValue(orderFixture()),
@@ -52,6 +54,7 @@ describe('ReturnRequestPage', () => {
     vi.mocked(getOrder).mockResolvedValue(orderFixture());
     vi.mocked(getReturnEligibility).mockResolvedValue(returnEligibilityFixture());
     vi.mocked(createReturnRequest).mockResolvedValue(returnRequestFixture());
+    vi.mocked(cancelReturnRequest).mockResolvedValue(returnRequestFixture({ status: 'CANCELLED' }));
   });
 
   it('renders eligible items and submits selected return request', async () => {
@@ -74,6 +77,27 @@ describe('ReturnRequestPage', () => {
       [],
     ));
     expect(await screen.findByText('Заявка отправлена. Продавец свяжется с вами.')).toBeTruthy();
+    expect(screen.getByText('Статус: Ожидает')).toBeTruthy();
+  });
+
+  it('allows cancelling a freshly created pending return request', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    render(<ReturnRequestPage />);
+
+    expect(await screen.findByText('Line Break Hoodie')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Выбрать товар'));
+    fireEvent.change(screen.getByPlaceholderText('Например: не подошёл размер, цвет отличается, обнаружен дефект'), {
+      target: { value: 'Не подошёл размер' },
+    });
+    fireEvent.click(screen.getByText('Отправить заявку'));
+
+    expect(await screen.findByText('Отменить заявку')).toBeTruthy();
+    fireEvent.click(screen.getByText('Отменить заявку'));
+
+    await waitFor(() => expect(cancelReturnRequest).toHaveBeenCalledWith(7));
+    expect(await screen.findByText('Заявка отменена.')).toBeTruthy();
+    expect(screen.getByText('Статус: Отменено')).toBeTruthy();
+    expect(screen.queryByText('Отменить заявку')).toBeNull();
   });
 
   it('blocks submit when no items are selected', async () => {
