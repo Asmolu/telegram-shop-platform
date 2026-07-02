@@ -34,6 +34,10 @@ from app.db.models import (
     ProductRelatedProduct,
     ProductSizeGrid,
     ProductVariant,
+    ReturnRequest,
+    ReturnRequestAttachment,
+    ReturnRequestItem,
+    ReturnRequestStatus,
     SellerPaymentSettings,
     SellerRegistrationStatus,
     Tag,
@@ -442,6 +446,29 @@ def test_product_visibility_and_returnability_migration_contract() -> None:
     assert Product.__table__.c.is_returnable.default.arg is True
     assert OrderItem.__table__.c.is_returnable.nullable is False
     assert Order.__table__.c.delivered_at.nullable is True
+
+
+def test_return_requests_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260701_0041_add_return_requests.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_return_requests_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    assert migration.RETURN_REQUEST_STATUS_ENUM.name == "return_request_status"
+    assert migration.RETURN_REQUEST_STATUS_ENUM.enums == ["PENDING", "APPROVED", "REJECTED"]
+    assert migration.RETURN_REQUEST_STATUS_ENUM.create_type is False
+    assert ReturnRequest.__table__.c.status.default.arg is ReturnRequestStatus.PENDING
+    assert ReturnRequest.__table__.c.order_id.nullable is False
+    assert ReturnRequestItem.__table__.c.quantity.nullable is False
+    assert ReturnRequestAttachment.__table__.c.file_path.nullable is False
+    assert ReturnRequestAttachment.__table__.c.media_type.nullable is False
 
 
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:

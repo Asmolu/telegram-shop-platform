@@ -19,6 +19,8 @@ from app.modules.notifications.router import router as notifications_router
 from app.modules.orders.router import router as orders_router
 from app.modules.products.router import router as products_router
 from app.modules.promo_codes.router import router as promo_codes_router
+from app.modules.returns.router import admin_router as returns_admin_router
+from app.modules.returns.router import customer_router as returns_customer_router
 from app.modules.reviews.router import product_reviews_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.seller_auth.router import router as seller_auth_router
@@ -40,6 +42,8 @@ api_router.include_router(users_router)
 api_router.include_router(banners_router)
 api_router.include_router(cart_router)
 api_router.include_router(orders_router)
+api_router.include_router(returns_customer_router)
+api_router.include_router(returns_admin_router)
 api_router.include_router(manual_payments_customer_router)
 api_router.include_router(manual_payments_seller_router)
 api_router.include_router(promo_codes_router)

@@ -75,6 +75,7 @@ class Settings(BaseSettings):
         "tags",
         "customer_campaigns",
         "payment_receipts",
+        "returns",
         "temp",
     )
 

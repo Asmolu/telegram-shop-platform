@@ -126,6 +126,12 @@ class ReviewStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ReturnRequestStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class DiscountType(StrEnum):
     PERCENT = "PERCENT"
     FIXED = "FIXED"
@@ -290,6 +296,17 @@ class User(Base):
     customer_telegram_subscription: Mapped["CustomerTelegramSubscription | None"] = relationship(
         back_populates="user",
         uselist=False,
+    )
+    return_requests: Mapped[list["ReturnRequest"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="ReturnRequest.user_id",
+        order_by="ReturnRequest.id",
+    )
+    decided_return_requests: Mapped[list["ReturnRequest"]] = relationship(
+        back_populates="decided_by",
+        foreign_keys="ReturnRequest.decided_by_user_id",
+        order_by="ReturnRequest.id",
     )
 
 
@@ -1217,6 +1234,11 @@ class Order(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    return_request: Mapped["ReturnRequest | None"] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class OrderItem(Base):
@@ -1271,6 +1293,166 @@ class OrderItem(Base):
     order: Mapped[Order] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="order_items")
     product_variant: Mapped[ProductVariant] = relationship(back_populates="order_items")
+    return_request_items: Mapped[list["ReturnRequestItem"]] = relationship(
+        back_populates="order_item",
+        cascade="all, delete-orphan",
+        order_by="ReturnRequestItem.id",
+    )
+
+
+class ReturnRequest(Base):
+    __tablename__ = "return_requests"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_return_requests_order_id"),
+        Index("ix_return_requests_order_id", "order_id"),
+        Index("ix_return_requests_user_id", "user_id"),
+        Index("ix_return_requests_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    return_number: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[ReturnRequestStatus] = mapped_column(
+        Enum(ReturnRequestStatus, name="return_request_status", values_callable=_enum_values),
+        nullable=False,
+        default=ReturnRequestStatus.PENDING,
+        server_default=ReturnRequestStatus.PENDING.value,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    decision_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    order: Mapped[Order] = relationship(back_populates="return_request")
+    user: Mapped[User] = relationship(
+        back_populates="return_requests",
+        foreign_keys=[user_id],
+    )
+    decided_by: Mapped[User | None] = relationship(
+        back_populates="decided_return_requests",
+        foreign_keys=[decided_by_user_id],
+    )
+    items: Mapped[list["ReturnRequestItem"]] = relationship(
+        back_populates="return_request",
+        cascade="all, delete-orphan",
+        order_by="ReturnRequestItem.id",
+    )
+    attachments: Mapped[list["ReturnRequestAttachment"]] = relationship(
+        back_populates="return_request",
+        cascade="all, delete-orphan",
+        order_by="ReturnRequestAttachment.position",
+    )
+
+
+class ReturnRequestItem(Base):
+    __tablename__ = "return_request_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_return_request_items_quantity_positive"),
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_return_request_items_unit_price_non_negative",
+        ),
+        UniqueConstraint(
+            "return_request_id",
+            "order_item_id",
+            name="uq_return_request_items_request_order_item",
+        ),
+        Index("ix_return_request_items_return_request_id", "return_request_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    return_request_id: Mapped[int] = mapped_column(
+        ForeignKey("return_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    order_item_id: Mapped[int] = mapped_column(
+        ForeignKey("order_items.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    product_variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    product_brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    return_request: Mapped[ReturnRequest] = relationship(back_populates="items")
+    order_item: Mapped[OrderItem] = relationship(back_populates="return_request_items")
+
+
+class ReturnRequestAttachment(Base):
+    __tablename__ = "return_request_attachments"
+    __table_args__ = (
+        CheckConstraint(
+            "media_type IN ('image', 'video')",
+            name="ck_return_request_attachments_media_type",
+        ),
+        CheckConstraint(
+            "size_bytes >= 0",
+            name="ck_return_request_attachments_size_non_negative",
+        ),
+        CheckConstraint(
+            "position >= 0",
+            name="ck_return_request_attachments_position_non_negative",
+        ),
+        Index("ix_return_request_attachments_return_request_id", "return_request_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    return_request_id: Mapped[int] = mapped_column(
+        ForeignKey("return_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    return_request: Mapped[ReturnRequest] = relationship(back_populates="attachments")
 
 
 class SellerPaymentSettings(Base):
