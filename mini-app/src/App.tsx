@@ -17,6 +17,8 @@ const routeLoaders = {
   search: () => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })),
   'search-results': () => import('./pages/SearchResultsPage').then((module) => ({ default: module.SearchResultsPage })),
   'product-detail': () => import('./pages/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })),
+  looks: () => import('./pages/LooksPage').then((module) => ({ default: module.LooksPage })),
+  'look-detail': () => import('./pages/LookDetailPage').then((module) => ({ default: module.LookDetailPage })),
   cart: () => import('./pages/CartPage').then((module) => ({ default: module.CartPage })),
   checkout: () => import('./pages/CheckoutPage').then((module) => ({ default: module.CheckoutPage })),
   'order-success': () => import('./pages/OrderSuccessPage').then((module) => ({ default: module.OrderSuccessPage })),
@@ -57,6 +59,9 @@ function getFallbackTitle(routeId: LazyRouteId) {
   }
   if (routeId === 'cart') {
     return 'Покупки';
+  }
+  if (routeId === 'looks' || routeId === 'look-detail') {
+    return 'Образы';
   }
   if (routeId === 'checkout') {
     return 'Оформление';

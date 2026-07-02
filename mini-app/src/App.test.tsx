@@ -67,6 +67,8 @@ vi.mock('./pages/CategoryPage', createPageMock('CategoryPage', 'Category detail 
 vi.mock('./pages/SearchPage', createPageMock('SearchPage', 'Search route loaded'));
 vi.mock('./pages/SearchResultsPage', createPageMock('SearchResultsPage', 'Search results route loaded'));
 vi.mock('./pages/ProductDetailPage', createPageMock('ProductDetailPage', 'Product route loaded'));
+vi.mock('./pages/LooksPage', createPageMock('LooksPage', 'Looks route loaded'));
+vi.mock('./pages/LookDetailPage', createPageMock('LookDetailPage', 'Look detail route loaded'));
 vi.mock('./pages/CartPage', createPageMock('CartPage', 'Cart route loaded'));
 vi.mock('./pages/CheckoutPage', createPageMock('CheckoutPage', 'Checkout route loaded'));
 vi.mock('./pages/OrderSuccessPage', createPageMock('OrderSuccessPage', 'Order success route loaded'));
@@ -130,5 +132,13 @@ describe('App lazy routes', () => {
 
     expect(await screen.findByText('Product route loaded')).toBeTruthy();
     expect(screen.queryByText('Category detail route loaded')).toBeNull();
+  });
+
+  it('loads looks routes', async () => {
+    window.history.replaceState(null, '', '/looks/summer-look');
+
+    render(<App />);
+
+    expect(await screen.findByText('Look detail route loaded')).toBeTruthy();
   });
 });

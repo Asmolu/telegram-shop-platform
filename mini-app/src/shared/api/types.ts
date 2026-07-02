@@ -190,6 +190,92 @@ export type BannerList = {
   meta: PageMeta;
 };
 
+export type LookStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export type LookImage = {
+  id: number;
+  look_id: number;
+  file_path: string;
+  url: string;
+  image_url?: string | null;
+  original_filename?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  alt_text?: string | null;
+  position: number;
+  is_primary: boolean;
+  created_at: string;
+};
+
+export type LookProductSummary = {
+  product_id: number;
+  product_slug: string;
+  name: string;
+  brand?: string | null;
+  image_url?: string | null;
+  price: string | number;
+  old_price?: string | number | null;
+};
+
+export type LookItem = {
+  look_item_id: number;
+  product: LookProductSummary;
+  product_id: number;
+  product_slug: string;
+  product_name: string;
+  brand?: string | null;
+  primary_image_url?: string | null;
+  price: string | number;
+  old_price?: string | number | null;
+  quantity: number;
+  is_default_selected: boolean;
+  available_sizes: string[];
+  one_size: boolean;
+  is_available: boolean;
+};
+
+export type LookCard = {
+  id: number;
+  slug: string;
+  title: string;
+  description?: string | null;
+  primary_image_url?: string | null;
+  price: string | number;
+  old_price?: string | number | null;
+  item_count: number;
+  is_available: boolean;
+  available_sizes: string[];
+};
+
+export type LookList = {
+  items: LookCard[];
+  meta: PageMeta;
+};
+
+export type LookDetail = {
+  id: number;
+  slug: string;
+  title: string;
+  description?: string | null;
+  images: LookImage[];
+  items: LookItem[];
+  default_selected_item_ids: number[];
+  default_price: string | number;
+  old_price?: string | number | null;
+  available_sizes: string[];
+  is_available: boolean;
+};
+
+export type LookCartPayload = {
+  selected_item_ids: number[];
+  size?: string | null;
+};
+
+export type LookCartResponse = {
+  message: string;
+  cart: Cart;
+};
+
 export type User = {
   id: number;
   telegram_id: number;

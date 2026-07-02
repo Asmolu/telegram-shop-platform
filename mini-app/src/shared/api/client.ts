@@ -541,6 +541,8 @@ export function isSafeReadPath(path: string) {
     /^\/categories\/\d+$/,
     /^\/tags$/,
     /^\/banners$/,
+    /^\/looks$/,
+    /^\/looks\/[^/]+$/,
     /^\/favorites$/,
     /^\/cart$/,
     /^\/orders$/,

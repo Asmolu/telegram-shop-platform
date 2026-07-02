@@ -34,6 +34,9 @@ const SWIPE_BACK_IGNORE_SELECTOR = [
   '.product-image-carousel__track',
   '.variant-carousel',
   '.related-products-carousel',
+  '.looks-carousel__track',
+  '.look-components-list',
+  '.look-included-products',
   '.aggressive-popup__track',
   '.chip-row',
   '.feed-chips',
@@ -112,6 +115,9 @@ export function getLogicalBackPath(path: string, fallback = '/main') {
 
   if (pathname.startsWith('/product/')) {
     return fallback;
+  }
+  if (pathname.startsWith('/looks/')) {
+    return '/looks';
   }
   if (pathname === '/faq') {
     return fallback;
@@ -450,6 +456,12 @@ export function getRouteId(pathname: string) {
   }
   if (pathname.startsWith('/product/')) {
     return 'product-detail';
+  }
+  if (pathname === '/looks') {
+    return 'looks';
+  }
+  if (pathname.startsWith('/looks/')) {
+    return 'look-detail';
   }
   if (pathname === '/cart') {
     return 'cart';

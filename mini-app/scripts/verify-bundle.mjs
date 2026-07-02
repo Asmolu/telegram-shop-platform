@@ -11,6 +11,8 @@ const requiredLazyPages = [
   'src/pages/SearchPage.tsx',
   'src/pages/SearchResultsPage.tsx',
   'src/pages/ProductDetailPage.tsx',
+  'src/pages/LooksPage.tsx',
+  'src/pages/LookDetailPage.tsx',
   'src/pages/CartPage.tsx',
   'src/pages/CheckoutPage.tsx',
   'src/pages/PaymentPage.tsx',

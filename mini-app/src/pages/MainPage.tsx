@@ -2,17 +2,19 @@ import React from 'react';
 import {
   getBanners,
   getFavorites,
+  getLooks,
   getProducts,
   trackBannerClick,
   toApiErrorMessage,
   type Banner,
+  type LookCard as LookCardType,
   type Product,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
 import { scheduleRoutePrefetch } from '../shared/router/routePrefetch';
-import { useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+import { Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
+import { EmptyState, ErrorState, InlineNotice, LookCard, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
@@ -22,6 +24,7 @@ export function MainPage() {
   const { navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const [products, setProducts] = React.useState<Product[]>([]);
+  const [looks, setLooks] = React.useState<LookCardType[]>([]);
   const [banners, setBanners] = React.useState<Banner[]>([]);
   const [favoriteIds, setFavoriteIds] = React.useState<Set<number>>(new Set());
   const [feedQuery, setFeedQuery] = React.useState('');
@@ -40,14 +43,16 @@ export function MainPage() {
       setLoading(true);
       setError(null);
       try {
-        const [productResult, bannerResult, favoriteResult] = await Promise.all([
+        const [productResult, lookResult, bannerResult, favoriteResult] = await Promise.all([
           getProducts({ limit: 40, offset: 0, status: 'ACTIVE' }),
+          getLooks({ limit: 8, offset: 0 }).catch(() => ({ items: [], meta: { limit: 8, offset: 0, total: 0 } })),
           getBanners().catch(() => ({ items: [], meta: { limit: 20, offset: 0, total: 0 } })),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
         ]);
 
         if (!cancelled) {
           setProducts(productResult.items);
+          setLooks(lookResult.items);
           setBanners(bannerResult.items);
           setFavoriteIds(new Set(favoriteResult.items.map((favorite) => favorite.product_id)));
         }
@@ -128,6 +133,7 @@ export function MainPage() {
 
       {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} onNotice={setBannerNotice} /> : null}
       {verticalBanners.length > 0 ? <VerticalBannerGrid banners={verticalBanners} onNotice={setBannerNotice} /> : null}
+      {!loading && !error && looks.length > 0 ? <LooksSection looks={looks} /> : null}
 
       {loading ? <ProductGridSkeleton count={6} /> : null}
       {!loading && error ? <ErrorState message={error} actionLabel="Повторить" onAction={() => window.location.reload()} /> : null}
@@ -151,6 +157,30 @@ export function MainPage() {
       ) : null}
       {sizePicker}
     </div>
+  );
+}
+
+function LooksSection({ looks }: { looks: LookCardType[] }) {
+  return (
+    <section className="looks-section" aria-labelledby="looks-section-title">
+      <div className="section-heading looks-section__heading">
+        <div>
+          <span>Готовые комплекты</span>
+          <h2 id="looks-section-title">Образы</h2>
+        </div>
+        <Link className="section-link" to="/looks">Все</Link>
+      </div>
+      <div className="looks-carousel__track" data-swipe-back-ignore>
+        {looks.map((look, index) => (
+          <LookCard
+            key={look.id}
+            look={look}
+            imageFetchPriority={index === 0 ? 'high' : 'auto'}
+            imageLoading={index === 0 ? 'eager' : 'lazy'}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -29,6 +29,7 @@ describe('logical mini app back routes', () => {
     ['/payment/42', '/cart?tab=orders'],
     ['/order-success/42', '/cart?tab=orders'],
     ['/orders/42/return', '/order-success/42'],
+    ['/looks/summer-look', '/looks'],
     ['/profile/personal-data', '/profile'],
   ])('returns the explicit logical parent for %s', (path, parent) => {
     expect(getLogicalBackPath(path)).toBe(parent);
@@ -38,6 +39,10 @@ describe('logical mini app back routes', () => {
     expect(getLogicalBackPath('/product/10?returnTo=%2Fsearch%2Fresults%3Fq%3Dhoodie')).toBe(
       '/search/results?q=hoodie',
     );
+  });
+
+  it('uses a safe returnTo for look detail pages', () => {
+    expect(getLogicalBackPath('/looks/summer-look?returnTo=%2Fmain')).toBe('/main');
   });
 
   it('matches category-product links before generic category routes', () => {
@@ -52,5 +57,12 @@ describe('logical mini app back routes', () => {
 
   it('resolves return request route ids', () => {
     expect(getRouteId('/orders/42/return')).toBe('return-request');
+  });
+
+  it('resolves look routes and keeps looks nested below main', () => {
+    expect(isFirstLevelRoutePath('/looks')).toBe(false);
+    expect(getLogicalBackPath('/looks')).toBe('/main');
+    expect(getRouteId('/looks')).toBe('looks');
+    expect(getRouteId('/looks/summer-look')).toBe('look-detail');
   });
 });

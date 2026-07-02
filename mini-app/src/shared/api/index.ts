@@ -10,6 +10,10 @@ import type {
   CustomerNotificationWriteAccessRequest,
   Favorite,
   FavoriteList,
+  LookCartPayload,
+  LookCartResponse,
+  LookDetail,
+  LookList,
   ManualPayment,
   Order,
   OrderList,
@@ -111,6 +115,32 @@ export function getTags(options: ApiRequestOptions = {}) {
 
 export function getBanners(options: ApiRequestOptions = {}) {
   return apiRequest<BannerList>('/banners', { ...options, query: { limit: 20, offset: 0 } });
+}
+
+export type LookListParams = {
+  limit?: number;
+  offset?: number;
+};
+
+export function getLooks(params: LookListParams = {}, options: ApiRequestOptions = {}) {
+  return apiRequest<LookList>('/looks', { ...options, query: params });
+}
+
+export function getLook(slug: string, options: ApiRequestOptions = {}) {
+  return apiRequest<LookDetail>(`/looks/${slug}`, options);
+}
+
+export function addLookToCart(
+  slug: string,
+  payload: LookCartPayload,
+  options: ApiRequestOptions = {},
+) {
+  return apiRequest<LookCartResponse>(`/looks/${slug}/cart`, {
+    ...options,
+    method: 'POST',
+    networkImpact: options.networkImpact ?? 'local',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function trackBannerClick(bannerId: number) {

@@ -1,0 +1,63 @@
+import React from 'react';
+import {
+  getLooks,
+  toApiErrorMessage,
+  type LookCard as LookCardType,
+} from '../shared/api';
+import { useRouter } from '../shared/router/RouterProvider';
+import { EmptyState, ErrorState, LookCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+
+export function LooksPage() {
+  const { navigate } = useRouter();
+  const [looks, setLooks] = React.useState<LookCardType[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const loadLooks = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await getLooks({ limit: 60, offset: 0 }, { dedupe: false });
+      setLooks(result.items);
+    } catch (loadError) {
+      setError(toApiErrorMessage(loadError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadLooks();
+  }, [loadLooks]);
+
+  return (
+    <div className="page page--looks">
+      <TopBar title="Образы" variant="marketplace" backFallback="/main" />
+
+      {loading ? <ProductGridSkeleton count={6} /> : null}
+      {!loading && error ? (
+        <ErrorState message={error} actionLabel="Повторить" onAction={() => void loadLooks()} />
+      ) : null}
+      {!loading && !error && looks.length === 0 ? (
+        <EmptyState
+          title="Пока нет образов"
+          message="Собранные комплекты появятся здесь позже."
+          actionLabel="К ленте"
+          onAction={() => navigate('/main')}
+        />
+      ) : null}
+      {!loading && !error && looks.length > 0 ? (
+        <div className="product-grid looks-grid">
+          {looks.map((look, index) => (
+            <LookCard
+              key={look.id}
+              look={look}
+              imageFetchPriority={index === 0 ? 'high' : 'auto'}
+              imageLoading={index === 0 ? 'eager' : 'lazy'}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
