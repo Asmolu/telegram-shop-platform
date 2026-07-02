@@ -24,6 +24,10 @@ import type {
   CustomerNotificationSubscription,
   CustomerOrderMessageResponse,
   DashboardSummary,
+  Look,
+  LookCreatePayload,
+  LookStatus,
+  LookUpdatePayload,
   ManualPayment,
   ManualPaymentStatus,
   NotificationTemplate,
@@ -62,6 +66,7 @@ import type {
   TokenResponse,
   UploadedBannerImage,
   UploadedCategoryImage,
+  UploadedLookImage,
   UploadedProductImage,
   UploadedTagImage,
   User,
@@ -414,6 +419,39 @@ export const api = {
         body,
       }),
     statuses: ['PENDING', 'APPROVED', 'REJECTED'] satisfies ReturnRequestStatus[],
+  },
+  looks: {
+    listAdmin: (query: QueryParams = {}) =>
+      apiRequest<PageList<Look>>('/looks/admin', { query: clampQueryLimit(query, 100) }),
+    getAdmin: (lookId: number) => apiRequest<Look>(`/looks/admin/${lookId}`),
+    create: (body: LookCreatePayload) =>
+      apiRequest<Look>('/looks/admin', { method: 'POST', body }),
+    update: (lookId: number, body: LookUpdatePayload) =>
+      apiRequest<Look>(`/looks/admin/${lookId}`, { method: 'PATCH', body }),
+    archive: (lookId: number) =>
+      apiRequest<Look>(`/looks/admin/${lookId}`, { method: 'DELETE' }),
+    uploadImage: (
+      lookId: number,
+      file: File,
+      options: { altText?: string; position?: number; isPrimary?: boolean } = {},
+    ) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (options.altText) {
+        formData.append('alt_text', options.altText);
+      }
+      if (options.position !== undefined) {
+        formData.append('position', String(options.position));
+      }
+      formData.append('is_primary', String(options.isPrimary ?? false));
+      return apiRequest<UploadedLookImage>(`/looks/admin/${lookId}/images`, {
+        method: 'POST',
+        formData,
+      });
+    },
+    deleteImage: (lookId: number, imageId: number) =>
+      apiRequest<void>(`/looks/admin/${lookId}/images/${imageId}`, { method: 'DELETE' }),
+    statuses: ['DRAFT', 'ACTIVE', 'ARCHIVED'] satisfies LookStatus[],
   },
   analytics: {
     summary: (query: QueryParams = {}) =>

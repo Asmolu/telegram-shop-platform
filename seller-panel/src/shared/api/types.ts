@@ -23,6 +23,7 @@ export type ManualPaymentStatus =
   | 'CANCELLED';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type LookStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
 export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
@@ -388,6 +389,75 @@ export interface ReturnRequest {
 export interface ReturnDecisionPayload {
   decision_comment?: string | null;
 }
+
+export interface LookImage {
+  id: number;
+  look_id: number;
+  file_path: string;
+  url: string;
+  image_url?: string | null;
+  original_filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  alt_text: string | null;
+  position: number;
+  is_primary: boolean;
+  created_at: string;
+}
+
+export interface LookItem {
+  id: number;
+  look_id: number;
+  product_id: number;
+  position: number;
+  quantity: number;
+  is_default_selected: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Look {
+  id: number;
+  slug: string;
+  title: string;
+  description: string | null;
+  status: LookStatus;
+  is_listed: boolean;
+  search_priority: 1 | 2 | 3;
+  images: LookImage[];
+  items: LookItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LookItemPayload {
+  product_id: number;
+  position?: number;
+  quantity?: number;
+  is_default_selected?: boolean;
+}
+
+export interface LookCreatePayload {
+  title: string;
+  slug: string;
+  description?: string | null;
+  status?: LookStatus;
+  is_listed?: boolean;
+  search_priority?: 1 | 2 | 3;
+  items?: LookItemPayload[];
+}
+
+export interface LookUpdatePayload {
+  title?: string;
+  slug?: string;
+  description?: string | null;
+  status?: LookStatus;
+  is_listed?: boolean;
+  search_priority?: 1 | 2 | 3;
+  items?: LookItemPayload[];
+}
+
+export interface UploadedLookImage extends LookImage {}
 
 export interface SellerPaymentSettings {
   is_manual_sbp_enabled: boolean;

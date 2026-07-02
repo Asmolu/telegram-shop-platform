@@ -15,6 +15,7 @@ import { BannersPage } from './pages/Banners/BannersPage';
 import { PromoCodesPage } from './pages/PromoCodes/PromoCodesPage';
 import { ReviewsPage } from './pages/Reviews/ReviewsPage';
 import { ReturnsPage } from './pages/Returns/ReturnsPage';
+import { LookEditorPage, LooksPage } from './pages/Looks/LooksPage';
 import { StatisticsPage } from './pages/Statistics/StatisticsPage';
 import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
 import { CustomerNotificationsPage } from './pages/CustomerNotifications/CustomerNotificationsPage';
@@ -31,6 +32,7 @@ const navItems: NavItem[] = [
   { path: '/promo-codes', labelKey: 'nav.promoCodes' },
   { path: '/reviews', labelKey: 'nav.reviews' },
   { path: '/returns', labelKey: 'nav.returns' },
+  { path: '/looks', labelKey: 'nav.looks' },
   { path: '/statistics', labelKey: 'nav.statistics' },
   { path: '/customer-notifications', labelKey: 'nav.customerNotifications' },
   { path: '/channel-entry', labelKey: 'nav.channelEntry' },
@@ -56,6 +58,9 @@ function getPageTitleKey(path: string): string {
   if (path.startsWith('/promo-codes')) return 'nav.promoCodes';
   if (path.startsWith('/reviews')) return 'nav.reviews';
   if (path.startsWith('/returns')) return 'nav.returns';
+  if (path === '/looks/new') return 'nav.addLook';
+  if (path.startsWith('/looks/') && path.endsWith('/edit')) return 'nav.editLook';
+  if (path.startsWith('/looks')) return 'nav.looks';
   if (path.startsWith('/statistics')) return 'nav.statistics';
   if (path.startsWith('/customer-notifications')) return 'nav.customerNotifications';
   if (path.startsWith('/channel-entry')) return 'nav.channelEntry';
@@ -198,6 +203,18 @@ function renderPage(
     return (
       <ReturnsPage
         initialReturnRequestId={match ? Number(match[1]) : undefined}
+        {...sharedPageProps}
+      />
+    );
+  }
+  if (path === '/looks') return <LooksPage {...sharedPageProps} />;
+  if (path === '/looks/new') return <LookEditorPage mode="create" {...sharedPageProps} />;
+  const lookEditMatch = path.match(/^\/looks\/(\d+)\/edit$/);
+  if (lookEditMatch) {
+    return (
+      <LookEditorPage
+        mode="edit"
+        lookId={Number(lookEditMatch[1])}
         {...sharedPageProps}
       />
     );
