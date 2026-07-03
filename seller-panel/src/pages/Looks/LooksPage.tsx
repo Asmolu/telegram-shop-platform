@@ -248,6 +248,9 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const manualSlugEditRef = useRef(false);
+  const savingRef = useRef(false);
+  const saveRequestIdRef = useRef(0);
+  const slugAutofillRequestIdRef = useRef(0);
 
   const productMap = useMemo(() => buildProductMap(products), [products]);
   const availableProductsForSelect = useMemo(() => {
@@ -269,8 +272,13 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       return;
     }
 
+    const requestId = slugAutofillRequestIdRef.current + 1;
+    slugAutofillRequestIdRef.current = requestId;
     api.looks.getNextSlugs(1)
       .then((response) => {
+        if (slugAutofillRequestIdRef.current !== requestId) {
+          return;
+        }
         const nextSlug = response.items[0];
         setForm((current) => ({
           ...current,
@@ -283,6 +291,9 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
         }));
       })
       .catch(() => {
+        if (slugAutofillRequestIdRef.current !== requestId || manualSlugEditRef.current) {
+          return;
+        }
         setFormError(t('looks.slugAutofillFailed'));
       });
   }
@@ -298,6 +309,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       .then(([productList, loadedLook]) => {
         setProducts(productList.items);
         if (loadedLook) {
+          slugAutofillRequestIdRef.current += 1;
           manualSlugEditRef.current = true;
           setLook(loadedLook);
           setForm({
@@ -391,25 +403,35 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
   }
 
   async function saveLook(stayOnPage: boolean) {
+    if (savingRef.current) {
+      return;
+    }
+
+    savingRef.current = true;
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
     setSaving(true);
     setError(null);
     setFormError(null);
     setSuccess(null);
 
-    const validationError = validateLookForm(form, items, productMap, t);
-    if (validationError) {
-      setFormError(validationError);
-      setSaving(false);
-      return;
-    }
-
-    const payload = buildLookPayload(form, items);
     try {
+      const validationError = validateLookForm(form, items, productMap, t);
+      if (validationError) {
+        setFormError(validationError);
+        return;
+      }
+
+      const payload = buildLookPayload(form, items);
       const savedLook =
         mode === 'edit' && lookId
           ? await api.looks.update(lookId, payload)
           : await api.looks.create(payload);
 
+      if (saveRequestIdRef.current !== requestId) {
+        return;
+      }
+      setFormError(null);
       if (!stayOnPage) {
         onNavigate('/looks');
         return;
@@ -434,9 +456,14 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
           })),
       );
     } catch (requestError) {
-      setFormError(formatRequestError(requestError));
+      if (saveRequestIdRef.current === requestId) {
+        setFormError(formatLookRequestError(requestError, t));
+      }
     } finally {
-      setSaving(false);
+      if (saveRequestIdRef.current === requestId) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   }
 
@@ -452,7 +479,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       setForm((current) => ({ ...current, status: archived.status }));
       setSuccess(t('looks.archived'));
     } catch (requestError) {
-      setFormError(formatRequestError(requestError));
+      setFormError(formatLookRequestError(requestError, t));
     } finally {
       setSaving(false);
     }
@@ -478,7 +505,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       setLook(reloaded);
       setSuccess(t('looks.imageUploaded'));
     } catch (requestError) {
-      setFormError(formatRequestError(requestError));
+      setFormError(formatLookRequestError(requestError, t));
     } finally {
       setImageBusy(false);
     }
@@ -496,7 +523,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       setLook(reloaded);
       setSuccess(t('looks.imageDeleted'));
     } catch (requestError) {
-      setFormError(formatRequestError(requestError));
+      setFormError(formatLookRequestError(requestError, t));
     } finally {
       setImageBusy(false);
     }
@@ -1040,9 +1067,26 @@ function lookStatusLabel(
   return t(`looks.status.${status}`);
 }
 
-function formatRequestError(error: unknown): string {
+function formatLookRequestError(
+  error: unknown,
+  t: (key: string, params?: Record<string, string | number | null | undefined>) => string,
+): string {
   if (error instanceof ApiError) {
+    if (error.status === 409 && isSlugConflictMessage(error.message)) {
+      return t('looks.slugTaken');
+    }
     return error.message;
   }
   return error instanceof Error ? error.message : 'Request failed';
+}
+
+function isSlugConflictMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('slug') &&
+    (normalized.includes('already exists') ||
+      normalized.includes('conflict') ||
+      normalized.includes('alias') ||
+      normalized.includes('занят'))
+  );
 }

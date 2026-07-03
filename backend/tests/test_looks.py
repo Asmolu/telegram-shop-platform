@@ -7,6 +7,7 @@ import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 from starlette.datastructures import Headers
 
 from app.common.deps import get_current_user
@@ -40,15 +41,21 @@ class DummySession:
         self.commit_count = 0
         self.rollback_count = 0
         self.flush_count = 0
+        self.commit_error: Exception | None = None
+        self.flush_error: Exception | None = None
 
     async def commit(self) -> None:
         self.commit_count += 1
+        if self.commit_error is not None:
+            raise self.commit_error
 
     async def rollback(self) -> None:
         self.rollback_count += 1
 
     async def flush(self) -> None:
         self.flush_count += 1
+        if self.flush_error is not None:
+            raise self.flush_error
 
     async def refresh(self, _instance: object) -> None:
         return None
@@ -92,6 +99,7 @@ class FakeLooksRepository:
         self.next_look_id = 1
         self.next_item_id = 1
         self.next_image_id = 1
+        self.added_look_count = 0
 
     async def list_public(self, *, limit: int, offset: int) -> tuple[list[Look], int]:
         looks = [
@@ -153,6 +161,7 @@ class FakeLooksRepository:
 
     def add(self, instance: Look | LookImage | LookItem) -> None:
         if isinstance(instance, Look):
+            self.added_look_count += 1
             self._persist_look(instance)
             self.looks[instance.id] = instance
             return
@@ -361,6 +370,8 @@ async def test_duplicate_slug_returns_conflict() -> None:
     service, repository, _cart_repository, _session, _storage = _looks_service()
     repository.products[1] = _product(product_id=1)
     repository.add(_look(look_id=1, slug="same-slug", items=[]))
+    existing_count = len(repository.looks)
+    add_count = repository.added_look_count
 
     with pytest.raises(AppError) as exc_info:
         await service.create_admin_look(
@@ -372,6 +383,32 @@ async def test_duplicate_slug_returns_conflict() -> None:
         )
 
     assert exc_info.value.status_code == 409
+    assert len(repository.looks) == existing_count
+    assert repository.added_look_count == add_count
+
+
+@pytest.mark.asyncio
+async def test_create_look_slug_conflicting_with_active_look_alias_returns_conflict() -> None:
+    service, repository, _cart_repository, session, _storage = _looks_service(
+        aliases=[_alias(RouteAliasEntityType.LOOK, entity_id=99, alias_slug="taken-slug")]
+    )
+    repository.products[1] = _product(product_id=1)
+
+    with pytest.raises(AppError) as exc_info:
+        await service.create_admin_look(
+            LookCreate(
+                title="Taken",
+                slug="taken-slug",
+                items=[LookItemInput(product_id=1)],
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Look slug conflicts with an active route alias"
+    assert repository.looks == {}
+    assert repository.added_look_count == 0
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
 
 
 @pytest.mark.asyncio
@@ -384,6 +421,84 @@ async def test_update_look_duplicate_slug_returns_conflict() -> None:
         await service.update_admin_look(1, LookUpdate(slug="second-look"))
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_look_slug_conflicting_with_active_look_alias_returns_conflict() -> None:
+    service, repository, _cart_repository, session, _storage = _looks_service(
+        aliases=[_alias(RouteAliasEntityType.LOOK, entity_id=2, alias_slug="taken-slug")]
+    )
+    repository.add(_look(look_id=1, slug="first-look"))
+
+    with pytest.raises(AppError) as exc_info:
+        await service.update_admin_look(1, LookUpdate(slug="taken-slug"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Look slug conflicts with an active route alias"
+    assert repository.looks[1].slug == "first-look"
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_update_look_old_slug_alias_conflict_returns_conflict() -> None:
+    service, repository, _cart_repository, session, _storage = _looks_service(
+        aliases=[_alias(RouteAliasEntityType.LOOK, entity_id=2, alias_slug="first-look")]
+    )
+    repository.add(_look(look_id=1, slug="first-look"))
+
+    with pytest.raises(AppError) as exc_info:
+        await service.update_admin_look(1, LookUpdate(slug="next-look"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Look slug conflicts with an active route alias"
+    assert repository.looks[1].slug == "first-look"
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_look_slug_integrity_error_returns_conflict() -> None:
+    service, repository, _cart_repository, session, _storage = _looks_service()
+    repository.products[1] = _product(product_id=1)
+    session.commit_error = IntegrityError(
+        "INSERT INTO looks",
+        {},
+        Exception("UNIQUE constraint failed: looks.slug"),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await service.create_admin_look(
+            LookCreate(
+                title="Race",
+                slug="race-slug",
+                items=[LookItemInput(product_id=1)],
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Look slug already exists"
+    assert exc_info.value.message != "Database service unavailable"
+    assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_look_route_alias_integrity_error_returns_conflict() -> None:
+    service, repository, _cart_repository, session, _storage = _looks_service()
+    repository.add(_look(look_id=1, slug="first-look"))
+    session.commit_error = IntegrityError(
+        "INSERT INTO route_aliases",
+        {},
+        Exception("UNIQUE constraint failed: route_aliases.entity_type, route_aliases.alias_slug"),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await service.update_admin_look(1, LookUpdate(slug="next-look"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Look slug conflicts with an active route alias"
+    assert exc_info.value.message != "Database service unavailable"
+    assert session.rollback_count == 1
 
 
 @pytest.mark.asyncio
@@ -403,6 +518,18 @@ async def test_generate_look_slugs_skips_existing_look_slug() -> None:
     result = await service.generate_look_slugs(1)
 
     assert result.items == ["00002"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_ignores_product_slug() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    product = _product(product_id=2)
+    product.slug = "00001"
+    repository.products[2] = product
+
+    result = await service.generate_look_slugs(1)
+
+    assert result.items == ["00001"]
 
 
 @pytest.mark.asyncio

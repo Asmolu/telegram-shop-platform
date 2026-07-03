@@ -107,7 +107,7 @@ test('look editor has required fields defaults and validation', () => {
   assert.match(pageSource, /activeNeedsDefault/);
   assert.match(pageSource, /activeNeedsActiveProducts/);
   assert.match(pageSource, /quantityInvalid/);
-  assert.match(pageSource, /formatRequestError/);
+  assert.match(pageSource, /formatLookRequestError/);
 });
 
 test('look editor requests and fills backend generated slugs only for new looks', () => {
@@ -119,6 +119,7 @@ test('look editor requests and fills backend generated slugs only for new looks'
   assert.match(pageSource, /setFormError\(t\('looks\.slugAutofillFailed'\)\)/);
   assert.match(i18nSource, /looks\.slugAutofillFailed/);
   assert.match(i18nSource, /Slug is generated automatically/);
+  assert.match(pageSource, /slugAutofillRequestIdRef/);
 });
 
 test('look editor preserves loaded slugs and sends slug in create payloads', () => {
@@ -126,6 +127,39 @@ test('look editor preserves loaded slugs and sends slug in create payloads', () 
   assert.match(pageSource, /slug: loadedLook\.slug/);
   assert.match(pageSource, /loadNextLookSlug\(\)/);
   assert.match(pageSource, /slug: form\.slug\.trim\(\)/);
+});
+
+test('look editor disables saves and guards against double submit while saving', () => {
+  assert.match(pageSource, /const savingRef = useRef\(false\)/);
+  assert.match(pageSource, /if \(savingRef\.current\)/);
+  assert.match(pageSource, /savingRef\.current = true/);
+  assert.match(pageSource, /savingRef\.current = false/);
+  assert.match(pageSource, /disabled=\{saving\}/);
+  assert.match(pageSource, /type="submit"/);
+});
+
+test('look editor ignores stale save errors after a newer save request wins', () => {
+  assert.match(pageSource, /const saveRequestIdRef = useRef\(0\)/);
+  assert.match(pageSource, /saveRequestIdRef\.current = requestId/);
+  assert.match(pageSource, /saveRequestIdRef\.current !== requestId/);
+  assert.match(pageSource, /saveRequestIdRef\.current === requestId/);
+  assert.match(pageSource, /setFormError\(null\)/);
+});
+
+test('look editor maps backend slug conflicts to a clear localized error', () => {
+  assert.match(pageSource, /formatLookRequestError\(requestError, t\)/);
+  assert.match(pageSource, /error\.status === 409/);
+  assert.match(pageSource, /isSlugConflictMessage/);
+  assert.match(pageSource, /looks\.slugTaken/);
+  assert.match(i18nSource, /'looks\.slugTaken': 'Slug уже занят'/);
+  assert.match(i18nSource, /'looks\.slugTaken': 'Slug is already taken\.'/);
+});
+
+test('look edit slug updates use the same clean conflict handling as creates', () => {
+  assert.match(pageSource, /mode === 'edit' && lookId/);
+  assert.match(pageSource, /api\.looks\.update\(lookId, payload\)/);
+  assert.match(pageSource, /api\.looks\.create\(payload\)/);
+  assert.match(pageSource, /formatLookRequestError\(requestError, t\)/);
 });
 
 test('look editor supports product components and hidden product badges', () => {

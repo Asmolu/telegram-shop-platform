@@ -48,6 +48,8 @@ ONE_SIZE = "ONE_SIZE"
 NUMERIC_LOOK_SLUG_MIN = 1
 NUMERIC_LOOK_SLUG_MAX = 99999
 NUMERIC_LOOK_SLUG_EXHAUSTED_MESSAGE = "Numeric Look slug range 00001-99999 is exhausted."
+LOOK_SLUG_CONFLICT_MESSAGE = "Look slug already exists"
+LOOK_ALIAS_CONFLICT_MESSAGE = "Look slug conflicts with an active route alias"
 
 logger = logging.getLogger(__name__)
 
@@ -202,41 +204,49 @@ class LooksService:
         payload: LookCreate,
         actor_user_id: int | None = None,
     ) -> LookAdminRead:
-        existing = await self.repository.get_by_slug(payload.slug)
-        if existing is not None:
-            raise AppError("Look slug already exists", status.HTTP_409_CONFLICT)
-        await self.route_aliases.ensure_slug_available(
-            RouteAliasEntityType.LOOK,
-            payload.slug,
-            conflict_message="Look slug conflicts with an active route alias",
-        )
+        try:
+            await self._ensure_slug_available(payload.slug)
+            products_by_id = await self._validate_item_inputs(
+                payload.items,
+                target_status=payload.status,
+            )
+            look = Look(
+                title=payload.title,
+                slug=payload.slug,
+                description=payload.description,
+                status=payload.status,
+                is_listed=payload.is_listed,
+                search_priority=payload.search_priority,
+                items=[
+                    LookItem(
+                        product_id=item.product_id,
+                        product=products_by_id[item.product_id],
+                        position=item.position,
+                        quantity=item.quantity,
+                        is_default_selected=item.is_default_selected,
+                    )
+                    for item in payload.items
+                ],
+            )
+            self.repository.add(look)
+        except AppError:
+            await self.session.rollback()
+            raise
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError(
+                self._look_integrity_error_message(
+                    exc,
+                    duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
+                    alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+                ),
+                status.HTTP_409_CONFLICT,
+            ) from exc
 
-        products_by_id = await self._validate_item_inputs(
-            payload.items,
-            target_status=payload.status,
-        )
-        look = Look(
-            title=payload.title,
-            slug=payload.slug,
-            description=payload.description,
-            status=payload.status,
-            is_listed=payload.is_listed,
-            search_priority=payload.search_priority,
-            items=[
-                LookItem(
-                    product_id=item.product_id,
-                    product=products_by_id[item.product_id],
-                    position=item.position,
-                    quantity=item.quantity,
-                    is_default_selected=item.is_default_selected,
-                )
-                for item in payload.items
-            ],
-        )
-        self.repository.add(look)
         return await self._commit_and_return_admin(
             look,
-            duplicate_message="Look slug already exists",
+            duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
+            alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
         )
 
     async def update_admin_look(
@@ -249,59 +259,69 @@ class LooksService:
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
 
-        next_slug = payload.slug if payload.slug is not None and payload.slug != look.slug else None
-        if next_slug is not None:
-            existing = await self.repository.get_by_slug(next_slug)
-            if existing is not None and existing.id != look.id:
-                raise AppError("Look slug already exists", status.HTTP_409_CONFLICT)
-            await self.route_aliases.ensure_slug_available(
-                RouteAliasEntityType.LOOK,
-                next_slug,
-                entity_id=look.id,
-                conflict_message="Look slug conflicts with an active route alias",
+        try:
+            next_slug = (
+                payload.slug if payload.slug is not None and payload.slug != look.slug else None
             )
+            if next_slug is not None:
+                await self._ensure_slug_available(next_slug, entity_id=look.id)
 
-        if payload.title is not None:
-            look.title = payload.title
-        if "description" in payload.model_fields_set:
-            look.description = payload.description
-        if payload.is_listed is not None:
-            look.is_listed = payload.is_listed
-        if payload.search_priority is not None:
-            look.search_priority = payload.search_priority
-        if payload.status is not None:
-            look.status = payload.status
+            if payload.title is not None:
+                look.title = payload.title
+            if "description" in payload.model_fields_set:
+                look.description = payload.description
+            if payload.is_listed is not None:
+                look.is_listed = payload.is_listed
+            if payload.search_priority is not None:
+                look.search_priority = payload.search_priority
+            if payload.status is not None:
+                look.status = payload.status
 
-        if payload.items is not None:
-            products_by_id = await self._validate_item_inputs(
-                payload.items,
-                target_status=look.status,
-            )
-            look.items = [
-                LookItem(
-                    product_id=item.product_id,
-                    product=products_by_id[item.product_id],
-                    position=item.position,
-                    quantity=item.quantity,
-                    is_default_selected=item.is_default_selected,
+            if payload.items is not None:
+                products_by_id = await self._validate_item_inputs(
+                    payload.items,
+                    target_status=look.status,
                 )
-                for item in payload.items
-            ]
+                look.items = [
+                    LookItem(
+                        product_id=item.product_id,
+                        product=products_by_id[item.product_id],
+                        position=item.position,
+                        quantity=item.quantity,
+                        is_default_selected=item.is_default_selected,
+                    )
+                    for item in payload.items
+                ]
 
-        await self._validate_look_publishable(look)
-        if next_slug is not None:
-            await self.route_aliases.create_alias_for_slug_change(
-                RouteAliasEntityType.LOOK,
-                entity_id=look.id,
-                old_slug=look.slug,
-                new_slug=next_slug,
-                created_by_user_id=actor_user_id,
-                conflict_message="Look slug conflicts with an active route alias",
-            )
-            look.slug = next_slug
+            await self._validate_look_publishable(look)
+            if next_slug is not None:
+                await self.route_aliases.create_alias_for_slug_change(
+                    RouteAliasEntityType.LOOK,
+                    entity_id=look.id,
+                    old_slug=look.slug,
+                    new_slug=next_slug,
+                    created_by_user_id=actor_user_id,
+                    conflict_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+                )
+                look.slug = next_slug
+        except AppError:
+            await self.session.rollback()
+            raise
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError(
+                self._look_integrity_error_message(
+                    exc,
+                    duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
+                    alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+                ),
+                status.HTTP_409_CONFLICT,
+            ) from exc
+
         return await self._commit_and_return_admin(
             look,
-            duplicate_message="Look slug already exists",
+            duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
+            alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
         )
 
     async def archive_admin_look(self, look_id: int) -> LookAdminRead:
@@ -446,17 +466,50 @@ class LooksService:
         look: Look,
         *,
         duplicate_message: str,
+        alias_message: str | None = None,
     ) -> LookAdminRead:
         try:
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
-            raise AppError(duplicate_message, status.HTTP_409_CONFLICT) from exc
+            raise AppError(
+                self._look_integrity_error_message(
+                    exc,
+                    duplicate_message=duplicate_message,
+                    alias_message=alias_message,
+                ),
+                status.HTTP_409_CONFLICT,
+            ) from exc
 
         reloaded = await self.repository.get_admin_by_id(look.id)
         if reloaded is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         return LookAdminRead.model_validate(reloaded)
+
+    async def _ensure_slug_available(self, slug: str, *, entity_id: int | None = None) -> None:
+        existing = await self.repository.get_by_slug(slug)
+        if existing is not None and existing.id != entity_id:
+            raise AppError(LOOK_SLUG_CONFLICT_MESSAGE, status.HTTP_409_CONFLICT)
+        await self.route_aliases.ensure_slug_available(
+            RouteAliasEntityType.LOOK,
+            slug,
+            entity_id=entity_id,
+            conflict_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+        )
+
+    @staticmethod
+    def _look_integrity_error_message(
+        exc: IntegrityError,
+        *,
+        duplicate_message: str,
+        alias_message: str | None = None,
+    ) -> str:
+        if alias_message is None:
+            return duplicate_message
+        text = " ".join(str(part) for part in (exc.orig, exc.statement, exc.params, exc)).lower()
+        if "route_alias" in text:
+            return alias_message
+        return duplicate_message
 
     async def _get_or_create_cart_for_mutation(self, user_id: int) -> Cart:
         cart = await self.cart_repository.get_by_user_id(user_id)
