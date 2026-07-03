@@ -50,6 +50,20 @@ class DummySession:
     async def refresh(self, _instance: object) -> None:
         return None
 
+    async def execute(self, _: object) -> "EmptyQueryResult":
+        return EmptyQueryResult()
+
+
+class EmptyQueryResult:
+    def scalars(self) -> "EmptyQueryResult":
+        return self
+
+    def all(self) -> list[object]:
+        return []
+
+    def scalar_one_or_none(self) -> object | None:
+        return None
+
 
 class FakeStorage:
     def __init__(self) -> None:

@@ -69,6 +69,20 @@ describe('LookDetailPage', () => {
     expect(within(screen.getByLabelText('Доступные размеры')).getByRole('button', { name: /M/ })).toBeTruthy();
   });
 
+  it('opens an old Look slug and replaces the route with the canonical slug', async () => {
+    routerMocks.route.currentPath = '/looks/old-look?returnTo=%2Fmain';
+    routerMocks.route.pathname = '/looks/old-look';
+    vi.mocked(getLook).mockResolvedValueOnce(lookFixture({ slug: 'current-look' }));
+
+    render(<LookDetailPage />);
+
+    await waitFor(() => expect(getLook).toHaveBeenCalledWith('old-look'));
+    expect(routerMocks.navigate).toHaveBeenCalledWith(
+      '/looks/current-look?returnTo=%2Fmain',
+      { replace: true },
+    );
+  });
+
   it('updates dynamic price when a component is unselected', async () => {
     const { container } = render(<LookDetailPage />);
 

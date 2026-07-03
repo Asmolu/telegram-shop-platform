@@ -52,6 +52,16 @@ class LooksRepository:
         )
         return result.scalars().unique().one_or_none()
 
+    async def get_public_by_id(self, look_id: int) -> Look | None:
+        result = await self.session.execute(
+            self._look_select().where(
+                Look.id == look_id,
+                Look.status == LookStatus.ACTIVE,
+                Look.is_listed.is_(True),
+            )
+        )
+        return result.scalars().unique().one_or_none()
+
     async def get_admin_by_id(self, look_id: int) -> Look | None:
         result = await self.session.execute(self._look_select().where(Look.id == look_id))
         return result.scalars().unique().one_or_none()

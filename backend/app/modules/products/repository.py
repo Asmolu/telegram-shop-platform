@@ -488,6 +488,10 @@ class ProductsRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_slug(self, product_slug: str) -> Product | None:
+        result = await self.session.execute(select(Product).where(Product.slug == product_slug))
+        return result.scalar_one_or_none()
+
     async def list_existing_ids(self, product_ids: list[int]) -> set[int]:
         if not product_ids:
             return set()

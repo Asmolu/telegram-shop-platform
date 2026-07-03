@@ -45,6 +45,8 @@ from app.db.models import (
     ReturnRequestAttachment,
     ReturnRequestItem,
     ReturnRequestStatus,
+    RouteAlias,
+    RouteAliasEntityType,
     SellerPaymentSettings,
     SellerRegistrationStatus,
     Tag,
@@ -604,6 +606,39 @@ def test_look_source_grouping_migration_contract() -> None:
     assert "ix_cart_items_source_look_id" in cart_index_names
     assert "ix_order_items_source_group_id" in order_item_index_names
     assert "ix_order_items_source_look_id" in order_item_index_names
+
+
+def test_route_aliases_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260703_0046_add_route_aliases.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_route_aliases_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text(encoding="utf-8")
+    table = RouteAlias.__table__
+    index_names = {index.name for index in table.indexes}
+
+    assert migration.ROUTE_ALIAS_ENTITY_TYPE_ENUM.name == "route_alias_entity_type"
+    assert migration.ROUTE_ALIAS_ENTITY_TYPE_ENUM.enums == ["PRODUCT", "CATEGORY", "LOOK"]
+    assert migration.ROUTE_ALIAS_ENTITY_TYPE_ENUM.create_type is False
+    assert "route_aliases" in content
+    assert "created_by_user_id" in content
+    assert table.c.entity_type.type.enums == [item.value for item in RouteAliasEntityType]
+    assert table.c.entity_id.nullable is False
+    assert table.c.alias_slug.nullable is False
+    assert table.c.is_active.default.arg is True
+    assert table.c.is_active.server_default is not None
+    assert table.c.created_by_user_id.nullable is True
+    assert "ix_route_aliases_alias_slug" in index_names
+    assert "ix_route_aliases_entity_type" in index_names
+    assert "ix_route_aliases_entity_id" in index_names
+    assert "uq_route_aliases_active_entity_type_alias_slug" in index_names
 
 
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:

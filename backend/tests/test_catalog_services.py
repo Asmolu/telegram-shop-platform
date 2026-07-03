@@ -82,6 +82,9 @@ class DummySession:
     async def delete(self, _: object) -> None:
         self.deleted = True
 
+    async def execute(self, _: object) -> "EmptyQueryResult":
+        return EmptyQueryResult()
+
 
 class FailingCommitSession(DummySession):
     async def commit(self) -> None:
@@ -115,6 +118,9 @@ class EmptyQueryResult:
 
     def all(self) -> list[object]:
         return []
+
+    def scalar_one_or_none(self) -> object | None:
+        return None
 
     def scalar_one(self) -> int:
         return 0

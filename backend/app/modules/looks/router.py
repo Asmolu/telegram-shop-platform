@@ -73,10 +73,10 @@ async def list_admin_looks(
 @admin_router.post("", response_model=LookAdminRead, status_code=status.HTTP_201_CREATED)
 async def create_admin_look(
     payload: LookCreate,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[LooksService, Depends(get_looks_service)],
 ) -> LookAdminRead:
-    return await service.create_admin_look(payload)
+    return await service.create_admin_look(payload, actor_user_id=current_user.id)
 
 
 @admin_router.get("/{look_id}", response_model=LookAdminRead)
@@ -92,10 +92,10 @@ async def get_admin_look(
 async def update_admin_look(
     look_id: int,
     payload: LookUpdate,
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
     service: Annotated[LooksService, Depends(get_looks_service)],
 ) -> LookAdminRead:
-    return await service.update_admin_look(look_id, payload)
+    return await service.update_admin_look(look_id, payload, actor_user_id=current_user.id)
 
 
 @admin_router.delete("/{look_id}", response_model=LookAdminRead)

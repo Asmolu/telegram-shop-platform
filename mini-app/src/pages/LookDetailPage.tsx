@@ -17,6 +17,12 @@ import { runLockedAction } from '../shared/utils/actionLock';
 
 const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'ONE_SIZE'];
 
+function canonicalLookPath(slug: string, currentPath: string) {
+  const url = new URL(currentPath, window.location.origin);
+  url.pathname = `/looks/${encodeURIComponent(slug)}`;
+  return `${url.pathname}${url.search}`;
+}
+
 export function LookDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
@@ -46,6 +52,10 @@ export function LookDetailPage() {
       try {
         const result = await getLook(slug);
         if (!cancelled) {
+          const canonicalPath = canonicalLookPath(result.slug, currentPath);
+          if (result.slug !== slug && canonicalPath !== currentPath) {
+            navigate(canonicalPath, { replace: true });
+          }
           setLook(result);
           setSelectedItemIds(new Set(getInitialSelectedItemIds(result)));
         }
@@ -64,7 +74,7 @@ export function LookDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [currentPath, navigate, slug]);
 
   const selectedItems = React.useMemo(
     () => look?.items.filter((item) => selectedItemIds.has(item.look_item_id)) ?? [],

@@ -80,6 +80,7 @@ Rules:
 | `products` | Product catalog, images, variants, inventory, search aliases |
 | `promo_codes` | Coupons, validation, usage limits, usage snapshots |
 | `reviews` | Purchase-gated moderated reviews |
+| `route_aliases` | Slug alias storage and resolution for durable public category, product, and Look links |
 | `seller_auth` | Seller/admin Telegram auth and registration flow |
 | `seller_bot` | Bot 2 seller/admin bot flows |
 | `statistics` | Seller/admin dashboard statistics |
@@ -114,6 +115,8 @@ Bot 2 must not be used for buyer notification or channel-entry buyer flows.
 Products support categories, tags, images, variants, inventory, active/public visibility, `old_price`, brand display, search aliases, and search priority. Multi-category assignments use priority values `1`, `2`, and `3`.
 
 Search uses normalized input, aliases, color synonym expansion, product/category/tag fields, priority ordering, and PostgreSQL trigram similarity when the database extension is present.
+
+Public product, category, and Look links use entity-level slug aliases through `route_aliases`. The backend stores old slugs by entity type (`PRODUCT`, `CATEGORY`, `LOOK`) and entity id, not full domains or full paths. Public resolvers try the current slug first, then an active alias, and return canonical current slugs so the Mini App can replace old URLs without adding a history entry. Product detail links resolve category and product aliases independently, preserving query parameters such as `sku`.
 
 ## Checkout Flow
 

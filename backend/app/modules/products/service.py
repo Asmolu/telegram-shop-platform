@@ -16,6 +16,7 @@ from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
+    Category,
     Product,
     ProductCategory,
     ProductImage,
@@ -24,6 +25,7 @@ from app.db.models import (
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
+    RouteAliasEntityType,
     Tag,
 )
 from app.modules.analytics.service import AnalyticsTracker
@@ -60,6 +62,7 @@ from app.modules.products.size_grids import (
     is_legacy_product_size_grid,
     normalize_size,
 )
+from app.modules.route_aliases.service import RouteAliasesService
 from app.modules.tags.repository import TagsRepository
 from app.modules.uploads.storage import LocalStorageService
 
@@ -117,6 +120,7 @@ class ProductsService:
         self.variants_repository = ProductVariantsRepository(session)
         self.categories_repository = CategoriesRepository(session)
         self.tags_repository = TagsRepository(session)
+        self.route_aliases = RouteAliasesService(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
         self.cache = cache
@@ -285,13 +289,13 @@ class ProductsService:
         user_id: int | None = None,
         track_view: bool = True,
     ) -> ProductResolveResponse:
-        product = await self.repository.get_public_detail_by_slug(product_slug)
+        product = await self._get_public_product_by_slug_or_alias(product_slug)
         if product is None:
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
 
         route_category: ProductResolveRouteCategory | None = None
         if category_slug is not None:
-            category = await self.categories_repository.get_by_slug(category_slug)
+            category = await self._get_category_by_slug_or_alias(category_slug)
             if category is None or not self._product_has_category(product, category.id):
                 raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
             route_category = ProductResolveRouteCategory(
@@ -368,6 +372,32 @@ class ProductsService:
             assignment.category_id == category_id for assignment in product.product_categories
         )
 
+    async def _get_public_product_by_slug_or_alias(self, product_slug: str) -> Product | None:
+        product = await self.repository.get_public_detail_by_slug(product_slug)
+        if product is not None:
+            return product
+
+        product_id = await self.route_aliases.resolve_entity_id(
+            RouteAliasEntityType.PRODUCT,
+            product_slug,
+        )
+        if product_id is None:
+            return None
+        return await self.repository.get_public_detail_by_id(product_id)
+
+    async def _get_category_by_slug_or_alias(self, category_slug: str) -> Category | None:
+        category = await self.categories_repository.get_by_slug(category_slug)
+        if category is not None:
+            return category
+
+        category_id = await self.route_aliases.resolve_entity_id(
+            RouteAliasEntityType.CATEGORY,
+            category_slug,
+        )
+        if category_id is None:
+            return None
+        return await self.categories_repository.get_by_id(category_id)
+
     async def get_product(self, product_id: int) -> Product:
         product = await self.repository.get_by_id(product_id)
         if product is None:
@@ -381,6 +411,11 @@ class ProductsService:
     ) -> Product:
         try:
             payload = await self._prepare_product_create_payload_slug(payload)
+            await self.route_aliases.ensure_slug_available(
+                RouteAliasEntityType.PRODUCT,
+                payload.slug,
+                conflict_message="Product slug conflicts with an active route alias",
+            )
             product = await self.stage_product_with_variants(payload, [])
         except AppError:
             await self.session.rollback()
@@ -522,6 +557,22 @@ class ProductsService:
         if candidate_badge_type != ProductImageBadgeType.CUSTOM:
             data["image_badge_text"] = None
 
+        next_slug = data.get("slug")
+        slug_is_changing = next_slug is not None and next_slug != product.slug
+        if slug_is_changing:
+            existing_slug_owner = await self.repository.get_by_slug(next_slug)
+            if existing_slug_owner is not None and existing_slug_owner.id != product.id:
+                raise AppError(
+                    "Product slug or variant SKU already exists",
+                    status.HTTP_409_CONFLICT,
+                )
+            await self.route_aliases.ensure_slug_available(
+                RouteAliasEntityType.PRODUCT,
+                next_slug,
+                entity_id=product.id,
+                conflict_message="Product slug conflicts with an active route alias",
+            )
+
         categories_were_provided = "categories" in payload.model_fields_set
         category_id_was_provided = "category_id" in data
         resolved_tags = None
@@ -538,6 +589,16 @@ class ProductsService:
 
         if resolved_tags is not None:
             self._sync_tags(product, resolved_tags)
+
+        if slug_is_changing:
+            await self.route_aliases.create_alias_for_slug_change(
+                RouteAliasEntityType.PRODUCT,
+                entity_id=product.id,
+                old_slug=product.slug,
+                new_slug=next_slug,
+                created_by_user_id=actor_user_id,
+                conflict_message="Product slug conflicts with an active route alias",
+            )
 
         if (
             "related_product_ids" in payload.model_fields_set
@@ -639,6 +700,10 @@ class ProductsService:
 
     async def generate_product_slugs(self, count: int) -> ProductSlugList:
         existing_slugs = await self.repository.list_numeric_slug_candidates()
+        alias_slugs = await self.route_aliases.repository.list_active_alias_slugs(
+            RouteAliasEntityType.PRODUCT
+        )
+        existing_slugs.extend(alias_slugs)
         return ProductSlugList(items=self._allocate_numeric_product_slugs(existing_slugs, count))
 
     async def _prepare_product_create_payload_slug(self, payload: ProductCreate) -> ProductCreate:

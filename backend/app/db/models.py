@@ -61,6 +61,12 @@ class LookStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class RouteAliasEntityType(StrEnum):
+    PRODUCT = "PRODUCT"
+    CATEGORY = "CATEGORY"
+    LOOK = "LOOK"
+
+
 class ProductSizeGrid(StrEnum):
     CLOTHING_ALPHA = "clothing_alpha"
     SHOES_EU = "shoes_eu"
@@ -722,6 +728,52 @@ class Category(Base):
     @property
     def image_url(self) -> str | None:
         return f"/uploads/{self.image_path}" if self.image_path else None
+
+
+class RouteAlias(Base):
+    __tablename__ = "route_aliases"
+    __table_args__ = (
+        Index("ix_route_aliases_alias_slug", "alias_slug"),
+        Index("ix_route_aliases_entity_type", "entity_type"),
+        Index("ix_route_aliases_entity_id", "entity_id"),
+        Index(
+            "uq_route_aliases_active_entity_type_alias_slug",
+            "entity_type",
+            "alias_slug",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+            sqlite_where=text("is_active = 1"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[RouteAliasEntityType] = mapped_column(
+        Enum(RouteAliasEntityType, name="route_alias_entity_type", values_callable=_enum_values),
+        nullable=False,
+    )
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    alias_slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class Tag(Base):

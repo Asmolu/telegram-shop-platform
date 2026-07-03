@@ -2,9 +2,9 @@ import React from 'react';
 import {
   ApiClientError,
   getCategory,
-  getCategories,
   getFavorites,
   getProducts,
+  resolveCategory,
   toApiErrorMessage,
   type Category,
   type Product,
@@ -33,13 +33,16 @@ export function getCategoryPageRoute(pathname: string): CategoryPageRoute | null
 }
 
 async function getCategoryBySlug(categorySlug: string) {
-  return (await getCategories()).find(
-    (candidate) => candidate.slug === categorySlug,
-  ) ?? null;
+  return resolveCategory(categorySlug);
+}
+
+function withCurrentSearch(pathname: string, currentPath: string) {
+  const url = new URL(currentPath, window.location.origin);
+  return `${pathname}${url.search}`;
 }
 
 export function CategoryPage() {
-  const { pathname, navigate } = useRouter();
+  const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const categoryRoute = React.useMemo(() => getCategoryPageRoute(pathname), [pathname]);
   const [category, setCategory] = React.useState<Category | null>(null);
@@ -81,6 +84,15 @@ export function CategoryPage() {
         if (!categoryResult) {
           throw new Error('Категория не найдена');
         }
+        if (categoryRoute.mode === 'slug' && categoryResult.slug !== categoryRoute.categorySlug) {
+          const canonicalPath = withCurrentSearch(
+            `/category/${encodeURIComponent(categoryResult.slug)}`,
+            currentPath,
+          );
+          if (canonicalPath !== currentPath) {
+            navigate(canonicalPath, { replace: true });
+          }
+        }
         const [productResult, favoriteResult] = await Promise.all([
           getProducts({ limit: 100, offset: 0, status: 'ACTIVE', category_id: categoryResult.id }),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
@@ -106,7 +118,7 @@ export function CategoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [categoryRoute, isAuthenticated]);
+  }, [categoryRoute, currentPath, isAuthenticated, navigate]);
 
   return (
     <div className="page">

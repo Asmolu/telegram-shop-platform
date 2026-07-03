@@ -133,6 +133,22 @@ function getInitialSelectedVariant(
   return selectedVariant ?? firstSelectableVariant(variants);
 }
 
+function canonicalProductPath(
+  route: ProductDetailRoute,
+  routeContext: ProductResolveRouteContext | null,
+  currentPath: string,
+) {
+  if (route.mode !== 'slug' || !routeContext?.category) {
+    return null;
+  }
+
+  const url = new URL(currentPath, window.location.origin);
+  const categorySlug = encodeURIComponent(routeContext.category.slug);
+  const productSlug = encodeURIComponent(routeContext.product_slug);
+  url.pathname = `/category/${categorySlug}/product/${productSlug}`;
+  return `${url.pathname}${url.search}`;
+}
+
 export function ProductDetailPage() {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
@@ -201,6 +217,12 @@ export function ProductDetailPage() {
               route_context: null,
             };
         const productResult = resolvedProduct.product;
+        const canonicalPath = productRoute.mode === 'slug'
+          ? canonicalProductPath(productRoute, resolvedProduct.route_context, currentPath)
+          : null;
+        if (canonicalPath && canonicalPath !== currentPath) {
+          navigate(canonicalPath, { replace: true });
+        }
         const [reviewsResult, favoritesResult, cartResult] = await Promise.all([
           getProductReviews(productResult.id).catch(() => ({ items: [] })),
           isAuthenticated ? getFavorites().catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
@@ -240,7 +262,7 @@ export function ProductDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, productRoute]);
+  }, [currentPath, isAuthenticated, navigate, productRoute]);
 
   const activeVariants = React.useMemo(
     () => product

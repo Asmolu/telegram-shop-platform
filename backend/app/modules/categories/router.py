@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.cache import CacheService
@@ -41,6 +41,21 @@ async def list_categories(
     return categories
 
 
+@router.get("/resolve", response_model=CategoryRead)
+async def resolve_category(
+    slug: Annotated[str, Query(min_length=1, max_length=255)],
+    request: Request,
+    response: Response,
+    service: Annotated[CategoriesService, Depends(get_categories_service)],
+) -> CategoryRead | Response:
+    category = CategoryRead.model_validate(await service.resolve_category_by_slug(slug))
+    etag = stable_etag(category)
+    if is_not_modified(request, etag):
+        return not_modified_response(etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    set_cache_headers(response, etag=etag, cache_control=PUBLIC_STABLE_CACHE)
+    return category
+
+
 @router.get("/{category_id}", response_model=CategoryRead)
 async def get_category(
     category_id: int,
@@ -60,9 +75,9 @@ async def get_category(
 async def create_category(
     payload: CategoryCreate,
     service: Annotated[CategoriesService, Depends(get_categories_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.create_category(payload)
+    return await service.create_category(payload, actor_user_id=current_user.id)
 
 
 @router.patch("/{category_id}", response_model=CategoryRead)
@@ -70,9 +85,9 @@ async def update_category(
     category_id: int,
     payload: CategoryUpdate,
     service: Annotated[CategoriesService, Depends(get_categories_service)],
-    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
 ) -> object:
-    return await service.update_category(category_id, payload)
+    return await service.update_category(category_id, payload, actor_user_id=current_user.id)
 
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)

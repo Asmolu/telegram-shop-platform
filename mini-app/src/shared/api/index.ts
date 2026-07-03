@@ -119,6 +119,13 @@ export function getCategory(categoryId: number, options: ApiRequestOptions = {})
   return apiRequest<Category>(`/categories/${categoryId}`, options);
 }
 
+export function resolveCategory(slug: string, options: ApiRequestOptions = {}) {
+  return apiRequest<Category>('/categories/resolve', {
+    ...options,
+    query: { slug },
+  });
+}
+
 export function getTags(options: ApiRequestOptions = {}) {
   return apiRequest<Tag[]>('/tags', options);
 }

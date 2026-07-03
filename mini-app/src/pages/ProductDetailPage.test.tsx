@@ -429,6 +429,43 @@ describe('ProductDetailPage resolver preselection', () => {
     expect(container.querySelector('.variant-button.is-selected')?.textContent).toContain('M');
   });
 
+  it('replaces old category and product slugs with the canonical route and preserves SKU', async () => {
+    routerMocks.route.currentPath = '/category/old-category/product/old-product?sku=00002';
+    routerMocks.route.pathname = '/category/old-category/product/old-product';
+    apiMocks.resolveProduct.mockResolvedValue({
+      product: productFixture({
+        slug: 'current-product',
+        variants: [
+          { ...productFixture().variants[0], id: 100, color: 'White', size: 'M', sku: '00001' },
+          { ...productFixture().variants[0], id: 101, color: 'Black', size: 'L', sku: '00002' },
+        ],
+      }),
+      route_context: {
+        category: { id: 1, slug: 'current-category', name: 'РљР°С‚РµРіРѕСЂРёСЏ' },
+        product_slug: 'current-product',
+        requested_sku: '00002',
+        selected_variant_id: 101,
+        selected_variant_sku: '00002',
+        variant_status: 'selected',
+      },
+    });
+    apiMocks.getProductReviews.mockResolvedValue({ items: [] });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getCart.mockResolvedValue(cartFixture());
+
+    render(<ProductDetailPage />);
+
+    await waitFor(() => expect(apiMocks.resolveProduct).toHaveBeenCalledWith({
+      category_slug: 'old-category',
+      product_slug: 'old-product',
+      sku: '00002',
+    }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith(
+      '/category/current-category/product/current-product?sku=00002',
+      { replace: true },
+    );
+  });
+
   it('keeps an out-of-stock resolver-selected variant highlighted with disabled purchase actions', async () => {
     routerMocks.route.currentPath = '/category/futbolki/product/line-break-hoodie?sku=00002';
     routerMocks.route.pathname = '/category/futbolki/product/line-break-hoodie';

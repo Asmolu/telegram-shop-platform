@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addCartItem,
   addFavorite,
+  resolveCategory,
   resolveProduct,
 } from './index';
 import {
@@ -273,6 +274,17 @@ describe('apiRequest resilience', () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       '/products/resolve?category_slug=futbolki&product_slug=line-break-hoodie&sku=00001',
+    );
+  });
+
+  it('builds category resolver requests with category slug', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 1, slug: 'futbolki' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await resolveCategory('old-futbolki');
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/categories/resolve?slug=old-futbolki',
     );
   });
 

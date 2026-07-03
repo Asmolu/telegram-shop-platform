@@ -18,6 +18,7 @@ from app.db.models import (
     Product,
     ProductStatus,
     ProductVariant,
+    RouteAliasEntityType,
 )
 from app.modules.cart.repository import CartRepository
 from app.modules.cart.service import CartService
@@ -37,6 +38,7 @@ from app.modules.looks.schemas import (
     LookPublicItemRead,
     LookUpdate,
 )
+from app.modules.route_aliases.service import RouteAliasesService
 from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
 
@@ -54,6 +56,7 @@ class LooksService:
         self.session = session
         self.repository = LooksRepository(session)
         self.cart_repository = CartRepository(session)
+        self.route_aliases = RouteAliasesService(session)
         self.storage = storage or LocalStorageService()
 
     async def list_public_looks(self, *, limit: int, offset: int) -> LookList:
@@ -64,7 +67,7 @@ class LooksService:
         )
 
     async def get_public_look(self, slug: str) -> LookDetailRead:
-        look = await self.repository.get_public_by_slug(slug)
+        look = await self._get_public_look_by_slug_or_alias(slug)
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         return self._build_detail(look)
@@ -76,7 +79,7 @@ class LooksService:
         user_id: int,
         payload: LookCartAddRequest,
     ) -> LookCartAddResponse:
-        look = await self.repository.get_public_by_slug(slug)
+        look = await self._get_public_look_by_slug_or_alias(slug)
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
 
@@ -172,10 +175,19 @@ class LooksService:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         return LookAdminRead.model_validate(look)
 
-    async def create_admin_look(self, payload: LookCreate) -> LookAdminRead:
+    async def create_admin_look(
+        self,
+        payload: LookCreate,
+        actor_user_id: int | None = None,
+    ) -> LookAdminRead:
         existing = await self.repository.get_by_slug(payload.slug)
         if existing is not None:
             raise AppError("Look slug already exists", status.HTTP_409_CONFLICT)
+        await self.route_aliases.ensure_slug_available(
+            RouteAliasEntityType.LOOK,
+            payload.slug,
+            conflict_message="Look slug conflicts with an active route alias",
+        )
 
         products_by_id = await self._validate_item_inputs(
             payload.items,
@@ -205,16 +217,27 @@ class LooksService:
             duplicate_message="Look slug already exists",
         )
 
-    async def update_admin_look(self, look_id: int, payload: LookUpdate) -> LookAdminRead:
+    async def update_admin_look(
+        self,
+        look_id: int,
+        payload: LookUpdate,
+        actor_user_id: int | None = None,
+    ) -> LookAdminRead:
         look = await self.repository.get_admin_by_id(look_id)
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
 
-        if payload.slug is not None and payload.slug != look.slug:
-            existing = await self.repository.get_by_slug(payload.slug)
+        next_slug = payload.slug if payload.slug is not None and payload.slug != look.slug else None
+        if next_slug is not None:
+            existing = await self.repository.get_by_slug(next_slug)
             if existing is not None and existing.id != look.id:
                 raise AppError("Look slug already exists", status.HTTP_409_CONFLICT)
-            look.slug = payload.slug
+            await self.route_aliases.ensure_slug_available(
+                RouteAliasEntityType.LOOK,
+                next_slug,
+                entity_id=look.id,
+                conflict_message="Look slug conflicts with an active route alias",
+            )
 
         if payload.title is not None:
             look.title = payload.title
@@ -244,6 +267,16 @@ class LooksService:
             ]
 
         await self._validate_look_publishable(look)
+        if next_slug is not None:
+            await self.route_aliases.create_alias_for_slug_change(
+                RouteAliasEntityType.LOOK,
+                entity_id=look.id,
+                old_slug=look.slug,
+                new_slug=next_slug,
+                created_by_user_id=actor_user_id,
+                conflict_message="Look slug conflicts with an active route alias",
+            )
+            look.slug = next_slug
         return await self._commit_and_return_admin(
             look,
             duplicate_message="Look slug already exists",
@@ -355,6 +388,16 @@ class LooksService:
             if product is None:
                 raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
             self._validate_component_product(product, target_status=LookStatus.ACTIVE)
+
+    async def _get_public_look_by_slug_or_alias(self, slug: str) -> Look | None:
+        look = await self.repository.get_public_by_slug(slug)
+        if look is not None:
+            return look
+
+        look_id = await self.route_aliases.resolve_entity_id(RouteAliasEntityType.LOOK, slug)
+        if look_id is None:
+            return None
+        return await self.repository.get_public_by_id(look_id)
 
     def _validate_component_product(self, product: Product, *, target_status: LookStatus) -> None:
         if product.status == ProductStatus.ARCHIVED:
