@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   Look,
@@ -11,6 +11,7 @@ import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { compactText, formatDate, formatMoney } from '../../shared/utils/format';
+import { applyGeneratedLookSlug } from './lookSlugAutofill';
 
 interface PageProps {
   onNavigate: (path: string) => void;
@@ -246,6 +247,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
   const [error, setError] = useState<unknown>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const manualSlugEditRef = useRef(false);
 
   const productMap = useMemo(() => buildProductMap(products), [products]);
   const availableProductsForSelect = useMemo(() => {
@@ -262,6 +264,29 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
     [form, items, productMap, t],
   );
 
+  function loadNextLookSlug() {
+    if (mode !== 'create') {
+      return;
+    }
+
+    api.looks.getNextSlugs(1)
+      .then((response) => {
+        const nextSlug = response.items[0];
+        setForm((current) => ({
+          ...current,
+          slug: applyGeneratedLookSlug({
+            mode,
+            currentSlug: current.slug,
+            generatedSlug: nextSlug,
+            wasManuallyEdited: manualSlugEditRef.current,
+          }),
+        }));
+      })
+      .catch(() => {
+        setFormError(t('looks.slugAutofillFailed'));
+      });
+  }
+
   function loadEditor() {
     setLoading(true);
     setError(null);
@@ -273,6 +298,7 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
       .then(([productList, loadedLook]) => {
         setProducts(productList.items);
         if (loadedLook) {
+          manualSlugEditRef.current = true;
           setLook(loadedLook);
           setForm({
             title: loadedLook.title,
@@ -295,9 +321,11 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
               })),
           );
         } else {
+          manualSlugEditRef.current = false;
           setLook(null);
           setForm(initialLookForm);
           setItems([]);
+          loadNextLookSlug();
         }
       })
       .catch(setError)
@@ -505,7 +533,10 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
               <span>{t('looks.slug')}</span>
               <input
                 value={form.slug}
-                onChange={(event) => updateField('slug', event.target.value)}
+                onChange={(event) => {
+                  manualSlugEditRef.current = true;
+                  updateField('slug', event.target.value);
+                }}
               />
               <small className="field-hint">{t('looks.slugInputHint')}</small>
             </label>

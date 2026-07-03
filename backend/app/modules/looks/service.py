@@ -6,6 +6,7 @@ from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.numeric_identifiers import allocate_numeric_identifiers
 from app.common.pagination import PageMeta
 from app.core.errors import AppError
 from app.db.models import (
@@ -36,6 +37,7 @@ from app.modules.looks.schemas import (
     LookList,
     LookProductSummaryRead,
     LookPublicItemRead,
+    LookSlugList,
     LookUpdate,
 )
 from app.modules.route_aliases.service import RouteAliasesService
@@ -43,6 +45,9 @@ from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
 
 ONE_SIZE = "ONE_SIZE"
+NUMERIC_LOOK_SLUG_MIN = 1
+NUMERIC_LOOK_SLUG_MAX = 99999
+NUMERIC_LOOK_SLUG_EXHAUSTED_MESSAGE = "Numeric Look slug range 00001-99999 is exhausted."
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +179,23 @@ class LooksService:
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         return LookAdminRead.model_validate(look)
+
+    async def generate_look_slugs(self, count: int) -> LookSlugList:
+        existing_slugs = await self.repository.list_numeric_slug_candidates()
+        alias_slugs = await self.route_aliases.repository.list_active_alias_slugs(
+            RouteAliasEntityType.LOOK
+        )
+        existing_slugs.extend(alias_slugs)
+        return LookSlugList(
+            items=allocate_numeric_identifiers(
+                existing_slugs,
+                count,
+                min_value=NUMERIC_LOOK_SLUG_MIN,
+                max_value=NUMERIC_LOOK_SLUG_MAX,
+                width=5,
+                exhausted_message=NUMERIC_LOOK_SLUG_EXHAUSTED_MESSAGE,
+            )
+        )
 
     async def create_admin_look(
         self,

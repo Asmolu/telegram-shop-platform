@@ -12,6 +12,7 @@ from app.common.cache import (
     public_product_detail_key,
     public_products_list_key,
 )
+from app.common.numeric_identifiers import allocate_numeric_identifiers
 from app.common.pagination import PageMeta
 from app.core.config import settings
 from app.core.errors import AppError
@@ -864,24 +865,13 @@ class ProductsService:
         existing_slugs: list[str],
         count: int,
     ) -> list[str]:
-        used_numbers = {
-            value
-            for slug in existing_slugs
-            if (value := self._numeric_product_slug_value(slug)) is not None
-        }
-        generated: list[str] = []
-
-        for value in range(NUMERIC_PRODUCT_SLUG_MIN, NUMERIC_PRODUCT_SLUG_MAX + 1):
-            if value in used_numbers:
-                continue
-            used_numbers.add(value)
-            generated.append(self._format_numeric_product_slug(value))
-            if len(generated) == count:
-                return generated
-
-        raise AppError(
-            NUMERIC_PRODUCT_SLUG_EXHAUSTED_MESSAGE,
-            status.HTTP_400_BAD_REQUEST,
+        return allocate_numeric_identifiers(
+            existing_slugs,
+            count,
+            min_value=NUMERIC_PRODUCT_SLUG_MIN,
+            max_value=NUMERIC_PRODUCT_SLUG_MAX,
+            width=5,
+            exhausted_message=NUMERIC_PRODUCT_SLUG_EXHAUSTED_MESSAGE,
         )
 
     @staticmethod

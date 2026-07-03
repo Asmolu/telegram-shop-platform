@@ -144,6 +144,10 @@ class LookAdminList(BaseModel):
     meta: PageMeta
 
 
+class LookSlugList(BaseModel):
+    items: list[str]
+
+
 class LookProductSummaryRead(BaseModel):
     product_id: int
     product_slug: str

@@ -16,6 +16,7 @@ from app.modules.looks.schemas import (
     LookDetailRead,
     LookImageRead,
     LookList,
+    LookSlugList,
     LookUpdate,
 )
 from app.modules.looks.service import LooksService
@@ -68,6 +69,15 @@ async def list_admin_looks(
         offset=pagination.offset,
         status_filter=status_filter,
     )
+
+
+@admin_router.get("/slugs/next", response_model=LookSlugList)
+async def generate_look_slugs(
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[LooksService, Depends(get_looks_service)],
+    count: Annotated[int, Query(ge=1, le=100)] = 1,
+) -> LookSlugList:
+    return await service.generate_look_slugs(count)
 
 
 @admin_router.post("", response_model=LookAdminRead, status_code=status.HTTP_201_CREATED)

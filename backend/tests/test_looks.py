@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import UploadFile
@@ -21,12 +22,14 @@ from app.db.models import (
     ProductSizeGrid,
     ProductStatus,
     ProductVariant,
+    RouteAlias,
+    RouteAliasEntityType,
     User,
     UserRole,
 )
 from app.main import create_app
 from app.modules.looks.router import get_looks_service
-from app.modules.looks.schemas import LookCartAddRequest, LookCreate, LookItemInput
+from app.modules.looks.schemas import LookCartAddRequest, LookCreate, LookItemInput, LookUpdate
 from app.modules.looks.service import LooksService
 
 NOW = datetime(2026, 7, 2, 12, 0, tzinfo=UTC)
@@ -121,6 +124,13 @@ class FakeLooksRepository:
 
     async def get_by_slug(self, slug: str) -> Look | None:
         return next((look for look in self.looks.values() if look.slug == slug), None)
+
+    async def list_numeric_slug_candidates(self) -> list[str]:
+        return [
+            look.slug
+            for look in self.looks.values()
+            if len(look.slug) == 5 and "00001" <= look.slug <= "99999"
+        ]
 
     async def get_product_by_id(self, product_id: int) -> Product | None:
         return self.products.get(product_id)
@@ -233,6 +243,41 @@ class FakeCartRepository:
         cart.items.append(instance)
 
 
+class FakeRouteAliasRepository:
+    def __init__(self, aliases: list[RouteAlias] | None = None) -> None:
+        self.aliases = aliases or []
+
+    async def get_active_by_slug(
+        self,
+        entity_type: RouteAliasEntityType,
+        alias_slug: str,
+    ) -> RouteAlias | None:
+        return next(
+            (
+                alias
+                for alias in self.aliases
+                if alias.entity_type == entity_type
+                and alias.alias_slug == alias_slug
+                and alias.is_active
+            ),
+            None,
+        )
+
+    async def list_active_alias_slugs(self, entity_type: RouteAliasEntityType) -> list[str]:
+        return [
+            alias.alias_slug
+            for alias in self.aliases
+            if alias.entity_type == entity_type and alias.is_active
+        ]
+
+    def add(self, route_alias: RouteAlias) -> None:
+        if route_alias.is_active is None:
+            route_alias.is_active = True
+        route_alias.created_at = getattr(route_alias, "created_at", None) or NOW
+        route_alias.updated_at = getattr(route_alias, "updated_at", None) or NOW
+        self.aliases.append(route_alias)
+
+
 @pytest.mark.asyncio
 async def test_admin_can_create_look_with_hidden_active_product() -> None:
     service, repository, _cart_repository, _session, _storage = _looks_service()
@@ -327,6 +372,103 @@ async def test_duplicate_slug_returns_conflict() -> None:
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_look_duplicate_slug_returns_conflict() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    repository.add(_look(look_id=1, slug="first-look"))
+    repository.add(_look(look_id=2, slug="second-look"))
+
+    with pytest.raises(AppError) as exc_info:
+        await service.update_admin_look(1, LookUpdate(slug="second-look"))
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_starts_at_first_numeric_value() -> None:
+    service, _repository, _cart_repository, _session, _storage = _looks_service()
+
+    result = await service.generate_look_slugs(1)
+
+    assert result.items == ["00001"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_skips_existing_look_slug() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    repository.add(_look(look_id=1, slug="00001"))
+
+    result = await service.generate_look_slugs(1)
+
+    assert result.items == ["00002"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_skips_active_look_route_alias() -> None:
+    service, _repository, _cart_repository, _session, _storage = _looks_service(
+        aliases=[_alias(RouteAliasEntityType.LOOK, entity_id=1, alias_slug="00001")]
+    )
+
+    result = await service.generate_look_slugs(1)
+
+    assert result.items == ["00002"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_ignores_inactive_look_route_alias() -> None:
+    service, _repository, _cart_repository, _session, _storage = _looks_service(
+        aliases=[
+            _alias(
+                RouteAliasEntityType.LOOK,
+                entity_id=1,
+                alias_slug="00001",
+                is_active=False,
+            )
+        ]
+    )
+
+    result = await service.generate_look_slugs(1)
+
+    assert result.items == ["00001"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_ignores_product_and_category_route_aliases() -> None:
+    service, _repository, _cart_repository, _session, _storage = _looks_service(
+        aliases=[
+            _alias(RouteAliasEntityType.PRODUCT, entity_id=1, alias_slug="00001"),
+            _alias(RouteAliasEntityType.CATEGORY, entity_id=1, alias_slug="00002"),
+        ]
+    )
+
+    result = await service.generate_look_slugs(2)
+
+    assert result.items == ["00001", "00002"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_returns_multiple_values() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service(
+        aliases=[_alias(RouteAliasEntityType.LOOK, entity_id=1, alias_slug="00002")]
+    )
+    repository.add(_look(look_id=1, slug="00001"))
+
+    result = await service.generate_look_slugs(3)
+
+    assert result.items == ["00003", "00004", "00005"]
+
+
+@pytest.mark.asyncio
+async def test_generate_look_slugs_reports_exhaustion() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    repository.list_numeric_slug_candidates = AsyncMock(
+        return_value=[f"{value:05d}" for value in range(1, 100000)]
+    )
+
+    with pytest.raises(AppError, match="Numeric Look slug range 00001-99999 is exhausted"):
+        await service.generate_look_slugs(1)
 
 
 @pytest.mark.asyncio
@@ -715,7 +857,61 @@ def test_regular_user_cannot_access_admin_look_endpoints() -> None:
     assert response.status_code == 403
 
 
-def _looks_service() -> tuple[
+def test_look_slug_generation_allows_seller() -> None:
+    app = create_app()
+
+    class FakeLooksService:
+        async def generate_look_slugs(self, count: int) -> dict[str, object]:
+            assert count == 2
+            return {"items": ["00001", "00002"]}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_looks_service] = lambda: FakeLooksService()
+    try:
+        response = TestClient(app).get("/api/v1/looks/admin/slugs/next?count=2")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": ["00001", "00002"]}
+
+
+def test_look_slug_generation_rejects_invalid_count() -> None:
+    app = create_app()
+
+    class FakeLooksService:
+        async def generate_look_slugs(self, count: int) -> dict[str, object]:
+            return {"items": [f"{count:05d}"]}
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_looks_service] = lambda: FakeLooksService()
+    try:
+        response = TestClient(app).get("/api/v1/looks/admin/slugs/next?count=0")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
+def test_look_slug_generation_requires_seller_or_admin() -> None:
+    app = create_app()
+    with TestClient(app) as client:
+        unauthenticated = client.get("/api/v1/looks/admin/slugs/next")
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    app.dependency_overrides[get_looks_service] = lambda: object()
+    try:
+        regular_user = TestClient(app).get("/api/v1/looks/admin/slugs/next")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert unauthenticated.status_code == 401
+    assert regular_user.status_code == 403
+
+
+def _looks_service_with_aliases(
+    aliases: list[RouteAlias] | None = None,
+) -> tuple[
     LooksService,
     FakeLooksRepository,
     FakeCartRepository,
@@ -731,7 +927,21 @@ def _looks_service() -> tuple[
     cart_repository = FakeCartRepository(repository.products)
     service.repository = repository  # type: ignore[assignment]
     service.cart_repository = cart_repository  # type: ignore[assignment]
+    service.route_aliases.repository = FakeRouteAliasRepository(aliases)  # type: ignore[assignment]
     return service, repository, cart_repository, session, storage
+
+
+def _looks_service(
+    *,
+    aliases: list[RouteAlias] | None = None,
+) -> tuple[
+    LooksService,
+    FakeLooksRepository,
+    FakeCartRepository,
+    DummySession,
+    FakeStorage,
+]:
+    return _looks_service_with_aliases(aliases)
 
 
 def _look(
@@ -831,6 +1041,23 @@ def _variant(
         sku=f"SKU-{variant_id}",
         stock_quantity=stock_quantity,
         reserved_quantity=reserved_quantity,
+        is_active=is_active,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+def _alias(
+    entity_type: RouteAliasEntityType,
+    *,
+    entity_id: int,
+    alias_slug: str,
+    is_active: bool = True,
+) -> RouteAlias:
+    return RouteAlias(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        alias_slug=alias_slug,
         is_active=is_active,
         created_at=NOW,
         updated_at=NOW,

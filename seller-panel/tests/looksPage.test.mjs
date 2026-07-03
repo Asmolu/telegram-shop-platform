@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { applyGeneratedLookSlug } from '../src/pages/Looks/lookSlugAutofill.ts';
+
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../src/shared/api/client.ts', import.meta.url), 'utf8');
 const typesSource = readFileSync(new URL('../src/shared/api/types.ts', import.meta.url), 'utf8');
@@ -25,10 +27,13 @@ test('seller API exposes looks admin methods and types', () => {
   assert.match(apiSource, /looks: \{/);
   assert.match(apiSource, /\/looks\/admin/);
   assert.match(apiSource, /\/looks\/admin\/\$\{lookId\}/);
+  assert.match(apiSource, /getNextSlugs/);
+  assert.match(apiSource, /\/looks\/admin\/slugs\/next/);
   assert.match(apiSource, /\/looks\/admin\/\$\{lookId\}\/images/);
   assert.match(apiSource, /deleteImage/);
   assert.match(typesSource, /export type LookStatus/);
   assert.match(typesSource, /export interface Look/);
+  assert.match(typesSource, /export interface LookSlugList/);
   assert.match(typesSource, /export interface LookCreatePayload/);
   assert.match(typesSource, /export interface LookUpdatePayload/);
 });
@@ -45,6 +50,51 @@ test('looks list renders filters badges price and archive action', () => {
   assert.match(i18nSource, /looks\.status\.ARCHIVED/);
 });
 
+test('new look editor can apply a generated numeric look slug', () => {
+  assert.equal(
+    applyGeneratedLookSlug({
+      mode: 'create',
+      currentSlug: '',
+      generatedSlug: '00017',
+      wasManuallyEdited: false,
+    }),
+    '00017',
+  );
+});
+
+test('look manual slug edits are not overwritten by async generation', () => {
+  assert.equal(
+    applyGeneratedLookSlug({
+      mode: 'create',
+      currentSlug: '',
+      generatedSlug: '00018',
+      wasManuallyEdited: true,
+    }),
+    '',
+  );
+  assert.equal(
+    applyGeneratedLookSlug({
+      mode: 'create',
+      currentSlug: 'manual-look',
+      generatedSlug: '00018',
+      wasManuallyEdited: false,
+    }),
+    'manual-look',
+  );
+});
+
+test('editing an existing look does not apply generated look slugs', () => {
+  assert.equal(
+    applyGeneratedLookSlug({
+      mode: 'edit',
+      currentSlug: 'existing-look',
+      generatedSlug: '00019',
+      wasManuallyEdited: false,
+    }),
+    'existing-look',
+  );
+});
+
 test('look editor has required fields defaults and validation', () => {
   assert.match(pageSource, /status: 'DRAFT'/);
   assert.match(pageSource, /isListed: true/);
@@ -58,6 +108,24 @@ test('look editor has required fields defaults and validation', () => {
   assert.match(pageSource, /activeNeedsActiveProducts/);
   assert.match(pageSource, /quantityInvalid/);
   assert.match(pageSource, /formatRequestError/);
+});
+
+test('look editor requests and fills backend generated slugs only for new looks', () => {
+  assert.match(pageSource, /api\.looks\.getNextSlugs\(1\)/);
+  assert.match(pageSource, /if \(mode !== 'create'\)/);
+  assert.match(pageSource, /slug: applyGeneratedLookSlug/);
+  assert.match(pageSource, /manualSlugEditRef\.current = false/);
+  assert.match(pageSource, /manualSlugEditRef\.current = true/);
+  assert.match(pageSource, /setFormError\(t\('looks\.slugAutofillFailed'\)\)/);
+  assert.match(i18nSource, /looks\.slugAutofillFailed/);
+  assert.match(i18nSource, /Slug is generated automatically/);
+});
+
+test('look editor preserves loaded slugs and sends slug in create payloads', () => {
+  assert.match(pageSource, /mode === 'edit' && lookId \? api\.looks\.getAdmin\(lookId\)/);
+  assert.match(pageSource, /slug: loadedLook\.slug/);
+  assert.match(pageSource, /loadNextLookSlug\(\)/);
+  assert.match(pageSource, /slug: form\.slug\.trim\(\)/);
 });
 
 test('look editor supports product components and hidden product badges', () => {

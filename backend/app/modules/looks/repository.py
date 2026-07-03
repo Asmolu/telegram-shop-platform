@@ -70,6 +70,16 @@ class LooksRepository:
         result = await self.session.execute(self._look_select().where(Look.slug == slug))
         return result.scalars().unique().one_or_none()
 
+    async def list_numeric_slug_candidates(self) -> list[str]:
+        result = await self.session.execute(
+            select(Look.slug).where(
+                func.length(Look.slug) == 5,
+                Look.slug >= "00001",
+                Look.slug <= "99999",
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_product_by_id(self, product_id: int) -> Product | None:
         result = await self.session.execute(
             select(Product)

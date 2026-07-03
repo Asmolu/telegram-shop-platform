@@ -491,6 +491,10 @@ export interface Look {
   updated_at: string;
 }
 
+export interface LookSlugList {
+  items: string[];
+}
+
 export interface LookItemPayload {
   product_id: number;
   position?: number;

@@ -26,6 +26,7 @@ import type {
   DashboardSummary,
   Look,
   LookCreatePayload,
+  LookSlugList,
   LookStatus,
   LookUpdatePayload,
   ManualPayment,
@@ -447,6 +448,10 @@ export const api = {
     listAdmin: (query: QueryParams = {}) =>
       apiRequest<PageList<Look>>('/looks/admin', { query: clampQueryLimit(query, 100) }),
     getAdmin: (lookId: number) => apiRequest<Look>(`/looks/admin/${lookId}`),
+    getNextSlugs: (count = 1) =>
+      apiRequest<LookSlugList>('/looks/admin/slugs/next', {
+        query: { count },
+      }),
     create: (body: LookCreatePayload) =>
       apiRequest<Look>('/looks/admin', { method: 'POST', body }),
     update: (lookId: number, body: LookUpdatePayload) =>
