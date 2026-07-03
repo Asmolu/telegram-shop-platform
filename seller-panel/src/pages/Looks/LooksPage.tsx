@@ -872,6 +872,7 @@ function LookItemCard({
         <div className="look-product-meta">
           <span>{formatMoney(product.base_price, language)}</span>
           <span>{t('looks.skus')}: {activeSkus.join(', ') || t('common.none')}</span>
+          <span>{t('productEditor.sizeGroup')}: {formatProductSizeGroup(product, t)}</span>
           <span>{t('looks.colors')}: {activeColors.join(', ') || t('productEditor.noColor')}</span>
           <span>{t('looks.sizes')}: {activeSizes.join(', ') || t('common.none')}</span>
         </div>
@@ -935,6 +936,19 @@ function calculateRowsDefaultPrice(items: LookItemRow[], productMap: Map<number,
       const product = productMap.get(item.productId);
       return sum + Number(product?.base_price ?? 0) * item.quantity;
     }, 0);
+}
+
+function formatProductSizeGroup(
+  product: Product,
+  t: (key: string, params?: Record<string, string | number | null | undefined>) => string,
+): string {
+  if (product.size_group === 'FOOTWEAR') {
+    return t('productEditor.sizeGroupFootwear');
+  }
+  if (product.size_group === 'ONE_SIZE') {
+    return t('productEditor.sizeGroupOneSize');
+  }
+  return t('productEditor.sizeGroupClothing');
 }
 
 function buildLookPayload(form: LookFormState, items: LookItemRow[]): LookCreatePayload {

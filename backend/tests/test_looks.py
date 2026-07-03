@@ -21,6 +21,7 @@ from app.db.models import (
     LookStatus,
     Product,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductStatus,
     ProductVariant,
     RouteAlias,
@@ -644,6 +645,10 @@ async def test_public_detail_includes_hidden_component_product_and_computes_pric
     assert detail.default_price == Decimal("200.00")
     assert detail.old_price == Decimal("240.00")
     assert detail.available_sizes == ["M"]
+    assert detail.available_clothing_sizes == ["M"]
+    assert detail.available_footwear_sizes == []
+    assert detail.requires_clothing_size is True
+    assert detail.requires_footwear_size is False
     assert detail.is_available is True
 
 
@@ -681,6 +686,7 @@ async def test_common_sizes_and_one_size_components_are_computed() -> None:
     )
     bag = _product(
         product_id=3,
+        size_group=ProductSizeGroup.ONE_SIZE,
         variants=[_variant(variant_id=5, product_id=3, size="ONE_SIZE")],
     )
     repository.add(
@@ -698,7 +704,82 @@ async def test_common_sizes_and_one_size_components_are_computed() -> None:
     detail = await service.get_public_look("common-size")
 
     assert detail.available_sizes == ["M"]
+    assert detail.available_clothing_sizes == ["M"]
+    assert detail.available_footwear_sizes == []
+    assert detail.requires_clothing_size is True
+    assert detail.requires_footwear_size is False
     assert detail.items[2].one_size is True
+    assert detail.items[2].size_group == ProductSizeGroup.ONE_SIZE
+
+
+@pytest.mark.asyncio
+async def test_look_with_footwear_only_returns_footwear_sizes() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    shoes = _product(
+        product_id=1,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[
+            _variant(variant_id=1, product_id=1, size="40"),
+            _variant(variant_id=2, product_id=1, size="41"),
+        ],
+    )
+    repository.add(
+        _look(
+            look_id=1,
+            slug="footwear-look",
+            items=[_look_item(item_id=1, look_id=1, product=shoes)],
+        )
+    )
+
+    detail = await service.get_public_look("footwear-look")
+
+    assert detail.available_sizes == ["40", "41"]
+    assert detail.available_clothing_sizes == []
+    assert detail.available_footwear_sizes == ["40", "41"]
+    assert detail.requires_clothing_size is False
+    assert detail.requires_footwear_size is True
+    assert detail.items[0].size_group == ProductSizeGroup.FOOTWEAR
+
+
+@pytest.mark.asyncio
+async def test_look_with_clothing_and_footwear_returns_groups_separately() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    hoodie = _product(
+        product_id=1,
+        variants=[
+            _variant(variant_id=1, product_id=1, size="M"),
+            _variant(variant_id=2, product_id=1, size="L"),
+        ],
+    )
+    shoes = _product(
+        product_id=2,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[
+            _variant(variant_id=3, product_id=2, size="40"),
+            _variant(variant_id=4, product_id=2, size="41"),
+        ],
+    )
+    repository.add(
+        _look(
+            look_id=1,
+            slug="mixed-look",
+            items=[
+                _look_item(item_id=1, look_id=1, product=hoodie),
+                _look_item(item_id=2, look_id=1, product=shoes),
+            ],
+        )
+    )
+
+    detail = await service.get_public_look("mixed-look")
+
+    assert detail.available_sizes == ["L", "M"]
+    assert detail.available_clothing_sizes == ["L", "M"]
+    assert detail.available_footwear_sizes == ["40", "41"]
+    assert detail.requires_clothing_size is True
+    assert detail.requires_footwear_size is True
+    assert detail.is_available is True
 
 
 @pytest.mark.asyncio
@@ -720,6 +801,8 @@ async def test_no_common_size_marks_look_unavailable() -> None:
     detail = await service.get_public_look("no-common-size")
 
     assert detail.available_sizes == []
+    assert detail.available_clothing_sizes == []
+    assert detail.available_footwear_sizes == []
     assert detail.is_available is False
 
 
@@ -757,6 +840,87 @@ async def test_add_look_to_cart_adds_selected_items_atomically() -> None:
     group_ids = {item.source_group_id for item in response.cart.items}
     assert len(group_ids) == 1
     assert None not in group_ids
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_clothing_and_footwear_uses_separate_sizes() -> None:
+    service, repository, cart_repository, _session, _storage = _looks_service()
+    hoodie = _product(
+        product_id=1,
+        variants=[
+            _variant(variant_id=1, product_id=1, size="M"),
+            _variant(variant_id=2, product_id=1, size="L"),
+        ],
+    )
+    shoes = _product(
+        product_id=2,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[
+            _variant(variant_id=3, product_id=2, size="41"),
+            _variant(variant_id=4, product_id=2, size="42"),
+        ],
+    )
+    repository.products = {1: hoodie, 2: shoes}
+    cart_repository.products = repository.products
+    cart_repository.variants = {
+        variant.id: variant
+        for product in repository.products.values()
+        for variant in product.variants
+    }
+    repository.add(
+        _look(
+            look_id=1,
+            slug="mixed-cart-look",
+            items=[
+                _look_item(item_id=1, look_id=1, product=hoodie),
+                _look_item(item_id=2, look_id=1, product=shoes),
+            ],
+        )
+    )
+
+    response = await service.add_look_to_cart(
+        slug="mixed-cart-look",
+        user_id=1,
+        payload=LookCartAddRequest(
+            selected_item_ids=[1, 2],
+            clothing_size="M",
+            footwear_size="42",
+        ),
+    )
+
+    assert {item.product_variant.size for item in response.cart.items} == {"M", "42"}
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_rejects_ambiguous_legacy_size_for_mixed_groups() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    hoodie = _product(product_id=1)
+    shoes = _product(
+        product_id=2,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[_variant(variant_id=2, product_id=2, size="42")],
+    )
+    repository.add(
+        _look(
+            look_id=1,
+            slug="mixed-legacy-size",
+            items=[
+                _look_item(item_id=1, look_id=1, product=hoodie),
+                _look_item(item_id=2, look_id=1, product=shoes),
+            ],
+        )
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await service.add_look_to_cart(
+            slug="mixed-legacy-size",
+            user_id=1,
+            payload=LookCartAddRequest(selected_item_ids=[1, 2], size="M"),
+        )
+
+    assert exc_info.value.message == "Выберите размер одежды"
 
 
 @pytest.mark.asyncio
@@ -858,7 +1022,78 @@ async def test_add_look_to_cart_rejects_missing_size_for_clothing() -> None:
             payload=LookCartAddRequest(selected_item_ids=[1]),
         )
 
-    assert exc_info.value.message == "Size is required for selected Look items"
+    assert exc_info.value.message == "Выберите размер одежды"
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_rejects_missing_footwear_size() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    shoes = _product(
+        product_id=1,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[_variant(variant_id=1, product_id=1, size="42")],
+    )
+    repository.add(
+        _look(
+            look_id=1,
+            slug="needs-shoe-size",
+            items=[_look_item(item_id=1, look_id=1, product=shoes)],
+        )
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await service.add_look_to_cart(
+            slug="needs-shoe-size",
+            user_id=1,
+            payload=LookCartAddRequest(selected_item_ids=[1]),
+        )
+
+    assert exc_info.value.message == "Выберите размер обуви"
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_footwear_only_accepts_legacy_size() -> None:
+    service, repository, cart_repository, _session, _storage = _looks_service()
+    shoes = _product(
+        product_id=1,
+        size_grid=ProductSizeGrid.SHOES_EU,
+        size_group=ProductSizeGroup.FOOTWEAR,
+        variants=[_variant(variant_id=1, product_id=1, size="42")],
+    )
+    repository.products = {1: shoes}
+    cart_repository.products = repository.products
+    cart_repository.variants = {1: shoes.variants[0]}
+    repository.add(
+        _look(
+            look_id=1,
+            slug="shoe-look",
+            items=[_look_item(item_id=1, look_id=1, product=shoes)],
+        )
+    )
+
+    response = await service.add_look_to_cart(
+        slug="shoe-look",
+        user_id=1,
+        payload=LookCartAddRequest(selected_item_ids=[1], size="42"),
+    )
+
+    assert response.cart.items[0].product_variant.size == "42"
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_rejects_unavailable_group_size() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    repository.add(_look(look_id=1, slug="unavailable-size"))
+
+    with pytest.raises(AppError) as exc_info:
+        await service.add_look_to_cart(
+            slug="unavailable-size",
+            user_id=1,
+            payload=LookCartAddRequest(selected_item_ids=[1], clothing_size="XL"),
+        )
+
+    assert exc_info.value.message == "Выбранный размер одежды недоступен"
 
 
 @pytest.mark.asyncio
@@ -866,6 +1101,7 @@ async def test_one_size_only_look_can_add_without_size() -> None:
     service, repository, cart_repository, _session, _storage = _looks_service()
     bag = _product(
         product_id=1,
+        size_group=ProductSizeGroup.ONE_SIZE,
         variants=[_variant(variant_id=1, product_id=1, size="ONE_SIZE")],
     )
     repository.products = {1: bag}
@@ -933,7 +1169,7 @@ async def test_add_look_to_cart_is_atomic_when_component_has_insufficient_stock(
             payload=LookCartAddRequest(selected_item_ids=[1, 2], size="M"),
         )
 
-    assert exc_info.value.message == "Insufficient stock"
+    assert exc_info.value.message == "Выбранный размер одежды недоступен"
     assert cart_repository.carts == {}
     assert session.commit_count == 0
 
@@ -1126,6 +1362,8 @@ def _product(
     base_price: Decimal = Decimal("59.90"),
     old_price: Decimal | None = None,
     variants: list[ProductVariant] | None = None,
+    size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA,
+    size_group: ProductSizeGroup = ProductSizeGroup.CLOTHING,
 ) -> Product:
     product = Product(
         id=product_id,
@@ -1135,7 +1373,8 @@ def _product(
         description="Product description",
         base_price=base_price,
         old_price=old_price,
-        size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        size_grid=size_grid,
+        size_group=size_group,
         status=status_value,
         is_listed=is_listed,
         is_returnable=True,

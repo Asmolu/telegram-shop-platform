@@ -103,3 +103,15 @@ test('seller API types include product visibility and returnability fields', () 
   assert.match(typesSource, /is_listed\?: boolean/);
   assert.match(typesSource, /is_returnable\?: boolean/);
 });
+
+test('product editor exposes and saves product size group', () => {
+  assert.match(typesSource, /export type ProductSizeGroup = 'CLOTHING' \| 'FOOTWEAR' \| 'ONE_SIZE'/);
+  assert.match(typesSource, /size_group: ProductSizeGroup/);
+  assert.match(typesSource, /size_group\?: ProductSizeGroup/);
+  assert.match(pageSource, /sizeGroup: 'CLOTHING'/);
+  assert.match(pageSource, /loadedProduct\.size_group \?\? 'CLOTHING'/);
+  assert.match(pageSource, /size_group: form\.sizeGroup/);
+  assert.match(pageSource, /productEditor\.sizeGroup/);
+  assert.match(pageSource, /productEditor\.sizeGroupFootwear/);
+  assert.match(i18nSource, /'productEditor\.sizeGroup': 'Тип размера'/);
+});

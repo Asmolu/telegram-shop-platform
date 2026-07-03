@@ -15,7 +15,15 @@ from starlette.datastructures import Headers
 from app.common.deps import get_current_user
 from app.core.config import settings
 from app.core.errors import AppError
-from app.db.models import Product, ProductImage, ProductSizeGrid, ProductStatus, User, UserRole
+from app.db.models import (
+    Product,
+    ProductImage,
+    ProductSizeGrid,
+    ProductSizeGroup,
+    ProductStatus,
+    User,
+    UserRole,
+)
 from app.main import create_app
 from app.modules.products.schemas import ProductImageRead
 from app.modules.uploads.derivative_backfill import backfill_product_image_derivatives
@@ -751,6 +759,7 @@ def _product() -> Product:
         description="Warm",
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        size_group=ProductSizeGroup.CLOTHING,
         status=ProductStatus.DRAFT,
         is_listed=True,
         is_returnable=True,

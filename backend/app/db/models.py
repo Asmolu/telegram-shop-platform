@@ -73,6 +73,12 @@ class ProductSizeGrid(StrEnum):
     SHOES_RU = "shoes_ru"
 
 
+class ProductSizeGroup(StrEnum):
+    CLOTHING = "CLOTHING"
+    FOOTWEAR = "FOOTWEAR"
+    ONE_SIZE = "ONE_SIZE"
+
+
 class ProductImageBadgeType(StrEnum):
     NONE = "none"
     NEW = "new"
@@ -948,6 +954,12 @@ class Product(Base):
         nullable=False,
         default=ProductSizeGrid.CLOTHING_ALPHA,
         server_default=ProductSizeGrid.CLOTHING_ALPHA.value,
+    )
+    size_group: Mapped[ProductSizeGroup] = mapped_column(
+        Enum(ProductSizeGroup, name="product_size_group", values_callable=_enum_values),
+        nullable=False,
+        default=ProductSizeGroup.CLOTHING,
+        server_default=ProductSizeGroup.CLOTHING.value,
     )
     image_badge_type: Mapped[ProductImageBadgeType] = mapped_column(
         Enum(

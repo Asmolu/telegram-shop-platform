@@ -38,6 +38,7 @@ from app.db.models import (
     ProductImageBadgeType,
     ProductRelatedProduct,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductVariant,
     ReturnRefund,
     ReturnRefundStatus,
@@ -841,6 +842,31 @@ def test_eu_footwear_size_grid_migration_is_additive() -> None:
     assert "ALTER TYPE product_size_grid ADD VALUE IF NOT EXISTS 'shoes_eu'" in content
     assert "UPDATE products" not in content
     assert "UPDATE order_items" not in content
+
+
+def test_product_size_group_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260703_0047_add_product_size_group.py"
+    )
+    content = migration_path.read_text()
+    product_table = Product.__table__
+
+    assert "product_size_group" in content
+    assert "CLOTHING" in content
+    assert "FOOTWEAR" in content
+    assert "ONE_SIZE" in content
+    assert "UPDATE products" in content
+    assert "product_variants" in content
+    assert Product.__table__.c.size_group.type.enums == [
+        ProductSizeGroup.CLOTHING.value,
+        ProductSizeGroup.FOOTWEAR.value,
+        ProductSizeGroup.ONE_SIZE.value,
+    ]
+    assert product_table.c.size_group.nullable is False
+    assert product_table.c.size_group.default.arg == ProductSizeGroup.CLOTHING
 
 
 def test_related_products_and_image_badges_migration_contract() -> None:

@@ -6,6 +6,7 @@ export type PageMeta = {
 
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_eu' | 'shoes_ru';
+export type ProductSizeGroup = 'CLOTHING' | 'FOOTWEAR' | 'ONE_SIZE';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type ProductImageBadgeColor =
   | 'purple'
@@ -118,6 +119,7 @@ export type Product = {
   old_price?: string | null;
   compare_at_price?: string | null;
   size_grid: ProductSizeGrid;
+  size_group?: ProductSizeGroup;
   image_badge_type: ProductImageBadgeType;
   image_badge_text?: string | null;
   image_badge_color?: ProductImageBadgeColor | null;
@@ -230,6 +232,7 @@ export type LookItem = {
   old_price?: string | number | null;
   quantity: number;
   is_default_selected: boolean;
+  size_group: ProductSizeGroup;
   available_sizes: string[];
   one_size: boolean;
   is_available: boolean;
@@ -246,6 +249,10 @@ export type LookCard = {
   item_count: number;
   is_available: boolean;
   available_sizes: string[];
+  available_clothing_sizes: string[];
+  available_footwear_sizes: string[];
+  requires_clothing_size: boolean;
+  requires_footwear_size: boolean;
 };
 
 export type LookList = {
@@ -281,12 +288,18 @@ export type LookDetail = {
   default_price: string | number;
   old_price?: string | number | null;
   available_sizes: string[];
+  available_clothing_sizes: string[];
+  available_footwear_sizes: string[];
+  requires_clothing_size: boolean;
+  requires_footwear_size: boolean;
   is_available: boolean;
 };
 
 export type LookCartPayload = {
   selected_item_ids: number[];
   size?: string | null;
+  clothing_size?: string | null;
+  footwear_size?: string | null;
 };
 
 export type LookCartResponse = {

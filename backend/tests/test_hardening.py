@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 
 from app.core.config import DEFAULT_JWT_SECRET_KEY, Settings, join_public_url, settings
 from app.core.rate_limit import reset_in_memory_rate_limiter
-from app.db.models import Category, Product, ProductImageBadgeType, ProductSizeGrid, ProductStatus
+from app.db.models import (
+    Category,
+    Product,
+    ProductImageBadgeType,
+    ProductSizeGrid,
+    ProductSizeGroup,
+    ProductStatus,
+)
 from app.main import create_app
 from app.modules.products.schemas import ProductCardList, ProductUpdate
 from app.modules.products.service import ProductsService
@@ -142,6 +149,7 @@ def _product(status: ProductStatus = ProductStatus.ACTIVE) -> Product:
         description="Warm",
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        size_group=ProductSizeGroup.CLOTHING,
         image_badge_type=ProductImageBadgeType.NONE,
         image_badge_text=None,
         image_badge_color=None,

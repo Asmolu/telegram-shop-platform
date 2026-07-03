@@ -7,6 +7,7 @@ import type {
   ProductImageBadgePosition,
   ProductImageBadgeType,
   ProductSizeGrid,
+  ProductSizeGroup,
   ProductStatus,
   ProductVariant,
   Tag,
@@ -61,6 +62,7 @@ interface ProductFormState {
   searchPriority: string;
   searchAliases: string;
   sizeGrid: ProductSizeGrid;
+  sizeGroup: ProductSizeGroup;
   imageBadgeType: ProductImageBadgeType;
   imageBadgeText: string;
   imageBadgeColor: ProductImageBadgeColor;
@@ -99,6 +101,7 @@ const initialForm: ProductFormState = {
   searchPriority: '2',
   searchAliases: '',
   sizeGrid: 'clothing_alpha',
+  sizeGroup: 'CLOTHING',
   imageBadgeType: 'none',
   imageBadgeText: '',
   imageBadgeColor: 'purple',
@@ -218,6 +221,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             isActive: variant.is_active,
           }));
           const loadedSizeGrid = loadedProduct.size_grid ?? 'clothing_alpha';
+          const loadedSizeGroup = loadedProduct.size_group ?? 'CLOTHING';
 
           setProduct(loadedProduct);
           setForm({
@@ -230,6 +234,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
             searchPriority: String(loadedProduct.search_priority ?? 2),
             searchAliases: loadedProduct.search_aliases ?? '',
             sizeGrid: loadedSizeGrid,
+            sizeGroup: loadedSizeGroup,
             imageBadgeType: loadedProduct.image_badge_type ?? 'none',
             imageBadgeText: loadedProduct.image_badge_text ?? '',
             imageBadgeColor:
@@ -652,6 +657,7 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         search_priority: parseSearchPriority(form.searchPriority),
         search_aliases: normalizeSearchAliases(form.searchAliases),
         size_grid: form.sizeGrid,
+        size_group: form.sizeGroup,
         image_badge_type: form.imageBadgeType,
         image_badge_text: form.imageBadgeType === 'custom' ? form.imageBadgeText.trim() : null,
         image_badge_color: form.imageBadgeColor,
@@ -1322,6 +1328,17 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
               {form.sizeGrid === 'shoes_ru' ? (
                 <option value="shoes_ru">{t('productEditor.sizeGridShoesRuLegacy')}</option>
               ) : null}
+            </select>
+          </label>
+          <label className="field">
+            <span>{t('productEditor.sizeGroup')}</span>
+            <select
+              value={form.sizeGroup}
+              onChange={(event) => updateField('sizeGroup', event.target.value as ProductSizeGroup)}
+            >
+              <option value="CLOTHING">{t('productEditor.sizeGroupClothing')}</option>
+              <option value="FOOTWEAR">{t('productEditor.sizeGroupFootwear')}</option>
+              <option value="ONE_SIZE">{t('productEditor.sizeGroupOneSize')}</option>
             </select>
           </label>
           <label className="field">

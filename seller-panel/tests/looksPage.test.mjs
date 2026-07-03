@@ -168,6 +168,8 @@ test('look editor supports product components and hidden product badges', () => 
   assert.match(pageSource, /duplicateProduct/);
   assert.match(pageSource, /isDefaultSelected/);
   assert.match(pageSource, /hasMultipleActiveColors/);
+  assert.match(pageSource, /formatProductSizeGroup/);
+  assert.match(pageSource, /productEditor\.sizeGroup/);
   assert.match(pageSource, /looks\.multiColorWarning/);
   assert.match(pageSource, /!product\.is_listed/);
   assert.match(pageSource, /moveItem/);

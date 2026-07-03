@@ -1,6 +1,7 @@
 export type UserRole = 'USER' | 'SELLER' | 'ADMIN';
 export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'OUT_OF_STOCK' | 'ARCHIVED';
 export type ProductSizeGrid = 'clothing_alpha' | 'shoes_eu' | 'shoes_ru';
+export type ProductSizeGroup = 'CLOTHING' | 'FOOTWEAR' | 'ONE_SIZE';
 export type ProductImageBadgeType = 'none' | 'new' | 'sale' | 'hit' | 'exclusive' | 'custom';
 export type ProductImageBadgeColor =
   | 'purple'
@@ -183,6 +184,7 @@ export interface Product {
   search_priority: 1 | 2 | 3;
   search_aliases: string | null;
   size_grid: ProductSizeGrid;
+  size_group: ProductSizeGroup;
   image_badge_type: ProductImageBadgeType;
   image_badge_text: string | null;
   image_badge_color: ProductImageBadgeColor | null;
@@ -220,6 +222,7 @@ export interface ProductCreate {
   search_priority?: 1 | 2 | 3;
   search_aliases?: string | null;
   size_grid?: ProductSizeGrid;
+  size_group?: ProductSizeGroup;
   image_badge_type?: ProductImageBadgeType;
   image_badge_text?: string | null;
   image_badge_color?: ProductImageBadgeColor | null;
@@ -244,6 +247,7 @@ export interface ProductUpdate {
   search_priority?: 1 | 2 | 3;
   search_aliases?: string | null;
   size_grid?: ProductSizeGrid;
+  size_group?: ProductSizeGroup;
   image_badge_type?: ProductImageBadgeType;
   image_badge_text?: string | null;
   image_badge_color?: ProductImageBadgeColor | null;

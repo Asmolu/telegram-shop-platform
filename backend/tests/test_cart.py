@@ -5,7 +5,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import AppError
-from app.db.models import Cart, CartItem, Product, ProductSizeGrid, ProductStatus, ProductVariant
+from app.db.models import (
+    Cart,
+    CartItem,
+    Product,
+    ProductSizeGrid,
+    ProductSizeGroup,
+    ProductStatus,
+    ProductVariant,
+)
 from app.main import create_app
 from app.modules.cart.schemas import (
     CartItemCreate,
@@ -358,6 +366,7 @@ def _product(
         description="Warm",
         base_price=Decimal("59.90"),
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        size_group=ProductSizeGroup.CLOTHING,
         status=status,
         is_listed=is_listed,
         is_returnable=is_returnable,

@@ -613,6 +613,7 @@ def test_public_product_list_includes_active_variants_and_availability() -> None
     assert response.json()["items"][0]["is_available"] is True
     assert response.json()["items"][0]["brand"] == "ICON STORE"
     assert response.json()["items"][0]["size_grid"] == "clothing_alpha"
+    assert response.json()["items"][0]["size_group"] == "CLOTHING"
     assert response.json()["items"][0]["image_badge_color"] == "green"
     assert response.json()["items"][0]["image_badge_position"] == "bottom-right"
     assert response.json()["items"][0]["variants"][0]["available_quantity"] == 3
@@ -675,6 +676,7 @@ def _product_response() -> dict[str, object]:
         "description": "Warm",
         "base_price": "59.90",
         "size_grid": "clothing_alpha",
+        "size_group": "CLOTHING",
         "image_badge_color": None,
         "image_badge_position": None,
         "status": "ACTIVE",

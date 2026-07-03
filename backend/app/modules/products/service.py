@@ -79,6 +79,7 @@ PRODUCT_AUDIT_FIELDS = (
     "search_priority",
     "search_aliases",
     "size_grid",
+    "size_group",
     "image_badge_type",
     "image_badge_text",
     "image_badge_color",
@@ -530,6 +531,11 @@ class ProductsService:
         if data.get("size_grid") is None and "size_grid" in data:
             raise AppError(
                 "size_grid must be clothing_alpha or shoes_eu",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if data.get("size_group") is None and "size_group" in data:
+            raise AppError(
+                "size_group must be CLOTHING, FOOTWEAR, or ONE_SIZE",
                 status.HTTP_400_BAD_REQUEST,
             )
         candidate_size_grid = data.get("size_grid", product.size_grid)

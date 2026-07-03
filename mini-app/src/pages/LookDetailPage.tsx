@@ -29,7 +29,8 @@ export function LookDetailPage() {
   const slug = React.useMemo(() => decodeURIComponent(pathname.replace('/looks/', '').split('/')[0] ?? ''), [pathname]);
   const [look, setLook] = React.useState<LookDetail | null>(null);
   const [selectedItemIds, setSelectedItemIds] = React.useState<Set<number>>(new Set());
-  const [selectedSize, setSelectedSize] = React.useState<string | null>(null);
+  const [selectedClothingSize, setSelectedClothingSize] = React.useState<string | null>(null);
+  const [selectedFootwearSize, setSelectedFootwearSize] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -80,8 +81,8 @@ export function LookDetailPage() {
     () => look?.items.filter((item) => selectedItemIds.has(item.look_item_id)) ?? [],
     [look, selectedItemIds],
   );
-  const availableSizes = React.useMemo(
-    () => getAvailableSizesForSelection(selectedItems),
+  const sizeState = React.useMemo(
+    () => getSizeStateForSelection(selectedItems),
     [selectedItems],
   );
   const selectedPrice = React.useMemo(
@@ -92,28 +93,46 @@ export function LookDetailPage() {
     () => getSelectedOldPrice(selectedItems, selectedPrice),
     [selectedItems, selectedPrice],
   );
-  const needsSize = selectedItems.some((item) => !item.one_size);
   const selectedItemsUnavailable = selectedItems.some((item) => !item.is_available);
-  const noCommonSize = selectedItems.length > 0 && availableSizes.length === 0;
-  const selectedSizeInvalid = needsSize && (!selectedSize || !availableSizes.includes(selectedSize));
+  const noClothingSize = sizeState.requiresClothingSize && sizeState.clothingSizes.length === 0;
+  const noFootwearSize = sizeState.requiresFootwearSize && sizeState.footwearSizes.length === 0;
+  const selectedClothingSizeInvalid = sizeState.requiresClothingSize
+    && (!selectedClothingSize || !sizeState.clothingSizes.includes(selectedClothingSize));
+  const selectedFootwearSizeInvalid = sizeState.requiresFootwearSize
+    && (!selectedFootwearSize || !sizeState.footwearSizes.includes(selectedFootwearSize));
   const ctaDisabled = cartAction !== null
     || selectedItems.length === 0
     || selectedItemsUnavailable
-    || noCommonSize
-    || selectedSizeInvalid;
+    || noClothingSize
+    || noFootwearSize
+    || selectedClothingSizeInvalid
+    || selectedFootwearSizeInvalid;
 
   React.useEffect(() => {
-    if (availableSizes.length === 0) {
-      if (selectedSize !== null) {
-        setSelectedSize(null);
+    if (!sizeState.requiresClothingSize || sizeState.clothingSizes.length === 0) {
+      if (selectedClothingSize !== null) {
+        setSelectedClothingSize(null);
       }
       return;
     }
 
-    if (!selectedSize || !availableSizes.includes(selectedSize)) {
-      setSelectedSize(availableSizes[0]);
+    if (selectedClothingSize && !sizeState.clothingSizes.includes(selectedClothingSize)) {
+      setSelectedClothingSize(null);
     }
-  }, [availableSizes, selectedSize]);
+  }, [selectedClothingSize, sizeState.clothingSizes, sizeState.requiresClothingSize]);
+
+  React.useEffect(() => {
+    if (!sizeState.requiresFootwearSize || sizeState.footwearSizes.length === 0) {
+      if (selectedFootwearSize !== null) {
+        setSelectedFootwearSize(null);
+      }
+      return;
+    }
+
+    if (selectedFootwearSize && !sizeState.footwearSizes.includes(selectedFootwearSize)) {
+      setSelectedFootwearSize(null);
+    }
+  }, [selectedFootwearSize, sizeState.footwearSizes, sizeState.requiresFootwearSize]);
 
   function toggleItem(item: LookItem) {
     setNotice(null);
@@ -139,11 +158,17 @@ export function LookDetailPage() {
     if (selectedItemsUnavailable) {
       return 'Один из выбранных товаров сейчас недоступен.';
     }
-    if (noCommonSize) {
-      return 'Нет общего доступного размера для выбранных товаров.';
+    if (noClothingSize) {
+      return 'Нет доступного размера одежды для выбранных товаров.';
     }
-    if (selectedSizeInvalid) {
-      return 'Выберите размер.';
+    if (noFootwearSize) {
+      return 'Нет доступного размера обуви для выбранных товаров.';
+    }
+    if (selectedClothingSizeInvalid) {
+      return 'Выберите размер одежды.';
+    }
+    if (selectedFootwearSizeInvalid) {
+      return 'Выберите размер обуви.';
     }
     return null;
   }
@@ -168,7 +193,8 @@ export function LookDetailPage() {
         setCartAction(action);
         const response = await addLookToCart(look.slug, {
           selected_item_ids: Array.from(selectedItemIds),
-          size: selectedSize ?? null,
+          clothing_size: selectedClothingSize ?? null,
+          footwear_size: selectedFootwearSize ?? null,
         });
         window.dispatchEvent(new Event('miniapp:cart-updated'));
 
@@ -240,29 +266,29 @@ export function LookDetailPage() {
         {look.description ? <p className="rating-line look-detail-description">{look.description}</p> : null}
       </section>
 
-      <section className="detail-card variant-selector-card look-size-card">
-        <div className="selector-heading">
-          <h2>Размер</h2>
-          {selectedSize ? <span>{formatLookSize(selectedSize)}</span> : null}
-        </div>
-        {availableSizes.length > 0 ? (
-          <div className="variant-carousel look-size-carousel" aria-label="Доступные размеры">
-            {availableSizes.map((size) => (
-              <button
-                className={`variant-chip variant-chip--size variant-button ${selectedSize === size ? 'is-selected variant-chip--selected' : ''}`}
-                key={size}
-                type="button"
-                onClick={() => setSelectedSize(size)}
-              >
-                <strong>{formatLookSize(size)}</strong>
-                <span>{size === 'ONE_SIZE' ? 'авто' : 'общий'}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="muted-text">Нет общего доступного размера для выбранных товаров.</p>
-        )}
-      </section>
+      {sizeState.requiresClothingSize ? (
+        <LookSizeSelector
+          ariaLabel="Доступные размеры одежды"
+          emptyMessage="Нет доступного размера одежды для выбранных товаров."
+          label="одежда"
+          selectedSize={selectedClothingSize}
+          sizes={sizeState.clothingSizes}
+          title="Размер одежды"
+          onSelect={setSelectedClothingSize}
+        />
+      ) : null}
+
+      {sizeState.requiresFootwearSize ? (
+        <LookSizeSelector
+          ariaLabel="Доступные размеры обуви"
+          emptyMessage="Нет доступного размера обуви для выбранных товаров."
+          label="обувь"
+          selectedSize={selectedFootwearSize}
+          sizes={sizeState.footwearSizes}
+          title="Размер обуви"
+          onSelect={setSelectedFootwearSize}
+        />
+      ) : null}
 
       <section className="detail-card look-components-card">
         <div className="selector-heading">
@@ -322,6 +348,50 @@ export function LookDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LookSizeSelector({
+  ariaLabel,
+  emptyMessage,
+  label,
+  selectedSize,
+  sizes,
+  title,
+  onSelect,
+}: {
+  ariaLabel: string;
+  emptyMessage: string;
+  label: string;
+  selectedSize: string | null;
+  sizes: string[];
+  title: string;
+  onSelect: (size: string) => void;
+}) {
+  return (
+    <section className="detail-card variant-selector-card look-size-card">
+      <div className="selector-heading">
+        <h2>{title}</h2>
+        {selectedSize ? <span>{formatLookSize(selectedSize)}</span> : null}
+      </div>
+      {sizes.length > 0 ? (
+        <div className="variant-carousel look-size-carousel" aria-label={ariaLabel}>
+          {sizes.map((size) => (
+            <button
+              className={`variant-chip variant-chip--size variant-button ${selectedSize === size ? 'is-selected variant-chip--selected' : ''}`}
+              key={size}
+              type="button"
+              onClick={() => onSelect(size)}
+            >
+              <strong>{formatLookSize(size)}</strong>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="muted-text">{emptyMessage}</p>
+      )}
+    </section>
   );
 }
 
@@ -440,7 +510,7 @@ function LookComponentCard({
         </span>
         <strong>{item.product_name}</strong>
         <span>
-          {item.one_size ? 'Единый размер' : getSizeSummary(item.available_sizes)}
+          {getComponentSizeSummary(item)}
           {item.quantity > 1 ? ` · ${item.quantity} шт.` : ''}
         </span>
         <em>{formatPrice(getItemTotal(item))}</em>
@@ -477,17 +547,24 @@ function getInitialSelectedItemIds(look: LookDetail) {
   return look.items[0] ? [look.items[0].look_item_id] : [];
 }
 
-function getAvailableSizesForSelection(items: LookItem[]) {
-  if (items.length === 0) {
+function getSizeStateForSelection(items: LookItem[]) {
+  const clothingSizes = getAvailableSizesForSelection(items, 'CLOTHING');
+  const footwearSizes = getAvailableSizesForSelection(items, 'FOOTWEAR');
+  return {
+    clothingSizes,
+    footwearSizes,
+    requiresClothingSize: items.some((item) => getLookItemSizeGroup(item) === 'CLOTHING'),
+    requiresFootwearSize: items.some((item) => getLookItemSizeGroup(item) === 'FOOTWEAR'),
+  };
+}
+
+function getAvailableSizesForSelection(items: LookItem[], group: 'CLOTHING' | 'FOOTWEAR') {
+  const groupItems = items.filter((item) => getLookItemSizeGroup(item) === group);
+  if (groupItems.length === 0) {
     return [];
   }
 
-  const sizedItems = items.filter((item) => !item.one_size);
-  if (sizedItems.length === 0) {
-    return ['ONE_SIZE'];
-  }
-
-  const [first, ...rest] = sizedItems.map((item) => (
+  const [first, ...rest] = groupItems.map((item) => (
     new Set(item.available_sizes.filter((size) => size && size !== 'ONE_SIZE'))
   ));
   if (!first) {
@@ -499,7 +576,19 @@ function getAvailableSizesForSelection(items: LookItem[]) {
     .sort(sortLookSize);
 }
 
+function getLookItemSizeGroup(item: LookItem) {
+  if (item.one_size || item.size_group === 'ONE_SIZE') {
+    return 'ONE_SIZE';
+  }
+  return item.size_group === 'FOOTWEAR' ? 'FOOTWEAR' : 'CLOTHING';
+}
+
 function sortLookSize(left: string, right: string) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
   const leftIndex = SIZE_ORDER.indexOf(left);
   const rightIndex = SIZE_ORDER.indexOf(right);
   const normalizedLeft = leftIndex < 0 ? SIZE_ORDER.length : leftIndex;
@@ -514,6 +603,15 @@ function formatLookSize(size: string) {
 function getSizeSummary(sizes: string[]) {
   const normalized = sizes.filter((size) => size && size !== 'ONE_SIZE').sort(sortLookSize);
   return normalized.length > 0 ? normalized.join(' / ') : 'Нет размера';
+}
+
+function getComponentSizeSummary(item: LookItem) {
+  const sizeGroup = getLookItemSizeGroup(item);
+  if (sizeGroup === 'ONE_SIZE') {
+    return 'Единый размер';
+  }
+  const prefix = sizeGroup === 'FOOTWEAR' ? 'Обувь' : 'Одежда';
+  return `${prefix}: ${getSizeSummary(item.available_sizes)}`;
 }
 
 function getItemTotal(item: LookItem) {

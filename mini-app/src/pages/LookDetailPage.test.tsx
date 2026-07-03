@@ -61,12 +61,13 @@ describe('LookDetailPage', () => {
     render(<LookDetailPage />);
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Summer Look' })).toBeTruthy();
-    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.getByText('Light city outfit')).toBeTruthy();
     expect(screen.getByText(/1\s*500/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Hoodie/ }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: /Cap/ }).getAttribute('aria-pressed')).toBe('true');
-    expect(within(screen.getByLabelText('Доступные размеры')).getByRole('button', { name: /M/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Размер одежды' })).toBeTruthy();
+    expect(within(screen.getByLabelText('Доступные размеры одежды')).getByRole('button', { name: /M/ })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('opens an old Look slug and replaces the route with the canonical slug', async () => {
@@ -107,12 +108,18 @@ describe('LookDetailPage', () => {
   it('adds selected items to cart through the atomic Look endpoint', async () => {
     render(<LookDetailPage />);
 
+    fireEvent.click(
+      within(await screen.findByLabelText('Доступные размеры одежды')).getByRole('button', {
+        name: /M/,
+      }),
+    );
     await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'В корзину' }));
 
     await waitFor(() => expect(addLookToCart).toHaveBeenCalledWith('summer-look', {
       selected_item_ids: [1, 2],
-      size: 'M',
+      clothing_size: 'M',
+      footwear_size: null,
     }));
     expect(await screen.findByText('Образ добавлен в корзину.')).toBeTruthy();
   });
@@ -120,6 +127,11 @@ describe('LookDetailPage', () => {
   it('uses the Look cart endpoint for buy-now and navigates to checkout', async () => {
     render(<LookDetailPage />);
 
+    fireEvent.click(
+      within(await screen.findByLabelText('Доступные размеры одежды')).getByRole('button', {
+        name: /M/,
+      }),
+    );
     await waitFor(() => expect((screen.getByRole('button', { name: 'Купить сейчас' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Купить сейчас' }));
 
@@ -127,11 +139,70 @@ describe('LookDetailPage', () => {
     await waitFor(() => expect(routerMocks.navigate).toHaveBeenCalledWith('/checkout?returnTo=%2Flooks%2Fsummer-look'));
   });
 
+  it('shows footwear selector for footwear-only Looks', async () => {
+    vi.mocked(getLook).mockResolvedValueOnce(lookFixture({
+      items: [footwearItem()],
+      default_selected_item_ids: [3],
+      default_price: '2200.00',
+      available_sizes: ['42', '43'],
+      available_clothing_sizes: [],
+      available_footwear_sizes: ['42', '43'],
+      requires_clothing_size: false,
+      requires_footwear_size: true,
+    }));
+
+    render(<LookDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Размер обуви' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Размер одежды' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(screen.getByLabelText('Доступные размеры обуви')).getByRole('button', { name: /42/ }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it('shows clothing and footwear selectors for mixed Looks and sends both sizes', async () => {
+    vi.mocked(getLook).mockResolvedValueOnce(lookFixture({
+      items: [sizedItem(), footwearItem()],
+      default_selected_item_ids: [1, 3],
+      default_price: '3200.00',
+      available_sizes: ['M', 'L'],
+      available_clothing_sizes: ['M', 'L'],
+      available_footwear_sizes: ['42', '43'],
+      requires_clothing_size: true,
+      requires_footwear_size: true,
+    }));
+
+    render(<LookDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Размер одежды' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Размер обуви' })).toBeTruthy();
+    expect(screen.queryByText('Нет общего доступного размера для выбранных товаров.')).toBeNull();
+    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(screen.getByLabelText('Доступные размеры одежды')).getByRole('button', { name: /M/ }));
+    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(screen.getByLabelText('Доступные размеры обуви')).getByRole('button', { name: /42/ }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(screen.getByRole('button', { name: 'В корзину' }));
+
+    await waitFor(() => expect(addLookToCart).toHaveBeenCalledWith('summer-look', {
+      selected_item_ids: [1, 3],
+      clothing_size: 'M',
+      footwear_size: '42',
+    }));
+  });
+
   it('handles ONE_SIZE-only Looks automatically', async () => {
     vi.mocked(getLook).mockResolvedValueOnce(lookFixture({
       items: [oneSizeItem()],
       default_selected_item_ids: [2],
       available_sizes: ['ONE_SIZE'],
+      available_clothing_sizes: [],
+      available_footwear_sizes: [],
+      requires_clothing_size: false,
+      requires_footwear_size: false,
       default_price: '500.00',
     }));
 
@@ -143,11 +214,12 @@ describe('LookDetailPage', () => {
 
     await waitFor(() => expect(addLookToCart).toHaveBeenCalledWith('summer-look', {
       selected_item_ids: [2],
-      size: 'ONE_SIZE',
+      clothing_size: null,
+      footwear_size: null,
     }));
   });
 
-  it('disables checkout when selected products have no common size', async () => {
+  it('disables checkout when selected clothing products have no available clothing size', async () => {
     vi.mocked(getLook).mockResolvedValueOnce(lookFixture({
       items: [
         {
@@ -175,11 +247,15 @@ describe('LookDetailPage', () => {
       ],
       default_selected_item_ids: [1, 3],
       available_sizes: [],
+      available_clothing_sizes: [],
+      available_footwear_sizes: [],
+      requires_clothing_size: true,
+      requires_footwear_size: false,
     }));
 
     render(<LookDetailPage />);
 
-    expect((await screen.findAllByText('Нет общего доступного размера для выбранных товаров.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Нет доступного размера одежды для выбранных товаров.')).length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -188,6 +264,11 @@ describe('LookDetailPage', () => {
 
     render(<LookDetailPage />);
 
+    fireEvent.click(
+      within(await screen.findByLabelText('Доступные размеры одежды')).getByRole('button', {
+        name: /M/,
+      }),
+    );
     await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'В корзину' }));
 
@@ -232,6 +313,10 @@ function lookFixture(overrides: Partial<LookDetail> = {}): LookDetail {
     default_price: '1500.00',
     old_price: null,
     available_sizes: ['M', 'L'],
+    available_clothing_sizes: ['M', 'L'],
+    available_footwear_sizes: [],
+    requires_clothing_size: true,
+    requires_footwear_size: false,
     is_available: true,
     ...overrides,
   };
@@ -258,7 +343,36 @@ function sizedItem() {
     old_price: null,
     quantity: 1,
     is_default_selected: true,
+    size_group: 'CLOTHING' as const,
     available_sizes: ['M', 'L'],
+    one_size: false,
+    is_available: true,
+  };
+}
+
+function footwearItem() {
+  return {
+    look_item_id: 3,
+    product: {
+      product_id: 12,
+      product_slug: 'sneakers',
+      name: 'Sneakers',
+      brand: 'ICON',
+      image_url: '/uploads/products/sneakers.webp',
+      price: '2200.00',
+      old_price: null,
+    },
+    product_id: 12,
+    product_slug: 'sneakers',
+    product_name: 'Sneakers',
+    brand: 'ICON',
+    primary_image_url: '/uploads/products/sneakers.webp',
+    price: '2200.00',
+    old_price: null,
+    quantity: 1,
+    is_default_selected: true,
+    size_group: 'FOOTWEAR' as const,
+    available_sizes: ['42', '43'],
     one_size: false,
     is_available: true,
   };
@@ -285,6 +399,7 @@ function oneSizeItem() {
     old_price: null,
     quantity: 1,
     is_default_selected: true,
+    size_group: 'ONE_SIZE' as const,
     available_sizes: ['ONE_SIZE'],
     one_size: true,
     is_available: true,

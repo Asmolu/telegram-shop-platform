@@ -10,6 +10,7 @@ from app.db.models import (
     ProductImageBadgePosition,
     ProductImageBadgeType,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductStatus,
 )
 from app.modules.categories.schemas import CategoryRead
@@ -281,6 +282,7 @@ class ProductBase(BaseModel):
     )
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
+    size_group: ProductSizeGroup = ProductSizeGroup.CLOTHING
     image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
     image_badge_text: str | None = Field(default=None, max_length=20)
     image_badge_color: ProductImageBadgeColor | None = None
@@ -377,6 +379,7 @@ class ProductUpdate(BaseModel):
     search_priority: int | None = Field(default=None, ge=1, le=3)
     search_aliases: str | None = Field(default=None, max_length=SEARCH_ALIAS_MAX_LENGTH)
     size_grid: ProductSizeGrid | None = None
+    size_group: ProductSizeGroup | None = None
     image_badge_type: ProductImageBadgeType | None = None
     image_badge_text: str | None = Field(default=None, max_length=20)
     image_badge_color: ProductImageBadgeColor | None = None
@@ -478,6 +481,7 @@ class ProductCardRead(BaseModel):
     base_price: Decimal
     old_price: Decimal | None = None
     size_grid: ProductSizeGrid
+    size_group: ProductSizeGroup
     image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
     image_badge_text: str | None = None
     image_badge_color: ProductImageBadgeColor | None = None
@@ -507,6 +511,7 @@ class ProductPublicDetailRead(BaseModel):
     base_price: Decimal
     old_price: Decimal | None = None
     size_grid: ProductSizeGrid
+    size_group: ProductSizeGroup
     image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
     image_badge_text: str | None = None
     image_badge_color: ProductImageBadgeColor | None = None

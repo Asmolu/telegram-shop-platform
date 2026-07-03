@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from app.db.models import (
     LookItem,
     LookStatus,
     Product,
+    ProductSizeGroup,
     ProductStatus,
     ProductVariant,
     RouteAliasEntityType,
@@ -40,6 +42,7 @@ from app.modules.looks.schemas import (
     LookSlugList,
     LookUpdate,
 )
+from app.modules.products.size_grids import is_footwear_size_grid
 from app.modules.route_aliases.service import RouteAliasesService
 from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
@@ -52,6 +55,16 @@ LOOK_SLUG_CONFLICT_MESSAGE = "Look slug already exists"
 LOOK_ALIAS_CONFLICT_MESSAGE = "Look slug conflicts with an active route alias"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LookSizeSummary:
+    available_sizes: list[str]
+    available_clothing_sizes: list[str]
+    available_footwear_sizes: list[str]
+    requires_clothing_size: bool
+    requires_footwear_size: bool
+    is_available: bool
 
 
 class LooksService:
@@ -105,8 +118,21 @@ class LooksService:
                 )
             selected_items.append(item)
 
+        size_summary = self._size_summary(selected_items)
+        clothing_size, footwear_size = self._requested_sizes_for_cart(
+            payload,
+            size_summary=size_summary,
+        )
+
         resolved_items = [
-            (item, self._resolve_variant_for_cart(item, requested_size=payload.size))
+            (
+                item,
+                self._resolve_variant_for_cart(
+                    item,
+                    clothing_size=clothing_size,
+                    footwear_size=footwear_size,
+                ),
+            )
             for item in selected_items
         ]
 
@@ -529,20 +555,35 @@ class LooksService:
         self,
         item: LookItem,
         *,
-        requested_size: str | None,
+        clothing_size: str | None,
+        footwear_size: str | None,
     ) -> ProductVariant:
         product = item.product
         if product.status != ProductStatus.ACTIVE:
             raise AppError("Product is not active", status.HTTP_400_BAD_REQUEST)
 
-        if self._is_one_size_product(product):
+        size_group = self._product_size_group(product)
+        if size_group == ProductSizeGroup.ONE_SIZE:
             variant = self._find_one_size_variant(product, required_quantity=item.quantity)
             if variant is None:
                 raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
             return variant
 
+        requested_size = (
+            clothing_size if size_group == ProductSizeGroup.CLOTHING else footwear_size
+        )
+        missing_message = (
+            "Выберите размер одежды"
+            if size_group == ProductSizeGroup.CLOTHING
+            else "Выберите размер обуви"
+        )
+        unavailable_message = (
+            "Выбранный размер одежды недоступен"
+            if size_group == ProductSizeGroup.CLOTHING
+            else "Выбранный размер обуви недоступен"
+        )
         if not requested_size or requested_size == ONE_SIZE:
-            raise AppError("Size is required for selected Look items", status.HTTP_400_BAD_REQUEST)
+            raise AppError(missing_message, status.HTTP_400_BAD_REQUEST)
 
         variant = next(
             (
@@ -553,7 +594,7 @@ class LooksService:
             None,
         )
         if variant is None:
-            raise AppError("Product size is unavailable", status.HTTP_400_BAD_REQUEST)
+            raise AppError(unavailable_message, status.HTTP_400_BAD_REQUEST)
         if variant.available_quantity < item.quantity:
             raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
         return variant
@@ -563,7 +604,7 @@ class LooksService:
 
     def _build_card(self, look: Look) -> LookCardRead:
         selected_items = self._default_selected_items(look)
-        available_sizes = self._common_sizes(selected_items)
+        size_summary = self._size_summary(selected_items)
         price, old_price = self._sum_price(selected_items)
         return LookCardRead(
             id=look.id,
@@ -574,13 +615,17 @@ class LooksService:
             price=price,
             old_price=old_price,
             item_count=len(look.items),
-            is_available=bool(available_sizes),
-            available_sizes=available_sizes,
+            is_available=size_summary.is_available,
+            available_sizes=size_summary.available_sizes,
+            available_clothing_sizes=size_summary.available_clothing_sizes,
+            available_footwear_sizes=size_summary.available_footwear_sizes,
+            requires_clothing_size=size_summary.requires_clothing_size,
+            requires_footwear_size=size_summary.requires_footwear_size,
         )
 
     def _build_detail(self, look: Look) -> LookDetailRead:
         selected_items = self._default_selected_items(look)
-        available_sizes = self._common_sizes(selected_items)
+        size_summary = self._size_summary(selected_items)
         price, old_price = self._sum_price(selected_items)
         return LookDetailRead(
             id=look.id,
@@ -592,15 +637,24 @@ class LooksService:
             default_selected_item_ids=[item.id for item in selected_items],
             default_price=price,
             old_price=old_price,
-            available_sizes=available_sizes,
-            is_available=bool(available_sizes),
+            available_sizes=size_summary.available_sizes,
+            available_clothing_sizes=size_summary.available_clothing_sizes,
+            available_footwear_sizes=size_summary.available_footwear_sizes,
+            requires_clothing_size=size_summary.requires_clothing_size,
+            requires_footwear_size=size_summary.requires_footwear_size,
+            is_available=size_summary.is_available,
         )
 
     def _build_public_item(self, item: LookItem) -> LookPublicItemRead:
         product = item.product
+        size_group = self._product_size_group(product)
         available_sizes = self._available_sizes(product, required_quantity=item.quantity)
-        one_size = self._is_one_size_product(product)
-        is_available = bool(available_sizes)
+        one_size = size_group == ProductSizeGroup.ONE_SIZE
+        is_available = (
+            self._find_one_size_variant(product, required_quantity=item.quantity) is not None
+            if one_size
+            else any(size for size in available_sizes if size != ONE_SIZE)
+        )
         summary = LookProductSummaryRead(
             product_id=product.id,
             product_slug=product.slug,
@@ -622,6 +676,7 @@ class LooksService:
             old_price=product.old_price,
             quantity=item.quantity,
             is_default_selected=item.is_default_selected,
+            size_group=size_group,
             available_sizes=available_sizes,
             one_size=one_size,
             is_available=is_available,
@@ -649,15 +704,18 @@ class LooksService:
                 old_price += product.base_price * quantity
         return price, old_price if has_old_price else None
 
-    def _common_sizes(self, items: list[LookItem]) -> list[str]:
+    def _size_summary(self, items: list[LookItem]) -> LookSizeSummary:
         clothing_size_sets: list[set[str]] = []
+        footwear_size_sets: list[set[str]] = []
         has_selected_one_size = False
+        one_size_available = True
         for item in items:
             product = item.product
-            if self._is_one_size_product(product):
+            size_group = self._product_size_group(product)
+            if size_group == ProductSizeGroup.ONE_SIZE:
                 has_selected_one_size = True
                 if self._find_one_size_variant(product, required_quantity=item.quantity) is None:
-                    return []
+                    one_size_available = False
                 continue
 
             sizes = {
@@ -665,16 +723,76 @@ class LooksService:
                 for size in self._available_sizes(product, required_quantity=item.quantity)
                 if size != ONE_SIZE
             }
-            if not sizes:
-                return []
-            clothing_size_sets.append(sizes)
+            if size_group == ProductSizeGroup.FOOTWEAR:
+                footwear_size_sets.append(sizes)
+            else:
+                clothing_size_sets.append(sizes)
 
-        if clothing_size_sets:
-            common = set.intersection(*clothing_size_sets)
-            return sorted(common)
-        if has_selected_one_size:
-            return [ONE_SIZE]
-        return []
+        clothing_sizes = (
+            sorted(set.intersection(*clothing_size_sets)) if clothing_size_sets else []
+        )
+        footwear_sizes = (
+            sorted(set.intersection(*footwear_size_sets)) if footwear_size_sets else []
+        )
+        requires_clothing_size = bool(clothing_size_sets)
+        requires_footwear_size = bool(footwear_size_sets)
+        is_available = (
+            one_size_available
+            and (not requires_clothing_size or bool(clothing_sizes))
+            and (not requires_footwear_size or bool(footwear_sizes))
+        )
+
+        if requires_clothing_size:
+            legacy_available_sizes = clothing_sizes
+        elif requires_footwear_size:
+            legacy_available_sizes = footwear_sizes
+        elif has_selected_one_size and one_size_available:
+            legacy_available_sizes = [ONE_SIZE]
+        else:
+            legacy_available_sizes = []
+
+        return LookSizeSummary(
+            available_sizes=legacy_available_sizes,
+            available_clothing_sizes=clothing_sizes,
+            available_footwear_sizes=footwear_sizes,
+            requires_clothing_size=requires_clothing_size,
+            requires_footwear_size=requires_footwear_size,
+            is_available=is_available,
+        )
+
+    def _requested_sizes_for_cart(
+        self,
+        payload: LookCartAddRequest,
+        *,
+        size_summary: LookSizeSummary,
+    ) -> tuple[str | None, str | None]:
+        clothing_size = payload.clothing_size
+        footwear_size = payload.footwear_size
+
+        if payload.size is not None:
+            if size_summary.requires_clothing_size and not size_summary.requires_footwear_size:
+                clothing_size = clothing_size or payload.size
+            elif size_summary.requires_footwear_size and not size_summary.requires_clothing_size:
+                footwear_size = footwear_size or payload.size
+
+        if size_summary.requires_clothing_size:
+            if not clothing_size or clothing_size == ONE_SIZE:
+                raise AppError("Выберите размер одежды", status.HTTP_400_BAD_REQUEST)
+            if clothing_size not in size_summary.available_clothing_sizes:
+                raise AppError(
+                    "Выбранный размер одежды недоступен",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+        if size_summary.requires_footwear_size:
+            if not footwear_size or footwear_size == ONE_SIZE:
+                raise AppError("Выберите размер обуви", status.HTTP_400_BAD_REQUEST)
+            if footwear_size not in size_summary.available_footwear_sizes:
+                raise AppError(
+                    "Выбранный размер обуви недоступен",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+
+        return clothing_size, footwear_size
 
     def _available_sizes(self, product: Product, *, required_quantity: int) -> list[str]:
         sizes = {
@@ -689,6 +807,19 @@ class LooksService:
         return bool(active_variants) and all(
             variant.size == ONE_SIZE for variant in active_variants
         )
+
+    def _product_size_group(self, product: Product) -> ProductSizeGroup:
+        raw_group = getattr(product, "size_group", None)
+        if raw_group is not None:
+            try:
+                return ProductSizeGroup(raw_group)
+            except ValueError:
+                pass
+        if self._is_one_size_product(product):
+            return ProductSizeGroup.ONE_SIZE
+        if is_footwear_size_grid(product.size_grid):
+            return ProductSizeGroup.FOOTWEAR
+        return ProductSizeGroup.CLOTHING
 
     def _find_one_size_variant(
         self,

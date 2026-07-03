@@ -19,6 +19,7 @@ from app.db.models import (
     ProductImage,
     ProductImageBadgeType,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductStatus,
     ProductVariant,
 )
@@ -94,6 +95,7 @@ async def _seed_products(session: AsyncSession) -> None:
             description="Hidden from card DTO",
             base_price=Decimal("1000.00") + Decimal(index),
             size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+            size_group=ProductSizeGroup.CLOTHING,
             image_badge_type=ProductImageBadgeType.NONE,
             status=ProductStatus.ACTIVE,
             is_listed=True,

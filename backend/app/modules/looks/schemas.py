@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
-from app.db.models import LookStatus
+from app.db.models import LookStatus, ProductSizeGroup
 from app.modules.cart.schemas import CartRead
 from app.modules.products.schemas import SLUG_PATTERN
 
@@ -170,6 +170,7 @@ class LookPublicItemRead(BaseModel):
     old_price: Decimal | None = None
     quantity: int
     is_default_selected: bool
+    size_group: ProductSizeGroup
     available_sizes: list[str] = Field(default_factory=list)
     one_size: bool
     is_available: bool
@@ -186,6 +187,10 @@ class LookCardRead(BaseModel):
     item_count: int
     is_available: bool
     available_sizes: list[str] = Field(default_factory=list)
+    available_clothing_sizes: list[str] = Field(default_factory=list)
+    available_footwear_sizes: list[str] = Field(default_factory=list)
+    requires_clothing_size: bool = False
+    requires_footwear_size: bool = False
 
 
 class LookList(BaseModel):
@@ -204,14 +209,20 @@ class LookDetailRead(BaseModel):
     default_price: Decimal
     old_price: Decimal | None = None
     available_sizes: list[str] = Field(default_factory=list)
+    available_clothing_sizes: list[str] = Field(default_factory=list)
+    available_footwear_sizes: list[str] = Field(default_factory=list)
+    requires_clothing_size: bool = False
+    requires_footwear_size: bool = False
     is_available: bool
 
 
 class LookCartAddRequest(BaseModel):
     selected_item_ids: list[int] = Field(min_length=1)
     size: str | None = Field(default=None, min_length=1, max_length=64)
+    clothing_size: str | None = Field(default=None, min_length=1, max_length=64)
+    footwear_size: str | None = Field(default=None, min_length=1, max_length=64)
 
-    @field_validator("size", mode="before")
+    @field_validator("size", "clothing_size", "footwear_size", mode="before")
     @classmethod
     def normalize_size(cls, value: object) -> object:
         if value is None:

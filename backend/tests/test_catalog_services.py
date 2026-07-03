@@ -20,6 +20,7 @@ from app.db.models import (
     ProductImageBadgeType,
     ProductRelatedProduct,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductStatus,
     ProductVariant,
     Tag,
@@ -1005,6 +1006,20 @@ async def test_product_grid_switch_allows_zero_or_compatible_variants() -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_update_accepts_size_group() -> None:
+    product = _product()
+    service = ProductsService(DummySession())
+    service.repository.get_by_id = AsyncMock(return_value=product)
+
+    updated = await service.update_product(
+        product.id,
+        ProductUpdate(size_group=ProductSizeGroup.FOOTWEAR),
+    )
+
+    assert updated.size_group == ProductSizeGroup.FOOTWEAR
+
+
+@pytest.mark.asyncio
 async def test_product_create_rejects_legacy_ru_footwear_grid() -> None:
     service = ProductsService(DummySession())
 
@@ -1339,6 +1354,7 @@ def test_product_create_defaults_search_priority_to_medium() -> None:
 
     assert product.search_priority == SEARCH_PRIORITY_DEFAULT == 2
     assert product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
+    assert product.size_group == ProductSizeGroup.CLOTHING
     assert product.image_badge_type == ProductImageBadgeType.NONE
     assert product.image_badge_text is None
     assert product.image_badge_color is None
@@ -2048,6 +2064,7 @@ def _product(
     variants: list[ProductVariant] | None = None,
     old_price: Decimal | None = None,
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA,
+    size_group: ProductSizeGroup = ProductSizeGroup.CLOTHING,
     is_listed: bool = True,
     is_returnable: bool = True,
 ) -> Product:
@@ -2061,6 +2078,7 @@ def _product(
         search_priority=SEARCH_PRIORITY_DEFAULT,
         search_aliases=None,
         size_grid=size_grid,
+        size_group=size_group,
         image_badge_type=ProductImageBadgeType.NONE,
         image_badge_text=None,
         image_badge_color=None,

@@ -12,6 +12,7 @@ from app.db.models import (
     Product,
     ProductImageBadgeType,
     ProductSizeGrid,
+    ProductSizeGroup,
     ProductStatus,
     ProductVariant,
 )
@@ -232,6 +233,7 @@ def _product(
         old_price=None,
         search_priority=search_priority,
         size_grid=ProductSizeGrid.CLOTHING_ALPHA,
+        size_group=ProductSizeGroup.CLOTHING,
         image_badge_type=ProductImageBadgeType.NONE,
         image_badge_text=None,
         image_badge_color=None,
@@ -309,6 +311,7 @@ def _product_card_payload() -> dict[str, object]:
         "base_price": "1000.00",
         "old_price": None,
         "size_grid": "clothing_alpha",
+        "size_group": "CLOTHING",
         "image_badge_type": "none",
         "image_badge_text": None,
         "image_badge_color": None,

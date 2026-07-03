@@ -33,6 +33,7 @@ class FavoritesRepository:
                     Product.base_price,
                     Product.old_price,
                     Product.size_grid,
+                    Product.size_group,
                     Product.image_badge_type,
                     Product.image_badge_text,
                     Product.image_badge_color,
