@@ -440,6 +440,9 @@ class LooksService:
             raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
         return variant
 
+    def build_card(self, look: Look) -> LookCardRead:
+        return self._build_card(look)
+
     def _build_card(self, look: Look) -> LookCardRead:
         selected_items = self._default_selected_items(look)
         available_sizes = self._common_sizes(selected_items)

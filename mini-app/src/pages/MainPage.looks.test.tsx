@@ -1,7 +1,7 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getLooks, getProducts } from '../shared/api';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getFeed } from '../shared/api';
 import { MainPage } from './MainPage';
 
 const routerMocks = vi.hoisted(() => ({
@@ -13,8 +13,19 @@ const routerMocks = vi.hoisted(() => ({
   },
 }));
 
+const apiMocks = vi.hoisted(() => ({
+  getBanners: vi.fn(),
+  getFavorites: vi.fn(),
+  getFeed: vi.fn(),
+  trackBannerClick: vi.fn(),
+}));
+
 vi.mock('../shared/auth/AuthProvider', () => ({
   useAuth: () => ({ isAuthenticated: false }),
+}));
+
+vi.mock('../shared/telemetry', () => ({
+  trackTelemetry: vi.fn(),
 }));
 
 vi.mock('../shared/router/routePrefetch', () => ({
@@ -49,7 +60,16 @@ vi.mock('../features/catalog/useProductActions', () => ({
 vi.mock('../shared/router/RouterProvider', () => ({
   isFirstLevelRoutePath: () => true,
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
-    <a href={to} {...props}>{children}</a>
+    <a
+      href={to}
+      onClick={(event) => {
+        event.preventDefault();
+        routerMocks.navigate(to);
+      }}
+      {...props}
+    >
+      {children}
+    </a>
   ),
   useRouter: () => ({
     currentPath: routerMocks.route.currentPath,
@@ -65,54 +85,122 @@ vi.mock('../shared/router/RouterProvider', () => ({
 
 vi.mock('../shared/api', () => ({
   getApiBaseUrl: vi.fn(() => ''),
-  getBanners: vi.fn().mockResolvedValue({ items: [], meta: { limit: 20, offset: 0, total: 0 } }),
-  getFavorites: vi.fn().mockResolvedValue({ items: [] }),
-  getLooks: vi.fn().mockResolvedValue({
-    items: [{
-      id: 1,
-      slug: 'summer-look',
-      title: 'Summer Look',
-      description: 'Ready outfit',
-      primary_image_url: '/uploads/looks/summer.webp',
-      price: '1500.00',
-      old_price: null,
-      item_count: 2,
-      is_available: true,
-      available_sizes: ['M', 'L'],
-    }],
-    meta: { limit: 8, offset: 0, total: 1 },
-  }),
-  getProducts: vi.fn().mockResolvedValue({ items: [], meta: { limit: 40, offset: 0, total: 0 } }),
+  getBanners: apiMocks.getBanners,
+  getFavorites: apiMocks.getFavorites,
+  getFeed: apiMocks.getFeed,
   toApiErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
-  trackBannerClick: vi.fn().mockResolvedValue(undefined),
+  trackBannerClick: apiMocks.trackBannerClick,
 }));
 
-describe('MainPage Looks section', () => {
+describe('MainPage mixed feed', () => {
+  beforeEach(() => {
+    apiMocks.getBanners.mockResolvedValue({
+      items: [],
+      meta: { limit: 20, offset: 0, total: 0 },
+    });
+    apiMocks.getFavorites.mockResolvedValue({ items: [] });
+    apiMocks.getFeed.mockResolvedValue(mixedFeedFixture());
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
   });
 
-  it('renders a Looks section when public Looks are returned', async () => {
-    render(<MainPage />);
+  it('calls the mixed feed endpoint and renders products and Looks in the same grid', async () => {
+    const { container } = render(<MainPage />);
 
-    expect(await screen.findByRole('heading', { name: 'Образы' })).toBeTruthy();
+    expect(await screen.findByText('Line Break Hoodie')).toBeTruthy();
     expect(screen.getByText('Summer Look')).toBeTruthy();
     expect(screen.getByText('Образ')).toBeTruthy();
-    const lookLink = screen.getByText('Summer Look').closest('a');
-
-    expect(getProducts).toHaveBeenCalledWith({ limit: 40, offset: 0, status: 'ACTIVE' });
-    expect(getLooks).toHaveBeenCalledWith({ limit: 8, offset: 0 });
-    expect(lookLink?.getAttribute('href')).toBe('/looks/summer-look?returnTo=%2Fmain');
+    expect(container.querySelectorAll('.product-grid > .product-card')).toHaveLength(2);
+    expect(getFeed).toHaveBeenCalledWith({ limit: 40, offset: 0 });
   });
 
-  it('keeps the product feed usable if Looks fail to load', async () => {
-    vi.mocked(getLooks).mockRejectedValueOnce(new Error('Looks unavailable'));
+  it('opens product detail and Look detail from mixed cards', async () => {
+    render(<MainPage />);
+
+    fireEvent.click(await screen.findByText('Line Break Hoodie'));
+    fireEvent.click(screen.getByText('Summer Look'));
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/product/10?returnTo=%2Fmain');
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/looks/summer-look?returnTo=%2Fmain');
+  });
+
+  it('renders an empty state when the mixed feed is empty', async () => {
+    apiMocks.getFeed.mockResolvedValueOnce({
+      items: [],
+      meta: { limit: 40, offset: 0, total: 0 },
+    });
 
     render(<MainPage />);
 
-    await waitFor(() => expect(getProducts).toHaveBeenCalled());
-    expect(screen.queryByText('Summer Look')).toBeNull();
-    expect(screen.getByText('Товары скоро появятся')).toBeTruthy();
+    expect(await screen.findByText('Товары скоро появятся')).toBeTruthy();
+  });
+
+  it('renders loading and error states for the mixed feed', async () => {
+    let rejectFeed: (error: Error) => void = () => undefined;
+    apiMocks.getFeed.mockReturnValueOnce(new Promise((_resolve, reject) => {
+      rejectFeed = reject;
+    }));
+
+    const { container } = render(<MainPage />);
+
+    expect(container.querySelector('.product-card--skeleton')).not.toBeNull();
+
+    rejectFeed(new Error('Feed unavailable'));
+
+    await waitFor(() => expect(screen.getByText('Feed unavailable')).toBeTruthy());
   });
 });
+
+function mixedFeedFixture() {
+  return {
+    items: [
+      {
+        type: 'product',
+        product: {
+          id: 10,
+          name: 'Line Break Hoodie',
+          slug: 'line-break-hoodie',
+          brand: 'ICON STORE',
+          base_price: '1000.00',
+          old_price: null,
+          size_grid: 'clothing_alpha',
+          image_badge_type: 'none',
+          image_badge_text: null,
+          image_badge_color: null,
+          image_badge_position: null,
+          image_url: null,
+          thumbnail_image_url: null,
+          variants: [{
+            id: 100,
+            product_id: 10,
+            size: 'M',
+            color: null,
+            available_quantity: 3,
+            is_active: true,
+          }],
+          is_available: true,
+          created_at: '2026-07-03T12:00:00Z',
+        },
+      },
+      {
+        type: 'look',
+        look: {
+          id: 1,
+          slug: 'summer-look',
+          title: 'Summer Look',
+          description: 'Ready outfit',
+          primary_image_url: '/uploads/looks/summer.webp',
+          price: '1500.00',
+          old_price: null,
+          item_count: 2,
+          is_available: true,
+          available_sizes: ['M', 'L'],
+        },
+      },
+    ],
+    meta: { limit: 40, offset: 0, total: 2 },
+  };
+}

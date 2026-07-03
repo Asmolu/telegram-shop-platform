@@ -19,7 +19,8 @@ export function LookCard({
 
   return (
     <article className={`product-card look-card ${look.is_available ? '' : 'look-card--unavailable'}`}>
-      <Link className="product-card__media look-card__media" to={lookPath}>
+      <div className="product-card__media-shell look-card__media-shell">
+        <Link className="product-card__media look-card__media" to={lookPath}>
         {imageUrl ? (
           <img
             src={imageUrl}
@@ -37,7 +38,8 @@ export function LookCard({
         )}
         <span className="look-card__badge">Образ</span>
         {!look.is_available ? <span className="look-card__availability">Недоступен</span> : null}
-      </Link>
+        </Link>
+      </div>
       <div className="product-card__body product-card__body--no-action look-card__body">
         <Link className="product-card__info" to={lookPath}>
           <span className="product-card__brand">{pluralizeProducts(look.item_count)}</span>

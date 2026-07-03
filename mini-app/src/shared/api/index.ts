@@ -8,6 +8,7 @@ import type {
   CustomerNotificationSubscription,
   CustomerNotificationSubscriptionUpdate,
   CustomerNotificationWriteAccessRequest,
+  FeedList,
   Favorite,
   FavoriteList,
   LookCartPayload,
@@ -74,6 +75,15 @@ export function updatePersonalData(payload: PersonalDataUpdate) {
 
 export function getProducts(params: ProductListParams = {}, options: ApiRequestOptions = {}) {
   return apiRequest<ProductList>('/products', { ...options, query: params });
+}
+
+export type FeedListParams = {
+  limit?: number;
+  offset?: number;
+};
+
+export function getFeed(params: FeedListParams = {}, options: ApiRequestOptions = {}) {
+  return apiRequest<FeedList>('/feed', { ...options, query: params });
 }
 
 export function getProductSearchSuggestions(

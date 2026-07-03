@@ -253,6 +253,23 @@ export type LookList = {
   meta: PageMeta;
 };
 
+export type FeedProductItem = {
+  type: 'product';
+  product: Product;
+};
+
+export type FeedLookItem = {
+  type: 'look';
+  look: LookCard;
+};
+
+export type FeedItem = FeedProductItem | FeedLookItem;
+
+export type FeedList = {
+  items: FeedItem[];
+  meta: PageMeta;
+};
+
 export type LookDetail = {
   id: number;
   slug: string;
