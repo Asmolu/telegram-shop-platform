@@ -8,10 +8,11 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getNumericRouteParam, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, PageLoader, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, LookSourceHeader, PageLoader, TopBar } from '../shared/ui';
 import { formatDate, formatOrderStatus, formatPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { displaySize } from '../shared/utils/sizes';
+import { groupLookSourcedItems } from '../shared/utils/sourceGroups';
 
 const DELIVERY_METHOD_LABELS: Record<string, string> = {
   ROUTE_TAXI: 'Маршруткой',
@@ -46,6 +47,10 @@ function getDeliveryCommentLines(comment: string | null | undefined) {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function orderItemsSubtotal(items: Order['items']) {
+  return items.reduce((total, item) => total + Number(item.item_total ?? item.subtotal), 0);
 }
 
 export function OrderSuccessPage() {
@@ -205,8 +210,21 @@ function OrderDetailContent({
       <section className="order-detail-section">
         <h2>Товары</h2>
         <div className="order-detail-items">
-          {order.items.map((item) => (
-            <OrderDetailItem item={item} currentPath={currentPath} key={item.id} />
+          {groupLookSourcedItems(order.items).map((section) => (
+            section.kind === 'look' ? (
+              <React.Fragment key={section.key}>
+                <LookSourceHeader
+                  imageUrl={section.imageUrl}
+                  subtotal={orderItemsSubtotal(section.items)}
+                  title={section.title}
+                />
+                {section.items.map((item) => (
+                  <OrderDetailItem item={item} currentPath={currentPath} key={item.id} />
+                ))}
+              </React.Fragment>
+            ) : (
+              <OrderDetailItem item={section.item} currentPath={currentPath} key={section.key} />
+            )
           ))}
         </div>
       </section>

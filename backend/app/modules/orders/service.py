@@ -193,6 +193,12 @@ class OrdersService:
                         quantity=item.quantity,
                         subtotal=subtotal,
                         is_returnable=is_returnable if is_returnable is not None else True,
+                        source_type=item.source_type,
+                        source_look_id=item.source_look_id,
+                        source_look_slug=item.source_look_slug,
+                        source_look_title=item.source_look_title,
+                        source_look_image_url=item.source_look_image_url,
+                        source_group_id=item.source_group_id,
                     )
                 )
 

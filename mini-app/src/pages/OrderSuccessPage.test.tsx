@@ -76,6 +76,19 @@ describe('OrderSuccessPage details', () => {
     expect(container.querySelector('.order-detail-item__image img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
   });
 
+  it('groups Look-sourced order items under the purchase provenance label', async () => {
+    vi.mocked(getOrder).mockResolvedValueOnce(orderWithLookGroupFixture());
+
+    render(<OrderSuccessPage />);
+
+    expect(await screen.findByText('Куплено из образа: City Look')).toBeTruthy();
+    expect(screen.getByText('Look Shirt')).toBeTruthy();
+    expect(screen.getByText('Look Pants')).toBeTruthy();
+    expect(screen.getByText('Line Break Hoodie')).toBeTruthy();
+    expect(document.querySelectorAll('.look-source-header')).toHaveLength(1);
+    expect(document.querySelectorAll('.order-detail-item')).toHaveLength(3);
+  });
+
   it('renders missing optional fields gracefully', async () => {
     vi.mocked(getOrder).mockResolvedValueOnce(orderFixture({
       discount_amount: '0.00',
@@ -217,5 +230,48 @@ function orderFixture(overrides: Partial<Order> = {}): Order {
     created_at: '2026-06-27T00:00:00Z',
     updated_at: '2026-06-27T00:00:00Z',
     ...overrides,
+  };
+}
+
+function orderWithLookGroupFixture(): Order {
+  const order = orderFixture();
+  return {
+    ...order,
+    items: [
+      order.items[0],
+      {
+        ...order.items[0],
+        id: 2,
+        product_id: 21,
+        product_variant_id: 31,
+        product_name: 'Look Shirt',
+        product_title: 'Look Shirt',
+        variant_sku: 'SHIRT-M',
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+      {
+        ...order.items[0],
+        id: 3,
+        product_id: 22,
+        product_variant_id: 32,
+        product_name: 'Look Pants',
+        product_title: 'Look Pants',
+        variant_sku: 'PANTS-M',
+        quantity: 1,
+        subtotal: '100.00',
+        item_total: '100.00',
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+    ],
   };
 }

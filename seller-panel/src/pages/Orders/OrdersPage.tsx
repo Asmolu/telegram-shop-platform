@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { Fragment, FormEvent, useEffect, useState } from 'react';
 import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
   ManualPayment,
@@ -672,7 +672,34 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                {selectedOrder.items.map((item) => (
+                {selectedOrder.items.map((item, index) => {
+                  const lookSourceGroupId = isLookSourceOrderItem(item) ? item.source_group_id : null;
+                  const previousItem = selectedOrder.items[index - 1];
+                  const startsLookGroup = Boolean(
+                    lookSourceGroupId
+                    && (!previousItem
+                      || previousItem.source_type !== 'LOOK'
+                      || previousItem.source_group_id !== lookSourceGroupId),
+                  );
+                  const lookGroupItems = startsLookGroup
+                    ? selectedOrder.items.filter((candidate) => (
+                      candidate.source_type === 'LOOK'
+                      && candidate.source_group_id === lookSourceGroupId
+                    ))
+                    : [];
+
+                  return (
+                  <Fragment key={item.id}>
+                    {startsLookGroup ? (
+                      <tr className="order-look-group-row">
+                        <td colSpan={5}>
+                          <div>
+                            <strong>Куплено из образа: {item.source_look_title?.trim() || 'Образ'}</strong>
+                            <small>{formatMoney(orderLookGroupSubtotal(lookGroupItems), language)}</small>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
                     <tr key={item.id}>
                       <td>
                         <div className="order-item-cell">
@@ -714,7 +741,9 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                       <td>{formatMoney(item.unit_price, language)}</td>
                       <td>{formatMoney(item.item_total ?? item.subtotal, language)}</td>
                     </tr>
-                ))}
+                  </Fragment>
+                  );
+                })}
                   </tbody>
                 </table>
               </div>
@@ -806,6 +835,14 @@ function formatVariantSize(sizeGrid: ProductSizeGrid, size: string, oneSizeLabel
   if (sizeGrid === 'shoes_eu') return `EU ${size}`;
   if (sizeGrid === 'shoes_ru') return `RU ${size}`;
   return size === 'ONE_SIZE' ? oneSizeLabel : size;
+}
+
+function isLookSourceOrderItem(item: Order['items'][number]): boolean {
+  return item.source_type === 'LOOK' && Boolean(item.source_group_id);
+}
+
+function orderLookGroupSubtotal(items: Order['items']): number {
+  return items.reduce((total, item) => total + Number(item.item_total ?? item.subtotal), 0);
 }
 
 function paymentStatusLabel(status: ManualPaymentStatus): string {

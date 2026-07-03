@@ -81,6 +81,8 @@ class CartRepository:
             .where(
                 CartItem.cart_id == cart_id,
                 CartItem.product_variant_id == product_variant_id,
+                CartItem.source_type.is_(None),
+                CartItem.source_group_id.is_(None),
             )
         )
         return result.scalar_one_or_none()

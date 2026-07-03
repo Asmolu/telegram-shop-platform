@@ -1920,6 +1920,27 @@ textarea:focus {
   min-width: 720px;
 }
 
+.order-look-group-row td {
+  background: #f5f3ff;
+  color: #4c1d95;
+}
+
+.order-look-group-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.order-look-group-row strong {
+  font-size: 13px;
+}
+
+.order-look-group-row small {
+  color: #6d28d9;
+  font-weight: 800;
+}
+
 .customer-message-modal {
   position: fixed;
   z-index: 80;

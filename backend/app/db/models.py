@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1146,7 +1147,16 @@ class CartItem(Base):
     __tablename__ = "cart_items"
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_cart_items_quantity_positive"),
-        UniqueConstraint("cart_id", "product_variant_id", name="uq_cart_items_cart_variant"),
+        Index("ix_cart_items_source_group_id", "source_group_id"),
+        Index("ix_cart_items_source_look_id", "source_look_id"),
+        Index(
+            "uq_cart_items_normal_cart_variant",
+            "cart_id",
+            "product_variant_id",
+            unique=True,
+            postgresql_where=text("source_type IS NULL AND source_group_id IS NULL"),
+            sqlite_where=text("source_type IS NULL AND source_group_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1172,6 +1182,15 @@ class CartItem(Base):
         default=True,
         server_default="true",
     )
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("looks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_look_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_look_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_look_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1281,6 +1300,8 @@ class OrderItem(Base):
         CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"),
         CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price_non_negative"),
         CheckConstraint("subtotal >= 0", name="ck_order_items_subtotal_non_negative"),
+        Index("ix_order_items_source_group_id", "source_group_id"),
+        Index("ix_order_items_source_look_id", "source_look_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1318,6 +1339,15 @@ class OrderItem(Base):
         default=True,
         server_default="true",
     )
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("looks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_look_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_look_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_look_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

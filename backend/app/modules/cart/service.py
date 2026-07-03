@@ -53,7 +53,8 @@ class CartService:
         if existing_item is not None:
             quantity += existing_item.quantity
 
-        self._validate_quantity(quantity, variant)
+        total_variant_quantity = self._cart_variant_quantity(cart, variant.id) + payload.quantity
+        self._validate_quantity(total_variant_quantity, variant)
 
         if existing_item is None:
             self.repository.add(
@@ -96,7 +97,15 @@ class CartService:
             product_id=item.product_id,
             product_variant_id=item.product_variant_id,
         )
-        self._validate_quantity(payload.quantity, item.product_variant)
+        cart = await self.repository.get_by_user_id(user_id)
+        if cart is None:
+            raise AppError("Cart not found", status.HTTP_404_NOT_FOUND)
+        total_variant_quantity = self._cart_variant_quantity(
+            cart,
+            item.product_variant_id,
+            exclude_item_id=item.id,
+        ) + payload.quantity
+        self._validate_quantity(total_variant_quantity, item.product_variant)
         item.quantity = payload.quantity
 
         return await self._commit_and_reload(user_id)
@@ -199,6 +208,19 @@ class CartService:
         if quantity > available_quantity:
             raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
 
+    def _cart_variant_quantity(
+        self,
+        cart: Cart,
+        product_variant_id: int,
+        *,
+        exclude_item_id: int | None = None,
+    ) -> int:
+        return sum(
+            item.quantity
+            for item in cart.items
+            if item.product_variant_id == product_variant_id and item.id != exclude_item_id
+        )
+
     async def _commit_and_reload(self, user_id: int) -> CartRead:
         try:
             await self.session.commit()
@@ -243,6 +265,12 @@ class CartService:
             is_selected=item.is_selected,
             unit_price=unit_price,
             subtotal=subtotal,
+            source_type=item.source_type,
+            source_group_id=item.source_group_id,
+            source_look_id=item.source_look_id,
+            source_look_slug=item.source_look_slug,
+            source_look_title=item.source_look_title,
+            source_look_image_url=item.source_look_image_url,
             created_at=item.created_at,
             updated_at=item.updated_at,
         )

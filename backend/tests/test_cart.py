@@ -69,7 +69,13 @@ class FakeCartRepository:
         if cart is None:
             return None
         return next(
-            (item for item in cart.items if item.product_variant_id == product_variant_id),
+            (
+                item
+                for item in cart.items
+                if item.product_variant_id == product_variant_id
+                and item.source_type is None
+                and item.source_group_id is None
+            ),
             None,
         )
 
@@ -128,6 +134,12 @@ async def test_add_item() -> None:
     assert len(cart.items) == 1
     assert cart.items[0].quantity == 2
     assert cart.items[0].is_selected is True
+    assert cart.items[0].source_type is None
+    assert cart.items[0].source_group_id is None
+    assert cart.items[0].source_look_id is None
+    assert cart.items[0].source_look_slug is None
+    assert cart.items[0].source_look_title is None
+    assert cart.items[0].source_look_image_url is None
     assert cart.items[0].product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
     assert cart.items[0].subtotal == Decimal("119.80")
     assert cart.total == Decimal("119.80")

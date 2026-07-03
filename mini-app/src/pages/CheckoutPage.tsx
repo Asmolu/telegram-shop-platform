@@ -20,13 +20,14 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
-import { EmptyState, ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, LookSourceHeader, PageLoader, TopBar } from '../shared/ui';
 import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice, getDisplayOldPrice, getUserDisplayName } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
+import { groupLookSourcedItems } from '../shared/utils/sourceGroups';
 
 const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string }[] = [
   { value: 'ROUTE_TAXI', label: 'Маршруткой' },
@@ -61,6 +62,10 @@ function checkoutProductImageSrcSet(thumbnailUrl?: string | null, imageUrl?: str
   }
 
   return entries.length > 1 ? entries.join(', ') : undefined;
+}
+
+function cartItemsSubtotal(items: CartItem[]) {
+  return items.reduce((total, item) => total + Number(item.subtotal), 0);
 }
 
 export function CheckoutPage() {
@@ -422,8 +427,21 @@ export function CheckoutPage() {
           <section className="summary-card checkout-summary-card">
             <h2>Корзина</h2>
             <div className="checkout-item-list">
-              {selectedItems.map((item) => (
-                <CheckoutItemSummary item={item} key={item.id} />
+              {groupLookSourcedItems(selectedItems).map((section) => (
+                section.kind === 'look' ? (
+                  <React.Fragment key={section.key}>
+                    <LookSourceHeader
+                      imageUrl={section.imageUrl}
+                      subtotal={cartItemsSubtotal(section.items)}
+                      title={section.title}
+                    />
+                    {section.items.map((item) => (
+                      <CheckoutItemSummary item={item} key={item.id} />
+                    ))}
+                  </React.Fragment>
+                ) : (
+                  <CheckoutItemSummary item={section.item} key={section.key} />
+                )
               ))}
             </div>
             <div><span>Выбрано</span><strong>{cart.selected_quantity_total}</strong></div>

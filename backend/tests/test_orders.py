@@ -417,6 +417,76 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_checkout_copies_look_source_metadata_to_order_items() -> None:
+    product = _product()
+    variant = _variant()
+    source_cart_item = CartItem(
+        id=1,
+        cart_id=1,
+        product_id=product.id,
+        product_variant_id=variant.id,
+        product=product,
+        product_variant=variant,
+        quantity=1,
+        is_selected=True,
+        source_type="LOOK",
+        source_look_id=15,
+        source_look_slug="linen-summer",
+        source_look_title="Linen Summer",
+        source_look_image_url="/uploads/looks/linen-summer.webp",
+        source_group_id="look-group-1",
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    service, repository, _, _ = _orders_service(cart_items=[source_cart_item])
+
+    order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    item = order.items[0]
+    assert item.source_type == "LOOK"
+    assert item.source_look_id == 15
+    assert item.source_look_slug == "linen-summer"
+    assert item.source_look_title == "Linen Summer"
+    assert item.source_look_image_url == "/uploads/looks/linen-summer.webp"
+    assert item.source_group_id == "look-group-1"
+    assert repository.orders[order.id].items[0].source_look_title == "Linen Summer"
+
+
+@pytest.mark.asyncio
+async def test_order_read_keeps_look_title_slug_snapshot_after_source_look_rename() -> None:
+    product = _product()
+    variant = _variant()
+    source_cart_item = CartItem(
+        id=1,
+        cart_id=1,
+        product_id=product.id,
+        product_variant_id=variant.id,
+        product=product,
+        product_variant=variant,
+        quantity=1,
+        is_selected=True,
+        source_type="LOOK",
+        source_look_id=15,
+        source_look_slug="original-look",
+        source_look_title="Original Look",
+        source_look_image_url="/uploads/looks/original.webp",
+        source_group_id="look-group-snapshot",
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    service, repository, _, _ = _orders_service(cart_items=[source_cart_item])
+
+    created = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+    source_cart_item.source_look_slug = "renamed-look"
+    source_cart_item.source_look_title = "Renamed Look"
+    detail = await service.get_current_user_order(user_id=1, order_id=created.id)
+
+    assert detail.items[0].source_look_slug == "original-look"
+    assert detail.items[0].source_look_title == "Original Look"
+    assert repository.orders[created.id].items[0].source_look_slug == "original-look"
+
+
+@pytest.mark.asyncio
 async def test_checkout_with_same_idempotency_key_returns_original_order() -> None:
     idempotency_service = FakeIdempotencyService()
     service, repository, _, events = _orders_service(idempotency_service=idempotency_service)

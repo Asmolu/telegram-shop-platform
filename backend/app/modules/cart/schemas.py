@@ -60,6 +60,12 @@ class CartItemRead(BaseModel):
     is_selected: bool
     unit_price: Decimal
     subtotal: Decimal
+    source_type: str | None = None
+    source_group_id: str | None = None
+    source_look_id: int | None = None
+    source_look_slug: str | None = None
+    source_look_title: str | None = None
+    source_look_image_url: str | None = None
     created_at: datetime
     updated_at: datetime
 

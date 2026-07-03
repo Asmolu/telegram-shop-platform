@@ -189,7 +189,13 @@ class FakeCartRepository:
         if cart is None:
             return None
         return next(
-            (item for item in cart.items if item.product_variant_id == product_variant_id),
+            (
+                item
+                for item in cart.items
+                if item.product_variant_id == product_variant_id
+                and item.source_type is None
+                and item.source_group_id is None
+            ),
             None,
         )
 
@@ -461,6 +467,100 @@ async def test_add_look_to_cart_adds_selected_items_atomically() -> None:
 
     assert response.cart.quantity_total == 2
     assert {item.product.id for item in response.cart.items} == {1, 2}
+    assert {item.source_type for item in response.cart.items} == {"LOOK"}
+    assert {item.source_look_id for item in response.cart.items} == {1}
+    assert {item.source_look_slug for item in response.cart.items} == {"cart-look"}
+    assert {item.source_look_title for item in response.cart.items} == {"Cart Look"}
+    group_ids = {item.source_group_id for item in response.cart.items}
+    assert len(group_ids) == 1
+    assert None not in group_ids
+
+
+@pytest.mark.asyncio
+async def test_add_look_to_cart_snapshots_look_image() -> None:
+    service, repository, cart_repository, _session, _storage = _looks_service()
+    look = _look(look_id=1, slug="image-look")
+    look.images = [
+        LookImage(
+            id=1,
+            look_id=1,
+            file_path="looks/image-look.webp",
+            original_filename="image-look.webp",
+            mime_type="image/webp",
+            size_bytes=120,
+            alt_text="Image look",
+            position=0,
+            is_primary=True,
+            created_at=NOW,
+        )
+    ]
+    repository.add(look)
+
+    response = await service.add_look_to_cart(
+        slug="image-look",
+        user_id=1,
+        payload=LookCartAddRequest(selected_item_ids=[1], size="M"),
+    )
+
+    assert response.cart.items[0].source_look_image_url == "/uploads/looks/image-look.webp"
+
+
+@pytest.mark.asyncio
+async def test_separate_look_add_to_cart_calls_use_distinct_groups_without_merging() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    repository.add(_look(look_id=1, slug="repeat-look"))
+
+    first = await service.add_look_to_cart(
+        slug="repeat-look",
+        user_id=1,
+        payload=LookCartAddRequest(selected_item_ids=[1], size="M"),
+    )
+    second = await service.add_look_to_cart(
+        slug="repeat-look",
+        user_id=1,
+        payload=LookCartAddRequest(selected_item_ids=[1], size="M"),
+    )
+
+    assert first.cart.items[0].source_group_id != second.cart.items[1].source_group_id
+    assert len(second.cart.items) == 2
+    assert [item.quantity for item in second.cart.items] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_look_cart_items_do_not_merge_with_normal_cart_items_for_same_variant() -> None:
+    service, repository, cart_repository, _session, _storage = _looks_service()
+    product = repository.products[1]
+    variant = product.variants[0]
+    normal_cart = Cart(id=1, user_id=1, created_at=NOW, updated_at=NOW)
+    normal_cart.items = [
+        CartItem(
+            id=1,
+            cart_id=1,
+            product_id=product.id,
+            product_variant_id=variant.id,
+            product=product,
+            product_variant=variant,
+            quantity=1,
+            is_selected=True,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    ]
+    cart_repository.carts[1] = normal_cart
+    cart_repository.next_cart_id = 2
+    cart_repository.next_item_id = 2
+    repository.add(_look(look_id=1, slug="same-variant-look"))
+
+    response = await service.add_look_to_cart(
+        slug="same-variant-look",
+        user_id=1,
+        payload=LookCartAddRequest(selected_item_ids=[1], size="M"),
+    )
+
+    assert len(response.cart.items) == 2
+    assert response.cart.items[0].source_type is None
+    assert response.cart.items[1].source_type == "LOOK"
+    assert response.cart.items[1].source_group_id is not None
 
 
 @pytest.mark.asyncio

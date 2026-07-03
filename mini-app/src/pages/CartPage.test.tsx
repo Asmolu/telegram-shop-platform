@@ -216,6 +216,36 @@ describe('CartPage compact favorites', () => {
     await waitFor(() => expect(removeCartItem).toHaveBeenCalledWith(10));
     expect(routerMocks.navigate).not.toHaveBeenCalledWith('/product/20');
   });
+
+  it('groups Look-sourced cart items and keeps normal items ungrouped/removable', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+    const cart = cartWithLookGroupFixture();
+    vi.mocked(getCart).mockResolvedValueOnce(cart);
+    vi.mocked(removeCartItem).mockResolvedValue({
+      ...cart,
+      items: cart.items.filter((item) => item.id !== 11),
+      total: '400.00',
+      quantity_total: 4,
+      distinct_item_count: 2,
+      selected_total: '400.00',
+      selected_quantity_total: 4,
+      selected_distinct_item_count: 2,
+    });
+
+    render(<CartPage />);
+
+    expect(await screen.findByText('Куплено из образа: City Look')).toBeTruthy();
+    expect(screen.getByText('Compact Hoodie')).toBeTruthy();
+    expect(screen.getByText('Look Shirt')).toBeTruthy();
+    expect(screen.getByText('Look Pants')).toBeTruthy();
+    expect(document.querySelectorAll('.look-source-header')).toHaveLength(1);
+    expect(document.querySelectorAll('.cart-item')).toHaveLength(3);
+
+    const groupedItem = screen.getByText('Look Shirt').closest('.cart-item') as HTMLElement;
+    fireEvent.click(within(groupedItem).getByRole('button', { name: 'Удалить' }));
+
+    await waitFor(() => expect(removeCartItem).toHaveBeenCalledWith(11));
+  });
 });
 
 function cartWithSelectedItemFixture() {
@@ -261,5 +291,67 @@ function cartWithSelectedItemFixture() {
     selected_distinct_item_count: 1,
     created_at: '2026-06-24T00:00:00Z',
     updated_at: '2026-06-24T00:00:00Z',
+  };
+}
+
+function cartWithLookGroupFixture() {
+  const normalCart = cartWithSelectedItemFixture();
+  return {
+    ...normalCart,
+    items: [
+      normalCart.items[0],
+      {
+        ...normalCart.items[0],
+        id: 11,
+        product: {
+          ...normalCart.items[0].product,
+          id: 21,
+          name: 'Look Shirt',
+          slug: 'look-shirt',
+        },
+        product_variant: {
+          ...normalCart.items[0].product_variant,
+          id: 31,
+          product_id: 21,
+          sku: 'SHIRT-M',
+        },
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+      {
+        ...normalCart.items[0],
+        id: 12,
+        product: {
+          ...normalCart.items[0].product,
+          id: 22,
+          name: 'Look Pants',
+          slug: 'look-pants',
+        },
+        product_variant: {
+          ...normalCart.items[0].product_variant,
+          id: 32,
+          product_id: 22,
+          sku: 'PANTS-M',
+        },
+        quantity: 1,
+        subtotal: '100.00',
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+    ],
+    total: '500.00',
+    quantity_total: 5,
+    distinct_item_count: 3,
+    selected_total: '500.00',
+    selected_quantity_total: 5,
+    selected_distinct_item_count: 3,
   };
 }

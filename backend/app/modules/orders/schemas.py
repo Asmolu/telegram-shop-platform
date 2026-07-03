@@ -62,6 +62,12 @@ class OrderItemRead(BaseModel):
     product_brand: str | None = None
     product_thumbnail_path: str | None = None
     product_thumbnail_url: str | None = None
+    source_type: str | None = None
+    source_group_id: str | None = None
+    source_look_id: int | None = None
+    source_look_slug: str | None = None
+    source_look_title: str | None = None
+    source_look_image_url: str | None = None
     created_at: datetime
 
     @model_validator(mode="before")
@@ -96,6 +102,12 @@ class OrderItemRead(BaseModel):
             "product_brand": _read_attr(product, "brand") if product is not None else None,
             "product_thumbnail_path": thumbnail_path,
             "product_thumbnail_url": thumbnail_url,
+            "source_type": _read_attr(data, "source_type"),
+            "source_group_id": _read_attr(data, "source_group_id"),
+            "source_look_id": _read_attr(data, "source_look_id"),
+            "source_look_slug": _read_attr(data, "source_look_slug"),
+            "source_look_title": _read_attr(data, "source_look_title"),
+            "source_look_image_url": _read_attr(data, "source_look_image_url"),
             "created_at": _read_attr(data, "created_at"),
         }
 

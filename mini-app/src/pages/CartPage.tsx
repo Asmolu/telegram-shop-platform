@@ -11,6 +11,7 @@ import {
   validatePromoCode,
   toApiErrorMessage,
   type Cart,
+  type CartItem,
   type Favorite,
   type Order,
   type Product,
@@ -19,7 +20,7 @@ import {
 import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, PageLoader, ProductCard, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, InlineNotice, LookSourceHeader, PageLoader, ProductCard, TopBar } from '../shared/ui';
 import { getTelegramWebApp } from '../shared/telegram/webApp';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
@@ -354,6 +355,22 @@ function cartProductImageSrcSet(thumbnailUrl?: string | null, imageUrl?: string 
   return entries.length > 1 ? entries.join(', ') : undefined;
 }
 
+function isLookSourceItem(item: CartItem | Order['items'][number]) {
+  return item.source_type === 'LOOK' && Boolean(item.source_group_id);
+}
+
+function lookSourceLabelTitle(item: CartItem | Order['items'][number]) {
+  return item.source_look_title?.trim() || 'Образ';
+}
+
+function cartLookGroupSubtotal(items: CartItem[]) {
+  return items.reduce((total, item) => total + Number(item.subtotal), 0);
+}
+
+function orderLookGroupSubtotal(items: Order['items']) {
+  return items.reduce((total, item) => total + Number(item.item_total ?? item.subtotal), 0);
+}
+
 function CartItemsTab({
   cart,
   promoCode,
@@ -587,7 +604,7 @@ function CartItemsTab({
       </div>
 
       <div className="cart-list">
-        {items.map((item) => {
+        {items.map((item, index) => {
           const imageUrl = normalizeAssetUrl(item.product.thumbnail_image_url ?? item.product.image_url);
           const unavailable = item.product.status !== 'ACTIVE' || !item.product_variant.is_active || item.product_variant.available_quantity < item.quantity;
           const brand = item.product.brand?.trim() || 'ICON STORE';
@@ -602,11 +619,32 @@ function CartItemsTab({
             item.product.old_price,
             item.product.compare_at_price,
           );
+          const lookSourceGroupId = isLookSourceItem(item) ? item.source_group_id : null;
+          const previousItem = items[index - 1];
+          const startsLookGroup = Boolean(
+            lookSourceGroupId
+            && (!previousItem
+              || previousItem.source_type !== 'LOOK'
+              || previousItem.source_group_id !== lookSourceGroupId),
+          );
+          const lookGroupItems = startsLookGroup
+            ? items.filter((candidate) => (
+              candidate.source_type === 'LOOK'
+              && candidate.source_group_id === lookSourceGroupId
+            ))
+            : [];
 
           return (
+            <React.Fragment key={item.id}>
+              {startsLookGroup ? (
+                <LookSourceHeader
+                  imageUrl={item.source_look_image_url}
+                  subtotal={cartLookGroupSubtotal(lookGroupItems)}
+                  title={lookSourceLabelTitle(item)}
+                />
+              ) : null}
             <article
               className={`cart-item cart-item--clickable ${item.is_selected ? '' : 'cart-item--unselected'}`}
-              key={item.id}
               role="link"
               tabIndex={0}
               onClick={() => navigateToProduct(item.product.id)}
@@ -686,6 +724,7 @@ function CartItemsTab({
                 ×
               </button>
             </article>
+            </React.Fragment>
           );
         })}
       </div>
@@ -766,9 +805,23 @@ function OrdersTab({ orders }: { orders: Order[] }) {
             </div>
 
             <div className="order-item-list">
-              {order.items.map((item) => {
+              {order.items.map((item, index) => {
                 const thumbnailUrl = normalizeAssetUrl(item.product_thumbnail_url || item.product_thumbnail_path);
                 const productPath = withReturnTo(`/product/${item.product_id}`, currentPath);
+                const lookSourceGroupId = isLookSourceItem(item) ? item.source_group_id : null;
+                const previousItem = order.items[index - 1];
+                const startsLookGroup = Boolean(
+                  lookSourceGroupId
+                  && (!previousItem
+                    || previousItem.source_type !== 'LOOK'
+                    || previousItem.source_group_id !== lookSourceGroupId),
+                );
+                const lookGroupItems = startsLookGroup
+                  ? order.items.filter((candidate) => (
+                    candidate.source_type === 'LOOK'
+                    && candidate.source_group_id === lookSourceGroupId
+                  ))
+                  : [];
                 const variant = [
                   displaySize(item.variant_size_grid, item.variant_size, true),
                   item.variant_color,
@@ -776,7 +829,15 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                 ].filter(Boolean).join(' · ');
 
                 return (
-                  <div className="order-item-row" key={item.id}>
+                  <React.Fragment key={item.id}>
+                    {startsLookGroup ? (
+                      <LookSourceHeader
+                        imageUrl={item.source_look_image_url}
+                        subtotal={orderLookGroupSubtotal(lookGroupItems)}
+                        title={lookSourceLabelTitle(item)}
+                      />
+                    ) : null}
+                  <div className="order-item-row">
                     <Link className="order-item-row__image" to={productPath}>
                       {thumbnailUrl ? (
                         <img
@@ -797,6 +858,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                     </div>
                     <strong>{formatPrice(item.item_total ?? item.subtotal)}</strong>
                   </div>
+                  </React.Fragment>
                 );
               })}
             </div>

@@ -10,6 +10,7 @@ from app.db.models import (
     BroadcastCampaignType,
     BroadcastDelivery,
     BroadcastDeliveryStatus,
+    CartItem,
     Category,
     CustomerTelegramSubscription,
     Look,
@@ -570,6 +571,39 @@ def test_looks_migration_contract() -> None:
     assert Look.__table__.c.is_listed.nullable is False
     assert LookItem.__table__.c.quantity.nullable is False
     assert LookImage.__table__.c.file_path.nullable is False
+
+
+def test_look_source_grouping_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260703_0045_add_look_source_grouping.py"
+    )
+    content = migration_path.read_text(encoding="utf-8")
+    cart_table = CartItem.__table__
+    order_item_table = OrderItem.__table__
+    cart_index_names = {index.name for index in cart_table.indexes}
+    order_item_index_names = {index.name for index in order_item_table.indexes}
+
+    for column_name in (
+        "source_type",
+        "source_look_id",
+        "source_look_slug",
+        "source_look_title",
+        "source_look_image_url",
+        "source_group_id",
+    ):
+        assert column_name in content
+        assert cart_table.c[column_name].nullable is True
+        assert order_item_table.c[column_name].nullable is True
+
+    assert "uq_cart_items_cart_variant" in content
+    assert "uq_cart_items_normal_cart_variant" in cart_index_names
+    assert "ix_cart_items_source_group_id" in cart_index_names
+    assert "ix_cart_items_source_look_id" in cart_index_names
+    assert "ix_order_items_source_group_id" in order_item_index_names
+    assert "ix_order_items_source_look_id" in order_item_index_names
 
 
 def test_customer_campaign_migration_adds_phase_2_tables_and_enums() -> None:

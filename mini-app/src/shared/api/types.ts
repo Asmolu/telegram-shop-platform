@@ -27,6 +27,7 @@ export type ProductResolveVariantStatus =
   | 'inactive';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
+export type ItemSourceType = 'LOOK' | string;
 export type ManualPaymentStatus =
   | 'PENDING'
   | 'SUBMITTED'
@@ -339,6 +340,12 @@ export type CartItem = {
   is_selected: boolean;
   unit_price: string;
   subtotal: string;
+  source_type?: ItemSourceType | null;
+  source_group_id?: string | null;
+  source_look_id?: number | null;
+  source_look_slug?: string | null;
+  source_look_title?: string | null;
+  source_look_image_url?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -396,6 +403,12 @@ export type OrderItem = {
   item_total?: string;
   product_thumbnail_path?: string | null;
   product_thumbnail_url?: string | null;
+  source_type?: ItemSourceType | null;
+  source_group_id?: string | null;
+  source_look_id?: number | null;
+  source_look_slug?: string | null;
+  source_look_title?: string | null;
+  source_look_image_url?: string | null;
   created_at: string;
 };
 

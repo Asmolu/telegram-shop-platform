@@ -265,6 +265,18 @@ describe('CheckoutPage item details', () => {
       'checkout-key',
     ));
   });
+
+  it('groups Look items in the checkout summary without changing totals', async () => {
+    vi.mocked(getCart).mockResolvedValueOnce(cartWithLookGroupFixture());
+
+    render(<CheckoutPage />);
+
+    expect(await screen.findByText('Куплено из образа: City Look')).toBeTruthy();
+    expect(screen.getByText('Look Shirt')).toBeTruthy();
+    expect(screen.getByText('Look Pants')).toBeTruthy();
+    expect(screen.getByText('Compact Hoodie')).toBeTruthy();
+    expect(screen.getAllByText(/500/).length).toBeGreaterThan(0);
+  });
 });
 
 function subscriptionFixture(
@@ -333,5 +345,67 @@ function cartFixture(): Cart {
     selected_distinct_item_count: 1,
     created_at: '2026-06-24T00:00:00Z',
     updated_at: '2026-06-24T00:00:00Z',
+  };
+}
+
+function cartWithLookGroupFixture(): Cart {
+  const cart = cartFixture();
+  return {
+    ...cart,
+    items: [
+      cart.items[0],
+      {
+        ...cart.items[0],
+        id: 11,
+        product: {
+          ...cart.items[0].product,
+          id: 21,
+          name: 'Look Shirt',
+          slug: 'look-shirt',
+        },
+        product_variant: {
+          ...cart.items[0].product_variant,
+          id: 31,
+          product_id: 21,
+          sku: 'SHIRT-M',
+        },
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+      {
+        ...cart.items[0],
+        id: 12,
+        product: {
+          ...cart.items[0].product,
+          id: 22,
+          name: 'Look Pants',
+          slug: 'look-pants',
+        },
+        product_variant: {
+          ...cart.items[0].product_variant,
+          id: 32,
+          product_id: 22,
+          sku: 'PANTS-M',
+        },
+        quantity: 1,
+        subtotal: '100.00',
+        source_type: 'LOOK',
+        source_group_id: 'look-group-1',
+        source_look_id: 7,
+        source_look_slug: 'city-look',
+        source_look_title: 'City Look',
+        source_look_image_url: '/uploads/looks/city.webp',
+      },
+    ],
+    total: '500.00',
+    quantity_total: 5,
+    distinct_item_count: 3,
+    selected_total: '500.00',
+    selected_quantity_total: 5,
+    selected_distinct_item_count: 3,
   };
 }

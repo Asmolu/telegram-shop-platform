@@ -1,5 +1,6 @@
 import logging
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
@@ -100,36 +101,39 @@ class LooksService:
         ]
 
         cart = await self._get_or_create_cart_for_mutation(user_id)
-        existing_by_variant: dict[int, CartItem] = {}
-        for _, variant in resolved_items:
-            existing_item = await self.cart_repository.get_item_by_cart_and_variant(
-                cart_id=cart.id,
-                product_variant_id=variant.id,
-            )
-            if existing_item is not None:
-                existing_by_variant[variant.id] = existing_item
-
+        additions_by_variant: dict[int, int] = {}
         for item, variant in resolved_items:
-            existing_item = existing_by_variant.get(variant.id)
-            target_quantity = item.quantity + (existing_item.quantity if existing_item else 0)
+            additions_by_variant[variant.id] = (
+                additions_by_variant.get(variant.id, 0) + item.quantity
+            )
+
+        for variant_id, added_quantity in additions_by_variant.items():
+            variant = next(variant for _, variant in resolved_items if variant.id == variant_id)
+            target_quantity = added_quantity + sum(
+                cart_item.quantity
+                for cart_item in cart.items
+                if cart_item.product_variant_id == variant_id
+            )
             if target_quantity > variant.available_quantity:
                 raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
 
+        source_group_id = str(uuid4())
         for item, variant in resolved_items:
-            existing_item = existing_by_variant.get(variant.id)
-            if existing_item is None:
-                self.cart_repository.add(
-                    CartItem(
-                        cart_id=cart.id,
-                        product_id=item.product_id,
-                        product_variant_id=variant.id,
-                        quantity=item.quantity,
-                        is_selected=True,
-                    )
+            self.cart_repository.add(
+                CartItem(
+                    cart_id=cart.id,
+                    product_id=item.product_id,
+                    product_variant_id=variant.id,
+                    quantity=item.quantity,
+                    is_selected=True,
+                    source_type="LOOK",
+                    source_look_id=look.id,
+                    source_look_slug=look.slug,
+                    source_look_title=look.title,
+                    source_look_image_url=look.image_url,
+                    source_group_id=source_group_id,
                 )
-            else:
-                existing_item.quantity += item.quantity
-                existing_item.is_selected = True
+            )
 
         try:
             await self.session.commit()
