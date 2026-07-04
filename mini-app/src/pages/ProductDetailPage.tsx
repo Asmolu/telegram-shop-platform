@@ -7,6 +7,7 @@ import {
   getFavorites,
   getProduct,
   getProductReviews,
+  getSimilarProducts,
   resolveProduct,
   removeFavorite,
   toApiErrorMessage,
@@ -25,7 +26,7 @@ import {
   useRouter,
   withReturnTo,
 } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, HeartIcon, InlineNotice, PageLoader, ProductCard, ProductImageCarousel, TopBar } from '../shared/ui';
+import { EmptyState, ErrorState, HeartIcon, InlineNotice, PageLoader, ProductImageCarousel, SimilarProductsCarousel, TopBar } from '../shared/ui';
 import {
   formatDate,
   formatDiscountPercent,
@@ -158,6 +159,8 @@ export function ProductDetailPage() {
   );
   const backFallback = getBackFallback(productRoute);
   const [product, setProduct] = React.useState<Product | null>(null);
+  const [similarProducts, setSimilarProducts] = React.useState<Product[]>([]);
+  const [similarProductsLoading, setSimilarProductsLoading] = React.useState(false);
   const [reviews, setReviews] = React.useState<Review[]>([]);
   const [cart, setCart] = React.useState<Cart | null>(null);
   const [addedVariantIds, setAddedVariantIds] = React.useState<Set<number>>(new Set());
@@ -263,6 +266,39 @@ export function ProductDetailPage() {
       cancelled = true;
     };
   }, [currentPath, isAuthenticated, navigate, productRoute]);
+
+  React.useEffect(() => {
+    if (!product) {
+      setSimilarProducts([]);
+      setSimilarProductsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSimilarProducts([]);
+    setSimilarProductsLoading(true);
+
+    getSimilarProducts(product.id, 12, { networkImpact: 'local' })
+      .then((result) => {
+        if (!cancelled) {
+          setSimilarProducts(result.items.filter((item) => item.id !== product.id));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSimilarProducts([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSimilarProductsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [product]);
 
   const activeVariants = React.useMemo(
     () => product
@@ -619,21 +655,6 @@ export function ProductDetailPage() {
         )}
       </section>
 
-      {product.related_products && product.related_products.length > 0 ? (
-        <section className="detail-card related-products-section">
-          <h2>Похожие товары</h2>
-          <div className="related-products-carousel">
-            {product.related_products.map((relatedProduct) => (
-              <ProductCard
-                key={relatedProduct.id}
-                product={relatedProduct}
-                onAddToCart={quickCart.addToCart}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       <section className="detail-card description-card">
         <h2>Описание</h2>
         <p className={`description-card__copy ${descriptionExpanded ? '' : 'is-collapsed'}`}>
@@ -712,6 +733,12 @@ export function ProductDetailPage() {
           </button>
         </form>
       </section>
+
+      <SimilarProductsCarousel
+        loading={similarProductsLoading}
+        products={similarProducts}
+        onAddToCart={quickCart.addToCart}
+      />
 
       <div className="detail-cta detail-cta--bottom-attached">
         <div className="detail-cta__actions">

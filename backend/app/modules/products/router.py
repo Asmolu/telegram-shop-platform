@@ -196,6 +196,15 @@ async def list_public_product_variants(
     return await service.list_public_product_variants(product_id)
 
 
+@router.get("/{product_id}/similar", response_model=ProductCardList)
+async def list_similar_products(
+    product_id: int,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 12,
+) -> ProductCardList:
+    return await service.list_similar_products(product_id, limit=limit)
+
+
 @router.post(
     "/{product_id}/variants",
     response_model=ProductVariantRead,

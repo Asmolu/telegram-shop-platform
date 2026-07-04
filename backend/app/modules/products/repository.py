@@ -156,6 +156,110 @@ class ProductsRepository:
         count_result = await self.session.execute(count_query)
         return list(products_result.scalars().all()), count_result.scalar_one()
 
+    async def get_similarity_context_by_id(self, product_id: int) -> Product | None:
+        result = await self.session.execute(
+            select(Product)
+            .options(
+                load_only(
+                    Product.id,
+                    Product.category_id,
+                    Product.status,
+                ),
+                selectinload(Product.product_categories).load_only(
+                    ProductCategory.product_id,
+                    ProductCategory.category_id,
+                    ProductCategory.priority,
+                ),
+                selectinload(Product.tags).load_only(Tag.id),
+            )
+            .where(Product.id == product_id, Product.status == ProductStatus.ACTIVE)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_public_similarity_candidates(
+        self,
+        *,
+        category_ids: set[int],
+        tag_ids: set[int],
+        exclude_product_ids: set[int],
+    ) -> list[Product]:
+        match_conditions = []
+        if category_ids:
+            match_conditions.extend(
+                [
+                    Product.category_id.in_(category_ids),
+                    Product.product_categories.any(
+                        ProductCategory.category_id.in_(category_ids)
+                    ),
+                ]
+            )
+        if tag_ids:
+            match_conditions.append(Product.tags.any(Tag.id.in_(tag_ids)))
+        if not match_conditions:
+            return []
+
+        conditions = [
+            Product.status == ProductStatus.ACTIVE,
+            Product.is_listed.is_(True),
+            or_(*match_conditions),
+        ]
+        if exclude_product_ids:
+            conditions.append(~Product.id.in_(exclude_product_ids))
+
+        result = await self.session.execute(
+            select(Product)
+            .options(
+                load_only(
+                    Product.id,
+                    Product.name,
+                    Product.slug,
+                    Product.brand,
+                    Product.base_price,
+                    Product.old_price,
+                    Product.search_priority,
+                    Product.size_grid,
+                    Product.size_group,
+                    Product.image_badge_type,
+                    Product.image_badge_text,
+                    Product.image_badge_color,
+                    Product.image_badge_position,
+                    Product.status,
+                    Product.is_listed,
+                    Product.category_id,
+                    Product.created_at,
+                ),
+                selectinload(Product.product_categories).load_only(
+                    ProductCategory.product_id,
+                    ProductCategory.category_id,
+                    ProductCategory.priority,
+                ),
+                selectinload(Product.tags).load_only(Tag.id),
+                selectinload(Product.images).load_only(
+                    ProductImage.id,
+                    ProductImage.product_id,
+                    ProductImage.file_path,
+                    ProductImage.thumbnail_path,
+                    ProductImage.card_path,
+                    ProductImage.detail_path,
+                    ProductImage.alt_text,
+                    ProductImage.position,
+                    ProductImage.is_primary,
+                ),
+                selectinload(Product.variants.and_(ProductVariant.is_active.is_(True))).load_only(
+                    ProductVariant.id,
+                    ProductVariant.product_id,
+                    ProductVariant.size,
+                    ProductVariant.color,
+                    ProductVariant.stock_quantity,
+                    ProductVariant.reserved_quantity,
+                    ProductVariant.is_active,
+                ),
+            )
+            .where(*conditions)
+            .order_by(Product.search_priority.asc(), Product.created_at.desc(), Product.id.desc())
+        )
+        return list(result.scalars().all())
+
     async def list_search_suggestions(
         self,
         *,

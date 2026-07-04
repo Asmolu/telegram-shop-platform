@@ -98,6 +98,36 @@ def test_public_product_list_accepts_unquoted_if_none_match() -> None:
     assert second_response.content == b""
 
 
+def test_public_product_similar_route_allows_anonymous_access() -> None:
+    app = create_app()
+
+    class FakeProductsService:
+        async def list_similar_products(self, product_id: int, *, limit: int) -> ProductCardList:
+            assert product_id == 1
+            assert limit == 2
+            related = _product_response()
+            related["id"] = 2
+            related["slug"] = "similar-hoodie"
+            return ProductCardList.model_validate(
+                {
+                    "items": [related],
+                    "meta": {"limit": 2, "offset": 0, "total": 1},
+                }
+            )
+
+    app.dependency_overrides[get_products_service] = lambda: FakeProductsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/products/1/similar?limit=2")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == 2
+    assert response.json()["items"][0]["slug"] == "similar-hoodie"
+    assert response.json()["meta"] == {"limit": 2, "offset": 0, "total": 1}
+
+
 def test_public_product_suggestions_allow_anonymous_access() -> None:
     app = create_app()
 

@@ -15,17 +15,21 @@ from app.core.errors import AppError
 from app.db.models import (
     Cart,
     CartItem,
+    Category,
     Look,
     LookImage,
     LookItem,
     LookStatus,
     Product,
+    ProductCategory,
+    ProductImageBadgeType,
     ProductSizeGrid,
     ProductSizeGroup,
     ProductStatus,
     ProductVariant,
     RouteAlias,
     RouteAliasEntityType,
+    Tag,
     User,
     UserRole,
 )
@@ -124,6 +128,15 @@ class FakeLooksRepository:
 
     async def get_public_by_slug(self, slug: str) -> Look | None:
         look = await self.get_by_slug(slug)
+        if look is None or look.status != LookStatus.ACTIVE or not look.is_listed:
+            return None
+        return look
+
+    async def get_public_similarity_context_by_slug(self, slug: str) -> Look | None:
+        return await self.get_public_by_slug(slug)
+
+    async def get_public_similarity_context_by_id(self, look_id: int) -> Look | None:
+        look = await self.get_admin_by_id(look_id)
         if look is None or look.status != LookStatus.ACTIVE or not look.is_listed:
             return None
         return look
@@ -650,6 +663,86 @@ async def test_public_detail_includes_hidden_component_product_and_computes_pric
     assert detail.requires_clothing_size is True
     assert detail.requires_footwear_size is False
     assert detail.is_available is True
+
+
+@pytest.mark.asyncio
+async def test_look_similar_uses_component_categories_and_tags() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    hidden_component = _product(
+        product_id=1,
+        is_listed=False,
+        category_ids=[10],
+        tag_ids=[7],
+    )
+    shoes = _product(product_id=2, category_ids=[20], tag_ids=[8])
+    same_category = _product(product_id=3, category_ids=[10], tag_ids=[])
+    shared_tag = _product(product_id=4, category_ids=[], tag_ids=[8])
+    repository.add(
+        _look(
+            look_id=1,
+            slug="similar-look",
+            items=[
+                _look_item(item_id=1, look_id=1, product=hidden_component),
+                _look_item(item_id=2, look_id=1, product=shoes),
+            ],
+        )
+    )
+    service.products_service.repository.list_public_similarity_candidates = AsyncMock(
+        return_value=[hidden_component, shoes, same_category, shared_tag]
+    )
+
+    result = await service.list_similar_products("similar-look")
+
+    assert [item.id for item in result.items] == [3, 4]
+    service.products_service.repository.list_public_similarity_candidates.assert_awaited_once_with(
+        category_ids={10, 20},
+        tag_ids={7, 8},
+        exclude_product_ids={1, 2},
+    )
+
+
+@pytest.mark.asyncio
+async def test_look_similar_excludes_hidden_standalone_products() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    component = _product(product_id=1, category_ids=[10], tag_ids=[7])
+    hidden_candidate = _product(product_id=2, is_listed=False, category_ids=[10], tag_ids=[7])
+    visible_candidate = _product(product_id=3, category_ids=[10], tag_ids=[7])
+    repository.add(
+        _look(
+            look_id=1,
+            slug="visibility-look",
+            items=[_look_item(item_id=1, look_id=1, product=component)],
+        )
+    )
+    service.products_service.repository.list_public_similarity_candidates = AsyncMock(
+        return_value=[hidden_candidate, visible_candidate]
+    )
+
+    result = await service.list_similar_products("visibility-look")
+
+    assert [item.id for item in result.items] == [3]
+
+
+@pytest.mark.asyncio
+async def test_look_similar_empty_context_returns_empty_list() -> None:
+    service, repository, _cart_repository, _session, _storage = _looks_service()
+    component = _product(product_id=1)
+    repository.add(
+        _look(
+            look_id=1,
+            slug="empty-similarity",
+            items=[_look_item(item_id=1, look_id=1, product=component)],
+        )
+    )
+    service.products_service.repository.list_public_similarity_candidates = AsyncMock(
+        return_value=[]
+    )
+
+    result = await service.list_similar_products("empty-similarity")
+
+    assert result.items == []
+    assert result.meta.total == 0
+    service.products_service.repository.list_public_similarity_candidates.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1239,6 +1332,29 @@ def test_look_slug_generation_allows_seller() -> None:
     assert response.json() == {"items": ["00001", "00002"]}
 
 
+def test_public_look_similar_products_route_allows_anonymous_access() -> None:
+    app = create_app()
+
+    class FakeLooksService:
+        async def list_similar_products(self, slug: str, *, limit: int) -> dict[str, object]:
+            assert slug == "summer-look"
+            assert limit == 2
+            return {
+                "items": [_product_card_payload(product_id=2, slug="similar-hoodie")],
+                "meta": {"limit": 2, "offset": 0, "total": 1},
+            }
+
+    app.dependency_overrides[get_looks_service] = lambda: FakeLooksService()
+    try:
+        response = TestClient(app).get("/api/v1/looks/summer-look/similar-products?limit=2")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["slug"] == "similar-hoodie"
+    assert response.json()["meta"] == {"limit": 2, "offset": 0, "total": 1}
+
+
 def test_look_slug_generation_rejects_invalid_count() -> None:
     app = create_app()
 
@@ -1364,7 +1480,12 @@ def _product(
     variants: list[ProductVariant] | None = None,
     size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA,
     size_group: ProductSizeGroup = ProductSizeGroup.CLOTHING,
+    category_ids: list[int] | None = None,
+    tag_ids: list[int] | None = None,
+    search_priority: int = 2,
+    created_at: datetime = NOW,
 ) -> Product:
+    normalized_category_ids = category_ids or []
     product = Product(
         id=product_id,
         name=f"Product {product_id}",
@@ -1373,16 +1494,32 @@ def _product(
         description="Product description",
         base_price=base_price,
         old_price=old_price,
+        search_priority=search_priority,
         size_grid=size_grid,
         size_group=size_group,
+        image_badge_type=ProductImageBadgeType.NONE,
+        image_badge_text=None,
+        image_badge_color=None,
+        image_badge_position=None,
         status=status_value,
         is_listed=is_listed,
         is_returnable=True,
-        category_id=None,
+        category_id=normalized_category_ids[0] if normalized_category_ids else None,
+        category=_category(normalized_category_ids[0]) if normalized_category_ids else None,
+        product_categories=[
+            ProductCategory(
+                product_id=product_id,
+                category_id=category_id,
+                priority=index + 1,
+                category=_category(category_id),
+            )
+            for index, category_id in enumerate(normalized_category_ids[:3])
+        ],
+        tags=[_tag(tag_id) for tag_id in tag_ids or []],
         images=[],
         variants=variants or [_variant(variant_id=product_id, product_id=product_id, size="M")],
-        created_at=NOW,
-        updated_at=NOW,
+        created_at=created_at,
+        updated_at=created_at,
     )
     for variant in product.variants:
         variant.product = product
@@ -1411,6 +1548,49 @@ def _variant(
         created_at=NOW,
         updated_at=NOW,
     )
+
+
+def _category(category_id: int) -> Category:
+    return Category(
+        id=category_id,
+        name=f"Category {category_id}",
+        slug=f"category-{category_id}",
+        description=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+def _tag(tag_id: int) -> Tag:
+    return Tag(
+        id=tag_id,
+        name=f"Tag {tag_id}",
+        slug=f"tag-{tag_id}",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+def _product_card_payload(*, product_id: int, slug: str) -> dict[str, object]:
+    return {
+        "id": product_id,
+        "name": slug.replace("-", " ").title(),
+        "slug": slug,
+        "brand": "ICON",
+        "base_price": "59.90",
+        "old_price": None,
+        "size_grid": "clothing_alpha",
+        "size_group": "CLOTHING",
+        "image_badge_type": "none",
+        "image_badge_text": None,
+        "image_badge_color": None,
+        "image_badge_position": None,
+        "image_url": None,
+        "thumbnail_image_url": None,
+        "variants": [],
+        "is_available": False,
+        "created_at": NOW.isoformat(),
+    }
 
 
 def _alias(

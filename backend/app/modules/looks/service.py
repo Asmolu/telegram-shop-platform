@@ -42,6 +42,8 @@ from app.modules.looks.schemas import (
     LookSlugList,
     LookUpdate,
 )
+from app.modules.products.schemas import ProductCardList
+from app.modules.products.service import ProductsService
 from app.modules.products.size_grids import is_footwear_size_grid
 from app.modules.route_aliases.service import RouteAliasesService
 from app.modules.uploads.service import UploadsService
@@ -76,6 +78,7 @@ class LooksService:
         self.session = session
         self.repository = LooksRepository(session)
         self.cart_repository = CartRepository(session)
+        self.products_service = ProductsService(session)
         self.route_aliases = RouteAliasesService(session)
         self.storage = storage or LocalStorageService()
 
@@ -91,6 +94,35 @@ class LooksService:
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         return self._build_detail(look)
+
+    async def list_similar_products(
+        self,
+        slug: str,
+        *,
+        limit: int = 12,
+    ) -> ProductCardList:
+        look = await self._get_public_look_similarity_context_by_slug_or_alias(slug)
+        if look is None:
+            raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
+
+        component_products = [item.product for item in look.items]
+        category_ids = {
+            category_id
+            for product in component_products
+            for category_id in ProductsService._product_category_ids(product)
+        }
+        tag_ids = {
+            tag_id
+            for product in component_products
+            for tag_id in ProductsService._product_tag_ids(product)
+        }
+        return await self.products_service.list_similar_products_for_context(
+            category_ids=category_ids,
+            tag_ids=tag_ids,
+            exclude_product_ids={product.id for product in component_products},
+            limit=limit,
+            rank_category_overlap_count=True,
+        )
 
     async def add_look_to_cart(
         self,
@@ -466,6 +498,19 @@ class LooksService:
         if look_id is None:
             return None
         return await self.repository.get_public_by_id(look_id)
+
+    async def _get_public_look_similarity_context_by_slug_or_alias(
+        self,
+        slug: str,
+    ) -> Look | None:
+        look = await self.repository.get_public_similarity_context_by_slug(slug)
+        if look is not None:
+            return look
+
+        look_id = await self.route_aliases.resolve_entity_id(RouteAliasEntityType.LOOK, slug)
+        if look_id is None:
+            return None
+        return await self.repository.get_public_similarity_context_by_id(look_id)
 
     def _validate_component_product(self, product: Product, *, target_status: LookStatus) -> None:
         if product.status == ProductStatus.ARCHIVED:

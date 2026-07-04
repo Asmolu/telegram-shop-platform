@@ -2,7 +2,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Look, LookImage, LookItem, LookStatus, Product, ProductImage
+from app.db.models import (
+    Look,
+    LookImage,
+    LookItem,
+    LookStatus,
+    Product,
+    ProductCategory,
+    ProductImage,
+)
 
 
 class LooksRepository:
@@ -55,6 +63,26 @@ class LooksRepository:
     async def get_public_by_id(self, look_id: int) -> Look | None:
         result = await self.session.execute(
             self._look_select().where(
+                Look.id == look_id,
+                Look.status == LookStatus.ACTIVE,
+                Look.is_listed.is_(True),
+            )
+        )
+        return result.scalars().unique().one_or_none()
+
+    async def get_public_similarity_context_by_slug(self, slug: str) -> Look | None:
+        result = await self.session.execute(
+            self._look_select(include_product_taxonomy=True).where(
+                Look.slug == slug,
+                Look.status == LookStatus.ACTIVE,
+                Look.is_listed.is_(True),
+            )
+        )
+        return result.scalars().unique().one_or_none()
+
+    async def get_public_similarity_context_by_id(self, look_id: int) -> Look | None:
+        result = await self.session.execute(
+            self._look_select(include_product_taxonomy=True).where(
                 Look.id == look_id,
                 Look.status == LookStatus.ACTIVE,
                 Look.is_listed.is_(True),
@@ -130,8 +158,8 @@ class LooksRepository:
         result = await self.session.execute(select(func.count()).select_from(Look).where(*filters))
         return int(result.scalar_one())
 
-    def _look_select(self):
-        return select(Look).options(
+    def _look_select(self, *, include_product_taxonomy: bool = False):
+        options = [
             selectinload(Look.images),
             selectinload(Look.items)
             .selectinload(LookItem.product)
@@ -148,4 +176,20 @@ class LooksRepository:
                 ProductImage.position,
                 ProductImage.is_primary,
             ),
-        )
+        ]
+        if include_product_taxonomy:
+            options.extend(
+                [
+                    selectinload(Look.items).selectinload(LookItem.product).selectinload(
+                        Product.product_categories
+                    ).load_only(
+                        ProductCategory.product_id,
+                        ProductCategory.category_id,
+                        ProductCategory.priority,
+                    ),
+                    selectinload(Look.items).selectinload(LookItem.product).selectinload(
+                        Product.tags
+                    ),
+                ]
+            )
+        return select(Look).options(*options)

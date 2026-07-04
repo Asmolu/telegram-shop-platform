@@ -106,6 +106,8 @@ NUMERIC_PRODUCT_SLUG_MAX = 99999
 NUMERIC_PRODUCT_SLUG_EXHAUSTED_MESSAGE = (
     "Numeric product slug range 00001-99999 is exhausted."
 )
+SIMILAR_PRODUCTS_DEFAULT_LIMIT = 12
+SIMILAR_PRODUCTS_MAX_LIMIT = 50
 
 
 class ProductsService:
@@ -354,6 +356,57 @@ class ProductsService:
     ) -> None:
         await self._track_event("product.viewed", user_id=user_id, product_id=product_id)
 
+    async def list_similar_products(
+        self,
+        product_id: int,
+        *,
+        limit: int = SIMILAR_PRODUCTS_DEFAULT_LIMIT,
+    ) -> ProductCardList:
+        product = await self.repository.get_similarity_context_by_id(product_id)
+        if product is None:
+            raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
+
+        return await self.list_similar_products_for_context(
+            category_ids=self._product_category_ids(product),
+            tag_ids=self._product_tag_ids(product),
+            exclude_product_ids={product.id},
+            limit=limit,
+            rank_category_overlap_count=False,
+        )
+
+    async def list_similar_products_for_context(
+        self,
+        *,
+        category_ids: set[int],
+        tag_ids: set[int],
+        exclude_product_ids: set[int],
+        limit: int = SIMILAR_PRODUCTS_DEFAULT_LIMIT,
+        rank_category_overlap_count: bool = True,
+    ) -> ProductCardList:
+        safe_limit = min(max(limit, 1), SIMILAR_PRODUCTS_MAX_LIMIT)
+        if not category_ids and not tag_ids:
+            return ProductCardList(
+                items=[],
+                meta=PageMeta(limit=safe_limit, offset=0, total=0),
+            )
+
+        candidates = await self.repository.list_public_similarity_candidates(
+            category_ids=category_ids,
+            tag_ids=tag_ids,
+            exclude_product_ids=exclude_product_ids,
+        )
+        ranked = self._rank_similar_products(
+            candidates,
+            category_ids=category_ids,
+            tag_ids=tag_ids,
+            exclude_product_ids=exclude_product_ids,
+            rank_category_overlap_count=rank_category_overlap_count,
+        )
+        return ProductCardList(
+            items=[ProductCardRead.model_validate(product) for product in ranked[:safe_limit]],
+            meta=PageMeta(limit=safe_limit, offset=0, total=len(ranked)),
+        )
+
     def _build_public_product_detail(self, product: Product) -> ProductPublicDetailRead:
         active_related_products = [
             related_product
@@ -373,6 +426,65 @@ class ProductsService:
         return product.category_id == category_id or any(
             assignment.category_id == category_id for assignment in product.product_categories
         )
+
+    def _rank_similar_products(
+        self,
+        candidates: list[Product],
+        *,
+        category_ids: set[int],
+        tag_ids: set[int],
+        exclude_product_ids: set[int],
+        rank_category_overlap_count: bool,
+    ) -> list[Product]:
+        seen_ids: set[int] = set()
+        scored: list[tuple[tuple[int, int, int, float, int], Product]] = []
+
+        for candidate in candidates:
+            if candidate.id in seen_ids or candidate.id in exclude_product_ids:
+                continue
+            seen_ids.add(candidate.id)
+            if candidate.status != ProductStatus.ACTIVE or not candidate.is_listed:
+                continue
+
+            category_overlap = len(category_ids & self._product_category_ids(candidate))
+            shared_tag_count = len(tag_ids & self._product_tag_ids(candidate))
+            if category_overlap <= 0 and shared_tag_count <= 0:
+                continue
+
+            category_rank = (
+                category_overlap if rank_category_overlap_count else int(category_overlap > 0)
+            )
+            search_priority = candidate.search_priority or 2
+            created_at = candidate.created_at
+            created_timestamp = created_at.timestamp() if created_at is not None else 0.0
+            scored.append(
+                (
+                    (
+                        -category_rank,
+                        -shared_tag_count,
+                        search_priority,
+                        -created_timestamp,
+                        -candidate.id,
+                    ),
+                    candidate,
+                )
+            )
+
+        return [product for _score, product in sorted(scored, key=lambda item: item[0])]
+
+    @staticmethod
+    def _product_category_ids(product: Product) -> set[int]:
+        category_ids = {product.category_id} if product.category_id is not None else set()
+        category_ids.update(
+            assignment.category_id
+            for assignment in getattr(product, "product_categories", []) or []
+            if assignment.category_id is not None
+        )
+        return category_ids
+
+    @staticmethod
+    def _product_tag_ids(product: Product) -> set[int]:
+        return {tag.id for tag in getattr(product, "tags", []) or [] if tag.id is not None}
 
     async def _get_public_product_by_slug_or_alias(self, product_slug: str) -> Product | None:
         product = await self.repository.get_public_detail_by_slug(product_slug)

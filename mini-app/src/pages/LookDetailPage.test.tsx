@@ -1,11 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addLookToCart,
   getLook,
+  getLookSimilarProducts,
   type Cart,
   type LookDetail,
+  type Product,
 } from '../shared/api';
 import { LookDetailPage } from './LookDetailPage';
 
@@ -26,7 +28,16 @@ vi.mock('../shared/router/RouterProvider', () => ({
   getAuthPath: (path: string) => `/auth?returnTo=${encodeURIComponent(path)}`,
   isFirstLevelRoutePath: () => false,
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
-    <a href={to} {...props}>{children}</a>
+    <a
+      href={to}
+      onClick={(event) => {
+        event.preventDefault();
+        routerMocks.navigate(to);
+      }}
+      {...props}
+    >
+      {children}
+    </a>
   ),
   useRouter: () => ({
     currentPath: routerMocks.route.currentPath,
@@ -44,8 +55,19 @@ vi.mock('../shared/api', () => ({
   addLookToCart: vi.fn().mockResolvedValue({ message: 'Образ добавлен в корзину.', cart: cartFixture() }),
   getApiBaseUrl: vi.fn(() => ''),
   getLook: vi.fn().mockResolvedValue(lookFixture()),
+  getLookSimilarProducts: vi.fn().mockResolvedValue({
+    items: [],
+    meta: { limit: 12, offset: 0, total: 0 },
+  }),
   toApiErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
 }));
+
+beforeEach(() => {
+  vi.mocked(getLookSimilarProducts).mockResolvedValue({
+    items: [],
+    meta: { limit: 12, offset: 0, total: 0 },
+  });
+});
 
 describe('LookDetailPage', () => {
   afterEach(() => {
@@ -68,6 +90,66 @@ describe('LookDetailPage', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Размер одежды' })).toBeTruthy();
     expect(within(screen.getByLabelText('Доступные размеры одежды')).getByRole('button', { name: /M/ })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('fetches and renders similar products below included Look products', async () => {
+    vi.mocked(getLookSimilarProducts).mockResolvedValueOnce({
+      items: [
+        productFixture({ id: 22, name: 'Similar Tee', slug: 'similar-tee' }),
+        productFixture({ id: 10, name: 'Included Duplicate', slug: 'included-duplicate' }),
+      ],
+      meta: { limit: 12, offset: 0, total: 2 },
+    });
+
+    render(<LookDetailPage />);
+
+    await waitFor(() => expect(getLookSimilarProducts).toHaveBeenCalledWith(
+      'summer-look',
+      12,
+      { networkImpact: 'local' },
+    ));
+    const heading = await screen.findByRole('heading', { level: 2, name: 'Похожие товары' });
+    const includedSection = screen.getByRole('heading', { level: 2, name: 'Товары в образе' });
+    expect(includedSection.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('Similar Tee')).toBeTruthy();
+    expect(screen.queryByText('Included Duplicate')).toBeNull();
+  });
+
+  it('hides similar products when the Look endpoint returns empty', async () => {
+    render(<LookDetailPage />);
+
+    await waitFor(() => expect(getLookSimilarProducts).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Похожие товары' })).toBeNull();
+    });
+  });
+
+  it('continues to render Look detail if similar products fail', async () => {
+    vi.mocked(getLookSimilarProducts).mockRejectedValueOnce(new Error('network failed'));
+
+    render(<LookDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Summer Look' })).toBeTruthy();
+    await waitFor(() => expect(getLookSimilarProducts).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Похожие товары' })).toBeNull();
+    });
+  });
+
+  it('preserves returnTo when opening a similar product from a Look', async () => {
+    vi.mocked(getLookSimilarProducts).mockResolvedValueOnce({
+      items: [productFixture({ id: 22, name: 'Similar Tee', slug: 'similar-tee' })],
+      meta: { limit: 12, offset: 0, total: 1 },
+    });
+
+    render(<LookDetailPage />);
+
+    const similarProductLink = (await screen.findByText('Similar Tee')).closest('a');
+    expect(similarProductLink).not.toBeNull();
+    expect(similarProductLink?.getAttribute('href')).toBe('/product/22?returnTo=%2Flooks%2Fsummer-look');
+    fireEvent.click(similarProductLink!);
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/product/22?returnTo=%2Flooks%2Fsummer-look');
   });
 
   it('opens an old Look slug and replaces the route with the canonical slug', async () => {
@@ -419,5 +501,37 @@ function cartFixture(): Cart {
     selected_distinct_item_count: 2,
     created_at: '2026-07-01T00:00:00Z',
     updated_at: '2026-07-01T00:00:00Z',
+  };
+}
+
+function productFixture(overrides: Partial<Product> = {}): Product {
+  return {
+    id: 22,
+    name: 'Similar Tee',
+    slug: 'similar-tee',
+    brand: 'ICON',
+    description: null,
+    base_price: '900.00',
+    old_price: null,
+    compare_at_price: null,
+    size_grid: 'clothing_alpha',
+    size_group: 'CLOTHING',
+    image_badge_type: 'none',
+    image_badge_text: null,
+    image_badge_color: null,
+    image_badge_position: null,
+    images: [],
+    variants: [{
+      id: 220,
+      product_id: 22,
+      size: 'M',
+      color: null,
+      sku: 'SIM-M',
+      available_quantity: 2,
+      is_active: true,
+    }],
+    is_available: true,
+    created_at: '2026-07-01T00:00:00Z',
+    ...overrides,
   };
 }

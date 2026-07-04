@@ -2,14 +2,16 @@ import React from 'react';
 import {
   addLookToCart,
   getLook,
+  getLookSimilarProducts,
   toApiErrorMessage,
   type LookDetail,
   type LookImage,
   type LookItem,
+  type Product,
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { ErrorState, InlineNotice, PageLoader, TopBar } from '../shared/ui';
+import { ErrorState, InlineNotice, PageLoader, SimilarProductsCarousel, TopBar } from '../shared/ui';
 import { formatPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
@@ -28,6 +30,8 @@ export function LookDetailPage() {
   const { isAuthenticated } = useAuth();
   const slug = React.useMemo(() => decodeURIComponent(pathname.replace('/looks/', '').split('/')[0] ?? ''), [pathname]);
   const [look, setLook] = React.useState<LookDetail | null>(null);
+  const [similarProducts, setSimilarProducts] = React.useState<Product[]>([]);
+  const [similarProductsLoading, setSimilarProductsLoading] = React.useState(false);
   const [selectedItemIds, setSelectedItemIds] = React.useState<Set<number>>(new Set());
   const [selectedClothingSize, setSelectedClothingSize] = React.useState<string | null>(null);
   const [selectedFootwearSize, setSelectedFootwearSize] = React.useState<string | null>(null);
@@ -76,6 +80,42 @@ export function LookDetailPage() {
       cancelled = true;
     };
   }, [currentPath, navigate, slug]);
+
+  React.useEffect(() => {
+    if (!look) {
+      setSimilarProducts([]);
+      setSimilarProductsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const includedProductIds = new Set(look.items.map((item) => item.product_id));
+    setSimilarProducts([]);
+    setSimilarProductsLoading(true);
+
+    getLookSimilarProducts(look.slug, 12, { networkImpact: 'local' })
+      .then((result) => {
+        if (!cancelled) {
+          setSimilarProducts(
+            result.items.filter((product) => !includedProductIds.has(product.id)),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSimilarProducts([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSimilarProductsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [look]);
 
   const selectedItems = React.useMemo(
     () => look?.items.filter((item) => selectedItemIds.has(item.look_item_id)) ?? [],
@@ -326,6 +366,11 @@ export function LookDetailPage() {
           ))}
         </div>
       </section>
+
+      <SimilarProductsCarousel
+        loading={similarProductsLoading}
+        products={similarProducts}
+      />
 
       <div className="detail-cta detail-cta--bottom-attached">
         <div className="detail-cta__actions">

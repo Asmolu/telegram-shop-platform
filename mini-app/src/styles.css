@@ -2521,11 +2521,17 @@ label {
   color: color-mix(in srgb, var(--danger) 72%, var(--muted));
 }
 
-.related-products-section {
+.related-products-section,
+.similar-products-section {
   overflow: visible;
 }
 
-.related-products-carousel {
+.similar-products-section {
+  padding-bottom: 18px;
+}
+
+.related-products-carousel,
+.similar-products-carousel {
   display: flex;
   gap: 9px;
   overflow-x: auto;
@@ -2537,14 +2543,20 @@ label {
   -webkit-overflow-scrolling: touch;
 }
 
-.related-products-carousel::-webkit-scrollbar {
+.related-products-carousel::-webkit-scrollbar,
+.similar-products-carousel::-webkit-scrollbar {
   display: none;
 }
 
-.related-products-carousel .product-card {
+.related-products-carousel .product-card,
+.similar-products-carousel .product-card {
   flex: 0 0 148px;
   width: 148px;
   scroll-snap-align: start;
+}
+
+.similar-products-skeleton {
+  min-height: 246px;
 }
 
 .page--look-detail {

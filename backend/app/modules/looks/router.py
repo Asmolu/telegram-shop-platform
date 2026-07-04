@@ -20,6 +20,7 @@ from app.modules.looks.schemas import (
     LookUpdate,
 )
 from app.modules.looks.service import LooksService
+from app.modules.products.schemas import ProductCardList
 
 public_router = APIRouter(prefix="/looks", tags=["looks"])
 admin_router = APIRouter(prefix="/looks/admin", tags=["looks"])
@@ -43,6 +44,15 @@ async def get_public_look(
     service: Annotated[LooksService, Depends(get_looks_service)],
 ) -> LookDetailRead:
     return await service.get_public_look(slug)
+
+
+@public_router.get("/{slug}/similar-products", response_model=ProductCardList)
+async def list_look_similar_products(
+    slug: str,
+    service: Annotated[LooksService, Depends(get_looks_service)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 12,
+) -> ProductCardList:
+    return await service.list_similar_products(slug, limit=limit)
 
 
 @public_router.post("/{slug}/cart", response_model=LookCartAddResponse)

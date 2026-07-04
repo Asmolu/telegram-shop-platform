@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -698,6 +698,141 @@ async def test_public_product_detail_returns_active_unlisted_product_by_direct_i
 
     assert result.id == product.id
     assert result.name == product.name
+
+
+@pytest.mark.asyncio
+async def test_product_similar_includes_same_category_products() -> None:
+    current = _similar_product(product_id=1, category_ids=[10], tag_ids=[])
+    same_category = _similar_product(product_id=2, category_ids=[10], tag_ids=[])
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(return_value=[same_category])
+
+    result = await service.list_similar_products(current.id)
+
+    assert [item.id for item in result.items] == [2]
+    service.repository.list_public_similarity_candidates.assert_awaited_once_with(
+        category_ids={10},
+        tag_ids=set(),
+        exclude_product_ids={1},
+    )
+
+
+@pytest.mark.asyncio
+async def test_product_similar_includes_shared_tag_products() -> None:
+    current = _similar_product(product_id=1, category_ids=[], tag_ids=[7])
+    shared_tag = _similar_product(product_id=2, category_ids=[], tag_ids=[7])
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(return_value=[shared_tag])
+
+    result = await service.list_similar_products(current.id)
+
+    assert [item.id for item in result.items] == [2]
+
+
+@pytest.mark.asyncio
+async def test_product_similar_excludes_current_hidden_and_inactive_products() -> None:
+    current = _similar_product(product_id=1, category_ids=[10], tag_ids=[7])
+    same_id = _similar_product(product_id=1, category_ids=[10], tag_ids=[7])
+    hidden = _similar_product(product_id=2, category_ids=[10], tag_ids=[7], is_listed=False)
+    draft = _similar_product(
+        product_id=3,
+        category_ids=[10],
+        tag_ids=[7],
+        status_value=ProductStatus.DRAFT,
+    )
+    archived = _similar_product(
+        product_id=4,
+        category_ids=[10],
+        tag_ids=[7],
+        status_value=ProductStatus.ARCHIVED,
+    )
+    visible = _similar_product(product_id=5, category_ids=[10], tag_ids=[7])
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(
+        return_value=[same_id, hidden, draft, archived, visible]
+    )
+
+    result = await service.list_similar_products(current.id)
+
+    assert [item.id for item in result.items] == [5]
+
+
+@pytest.mark.asyncio
+async def test_product_similar_ranking_is_deterministic() -> None:
+    base_time = datetime(2026, 6, 1, tzinfo=UTC)
+    current = _similar_product(product_id=1, category_ids=[10], tag_ids=[7])
+    tag_only = _similar_product(
+        product_id=2,
+        category_ids=[],
+        tag_ids=[7],
+        search_priority=1,
+        created_at=base_time + timedelta(days=3),
+    )
+    category_no_tag = _similar_product(
+        product_id=3,
+        category_ids=[10],
+        tag_ids=[],
+        search_priority=1,
+        created_at=base_time + timedelta(days=2),
+    )
+    older_same_score = _similar_product(
+        product_id=4,
+        category_ids=[10],
+        tag_ids=[7],
+        search_priority=2,
+        created_at=base_time,
+    )
+    same_score_higher_id = _similar_product(
+        product_id=5,
+        category_ids=[10],
+        tag_ids=[7],
+        search_priority=2,
+        created_at=base_time,
+    )
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(
+        return_value=[tag_only, category_no_tag, older_same_score, same_score_higher_id]
+    )
+
+    result = await service.list_similar_products(current.id)
+
+    assert [item.id for item in result.items] == [5, 4, 3, 2]
+
+
+@pytest.mark.asyncio
+async def test_product_similar_respects_limit() -> None:
+    current = _similar_product(product_id=1, category_ids=[10], tag_ids=[])
+    candidates = [
+        _similar_product(product_id=product_id, category_ids=[10], tag_ids=[])
+        for product_id in range(2, 6)
+    ]
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(return_value=candidates)
+
+    result = await service.list_similar_products(current.id, limit=2)
+
+    assert len(result.items) == 2
+    assert result.meta.limit == 2
+    assert result.meta.total == 4
+
+
+@pytest.mark.asyncio
+async def test_product_similar_empty_context_returns_empty_list() -> None:
+    current = _similar_product(product_id=1, category_ids=[], tag_ids=[])
+    service = ProductsService(DummySession())
+    service.repository.get_similarity_context_by_id = AsyncMock(return_value=current)
+    service.repository.list_public_similarity_candidates = AsyncMock(return_value=[])
+
+    result = await service.list_similar_products(current.id)
+
+    assert result.items == []
+    assert result.meta.total == 0
+    service.repository.list_public_similarity_candidates.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2021,6 +2156,55 @@ def test_repository_category_context_orders_by_category_priority() -> None:
     ordering = repository._list_ordering(search=None, category_id=2)
 
     assert "product_categories.priority" in str(ordering[0])
+
+
+def _similar_product(
+    *,
+    product_id: int,
+    category_ids: list[int],
+    tag_ids: list[int],
+    status_value: ProductStatus = ProductStatus.ACTIVE,
+    is_listed: bool = True,
+    search_priority: int = SEARCH_PRIORITY_DEFAULT,
+    created_at: datetime | None = None,
+) -> Product:
+    timestamp = created_at or datetime(2026, 5, 27, tzinfo=UTC)
+    variant = _variant(sku=f"SKU-{product_id}")
+    variant.id = product_id
+    variant.product_id = product_id
+    product = _product(
+        product_id=product_id,
+        status=status_value,
+        variants=[variant],
+        is_listed=is_listed,
+    )
+    product.name = f"Product {product_id}"
+    product.slug = f"product-{product_id}"
+    product.search_priority = search_priority
+    product.category_id = category_ids[0] if category_ids else None
+    product.category = (
+        _category(category_id=category_ids[0], name=f"Category {category_ids[0]}")
+        if category_ids
+        else None
+    )
+    product.product_categories = [
+        ProductCategory(
+            product_id=product_id,
+            category_id=category_id,
+            priority=index + 1,
+            category=_category(category_id=category_id, name=f"Category {category_id}"),
+        )
+        for index, category_id in enumerate(category_ids[:3])
+    ]
+    product.tags = [
+        _tag(tag_id=tag_id, name=f"Tag {tag_id}", slug=f"tag-{tag_id}")
+        for tag_id in tag_ids
+    ]
+    product.created_at = timestamp
+    product.updated_at = timestamp
+    for product_variant in product.variants:
+        product_variant.product = product
+    return product
 
 
 def _category(

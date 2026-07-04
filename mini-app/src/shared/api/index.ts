@@ -103,6 +103,17 @@ export function getProduct(productId: number, options: ApiRequestOptions = {}) {
   return apiRequest<Product>(`/products/${productId}`, options);
 }
 
+export function getSimilarProducts(
+  productId: number,
+  limit = 12,
+  options: ApiRequestOptions = {},
+) {
+  return apiRequest<ProductList>(`/products/${productId}/similar`, {
+    ...options,
+    query: { limit },
+  });
+}
+
 export function resolveProduct(
   params: { category_slug?: string; product_slug: string; sku?: string | null },
   options: ApiRequestOptions = {},
@@ -147,6 +158,17 @@ export function getLooks(params: LookListParams = {}, options: ApiRequestOptions
 
 export function getLook(slug: string, options: ApiRequestOptions = {}) {
   return apiRequest<LookDetail>(`/looks/${slug}`, options);
+}
+
+export function getLookSimilarProducts(
+  slug: string,
+  limit = 12,
+  options: ApiRequestOptions = {},
+) {
+  return apiRequest<ProductList>(`/looks/${slug}/similar-products`, {
+    ...options,
+    query: { limit },
+  });
 }
 
 export function addLookToCart(

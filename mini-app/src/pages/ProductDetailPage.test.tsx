@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductDetailPage } from './ProductDetailPage';
 import type { Product } from '../shared/api';
 import { readFileSync } from 'node:fs';
@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   getFavorites: vi.fn(),
   getProduct: vi.fn(),
   getProductReviews: vi.fn(),
+  getSimilarProducts: vi.fn(),
   removeFavorite: vi.fn(),
   resolveProduct: vi.fn(),
 }));
@@ -34,6 +35,7 @@ vi.mock('../shared/api', () => ({
   getFavorites: apiMocks.getFavorites,
   getProduct: apiMocks.getProduct,
   getProductReviews: apiMocks.getProductReviews,
+  getSimilarProducts: apiMocks.getSimilarProducts,
   removeFavorite: apiMocks.removeFavorite,
   resolveProduct: apiMocks.resolveProduct,
   toApiErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
@@ -55,7 +57,16 @@ vi.mock('../shared/router/RouterProvider', () => ({
     return ['/', '/main', '/categories', '/search', '/cart', '/profile'].includes(url.pathname);
   },
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
-    <a href={to} {...props}>{children}</a>
+    <a
+      href={to}
+      onClick={(event) => {
+        event.preventDefault();
+        routerMocks.navigate(to);
+      }}
+      {...props}
+    >
+      {children}
+    </a>
   ),
   useRouter: () => ({
     currentPath: routerMocks.route.currentPath,
@@ -72,6 +83,80 @@ function mockProductDetail(product = productFixture(), cart = cartFixture()) {
   apiMocks.getFavorites.mockResolvedValue({ items: [] });
   apiMocks.getCart.mockResolvedValue(cart);
 }
+
+beforeEach(() => {
+  apiMocks.getSimilarProducts.mockResolvedValue({
+    items: [],
+    meta: { limit: 12, offset: 0, total: 0 },
+  });
+});
+
+describe('ProductDetailPage similar products', () => {
+  afterEach(() => {
+    cleanup();
+    routerMocks.route.currentPath = '/product/10';
+    routerMocks.route.pathname = '/product/10';
+    vi.clearAllMocks();
+  });
+
+  it('fetches and renders the similar products carousel', async () => {
+    mockProductDetail();
+    apiMocks.getSimilarProducts.mockResolvedValueOnce({
+      items: [productFixture({ id: 22, name: 'Similar Tee', slug: 'similar-tee' })],
+      meta: { limit: 12, offset: 0, total: 1 },
+    });
+
+    render(<ProductDetailPage />);
+
+    await waitFor(() => expect(apiMocks.getSimilarProducts).toHaveBeenCalledWith(
+      10,
+      12,
+      { networkImpact: 'local' },
+    ));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Похожие товары' })).toBeTruthy();
+    expect(screen.getByText('Similar Tee')).toBeTruthy();
+  });
+
+  it('hides the similar products carousel when the endpoint returns empty', async () => {
+    mockProductDetail();
+
+    render(<ProductDetailPage />);
+
+    await waitFor(() => expect(apiMocks.getSimilarProducts).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Похожие товары' })).toBeNull();
+    });
+  });
+
+  it('continues to render product detail if the similar endpoint fails', async () => {
+    mockProductDetail();
+    apiMocks.getSimilarProducts.mockRejectedValueOnce(new Error('network failed'));
+
+    render(<ProductDetailPage />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Line Break Hoodie' })).toBeTruthy();
+    await waitFor(() => expect(apiMocks.getSimilarProducts).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Похожие товары' })).toBeNull();
+    });
+  });
+
+  it('navigates to a similar product detail page when a card is clicked', async () => {
+    mockProductDetail();
+    apiMocks.getSimilarProducts.mockResolvedValueOnce({
+      items: [productFixture({ id: 22, name: 'Similar Tee', slug: 'similar-tee' })],
+      meta: { limit: 12, offset: 0, total: 1 },
+    });
+
+    render(<ProductDetailPage />);
+
+    const similarProductLink = (await screen.findByText('Similar Tee')).closest('a');
+    expect(similarProductLink).not.toBeNull();
+    fireEvent.click(similarProductLink!);
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/product/22');
+  });
+});
 
 describe('ProductDetailPage visual polish', () => {
   afterEach(() => {

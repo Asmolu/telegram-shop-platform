@@ -34,6 +34,7 @@ const SWIPE_BACK_IGNORE_SELECTOR = [
   '.product-image-carousel__track',
   '.variant-carousel',
   '.related-products-carousel',
+  '.similar-products-carousel',
   '.looks-carousel__track',
   '.look-components-list',
   '.look-included-products',
