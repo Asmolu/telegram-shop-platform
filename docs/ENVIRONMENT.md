@@ -29,6 +29,7 @@ Use these placeholders in docs and examples:
 | `<BOT_TOKEN>` | Telegram bot token |
 | `<DATABASE_URL>` | SQLAlchemy database URL |
 | `<JWT_SECRET>` | JWT signing secret |
+| `-100xxxxxxxxxx` | Placeholder Telegram supergroup/channel chat id |
 
 ## Backend Core Settings
 
@@ -69,10 +70,10 @@ Production safety validation rejects the default JWT secret and wildcard CORS or
 | `TELEGRAM_CUSTOMER_WEBHOOK_SECRET` | Bot 1 | Secret header for customer bot webhook | `<SECRET>` |
 | `TELEGRAM_BOT_TOKEN` | Bot 2 | Seller/admin/auth-related bot token | `<BOT_TOKEN>` |
 | `TELEGRAM_SELLER_BOT_USERNAME` | Bot 2 | Seller/admin bot username | `<SECRET>` |
-| `TELEGRAM_ORDERS_CHAT_ID` | Bot 2 | Orders/seller/admin operational chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
-| `TELEGRAM_RETURNS_CHAT_ID` | Bot 2 | Return request notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
-| `TELEGRAM_BACKUP_CHAT_ID` | Bot 2 backup script | Backup success/failure notification chat id; falls back to `TELEGRAM_SELLER_CHAT_ID` when unset | empty |
-| `TELEGRAM_SELLER_CHAT_ID` | Bot 2 | Legacy seller/admin notification chat id used only as a migration fallback | `<SECRET>` |
+| `TELEGRAM_ORDERS_CHAT_ID` | Bot 2 | Orders group for order notifications, seller/admin commands, manual payment callbacks, seller registration approval callbacks | `-100xxxxxxxxxx` |
+| `TELEGRAM_RETURNS_CHAT_ID` | Bot 2 | Returns group for return request notifications, return media, approve/reject callbacks | `-100xxxxxxxxxx` |
+| `TELEGRAM_BACKUP_CHAT_ID` | Bot 2 backup script | Backup success/failure notification group | `-100xxxxxxxxxx` |
+| `TELEGRAM_SELLER_CHAT_ID` | Bot 2 | Legacy seller/admin notification chat id used only as a migration fallback | `-100xxxxxxxxxx` |
 | `TELEGRAM_SELLER_WEBHOOK_SECRET` | Bot 2 | Secret header for seller bot webhook | `<SECRET>` |
 | `TELEGRAM_MINI_APP_SHORT_NAME` | Bot 1 link builder | Optional short-name Mini App path for direct links | `<SECRET>` |
 | `TELEGRAM_CHANNEL_ENTRY_START_PARAM` | Bot 1 link builder | Channel entry start parameter | `channel_pin` |
@@ -80,14 +81,22 @@ Production safety validation rejects the default JWT secret and wildcard CORS or
 
 Bot 1 handles buyer-facing and channel-entry flows. Bot 2 handles seller/admin/auth-related flows. Do not swap these tokens.
 
-Bot 2 operational routing is split by chat purpose: orders/seller/admin commands and callbacks use `TELEGRAM_ORDERS_CHAT_ID`, return request notifications use `TELEGRAM_RETURNS_CHAT_ID`, and backup notifications use `TELEGRAM_BACKUP_CHAT_ID`. `TELEGRAM_SELLER_CHAT_ID` remains only as a legacy fallback while production env files are migrated. Telegram group topic/thread ids are not supported yet.
+Bot 2 operational routing is split by chat purpose: orders/seller/admin commands and callbacks use `TELEGRAM_ORDERS_CHAT_ID`, return request notifications and callbacks use `TELEGRAM_RETURNS_CHAT_ID`, and backup notifications use `TELEGRAM_BACKUP_CHAT_ID`. `TELEGRAM_SELLER_CHAT_ID` remains only as a legacy fallback while production env files are migrated. Telegram group topic/thread ids are not supported yet.
+
+Fallback behavior:
+
+- Orders: `TELEGRAM_ORDERS_CHAT_ID` -> `TELEGRAM_SELLER_CHAT_ID`.
+- Returns: `TELEGRAM_RETURNS_CHAT_ID` -> `TELEGRAM_SELLER_CHAT_ID`.
+- Backup: `TELEGRAM_BACKUP_CHAT_ID` -> `TELEGRAM_SELLER_CHAT_ID`.
+- `TELEGRAM_SELLER_CHAT_ID` is legacy fallback only; do not use it as the desired split-chat configuration.
 
 Safe Telegram diagnostics:
 
 ```bash
-cd backend
-python scripts/telegram_diagnostics.py --env-file .env.production
-python scripts/telegram_diagnostics.py --env-file .env.production --send
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend \
+  python scripts/telegram_diagnostics.py --env-file .env.production
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend \
+  python scripts/telegram_diagnostics.py --env-file .env.production --send
 ```
 
 The diagnostic helper checks Bot 2 `getMe` and `getChat` for the configured orders, returns, backup, and legacy seller chats. It does not print bot tokens and sends messages only with `--send`.
@@ -129,6 +138,25 @@ The diagnostic helper checks Bot 2 `getMe` and `getChat` for the configured orde
 | `CUSTOMER_CAMPAIGN_SENDING_TIMEOUT_SECONDS` | Campaign sending timeout |
 | `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED` | Enables manual payment expiration worker |
 | `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS` | Manual payment expiration polling interval |
+
+## Backup Settings
+
+| Variable | Purpose | Production placeholder |
+| --- | --- | --- |
+| `BACKUP_ENABLED` | Enables production backup script | `true` |
+| `BACKUP_ENVIRONMENT` | Backup environment label | `production` |
+| `BACKUP_LOCAL_DIR` | Local backup staging directory | `backups` |
+| `BACKUP_REMOTE_DIR` | Yandex Disk remote directory | `/TelegramShopPlatform/storage` |
+| `BACKUP_INTERVAL_HOURS` | Expected backup interval | `6` |
+| `BACKUP_RETENTION_DAYS` | Retention by age | `5` |
+| `BACKUP_RETENTION_MAX_COUNT` | Retention by count | `20` |
+| `BACKUP_RESTORE_VERIFY_ENABLED` | Enables restore verification in backup flow | `true` |
+| `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED` | Enables Telegram backup notifications | `true` |
+| `YANDEX_CLIENT_ID` | Yandex Disk OAuth client id | `<SECRET>` |
+| `YANDEX_CLIENT_SECRET` | Yandex Disk OAuth client secret | `<SECRET>` |
+| `YANDEX_REFRESH_TOKEN` | Yandex Disk OAuth refresh token | `<SECRET>` |
+
+Backup notifications use `TELEGRAM_BACKUP_CHAT_ID` and fall back to `TELEGRAM_SELLER_CHAT_ID` only for legacy env compatibility. Yandex Disk uploads can timeout and retry; operators must confirm final success through systemd journal logs.
 
 ## Frontend Build Variables
 

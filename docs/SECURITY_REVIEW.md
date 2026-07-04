@@ -12,7 +12,7 @@ This document summarizes current security posture and areas that require continu
 | API | `https://api.stylexac.ru` |
 | Seller Panel | `https://seller.stylexac.ru` |
 | Production env | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Authentication
 

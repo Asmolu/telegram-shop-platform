@@ -138,7 +138,7 @@ Documentation consistency searches:
 
 ```bash
 rg -n "tsplatform\.ru|mini\.tsplatform\.ru|api\.tsplatform\.ru|seller\.tsplatform\.ru" .
-rg -n "20260628_0039" .
+rg -n "20260703_0047" .
 ```
 
-`20260628_0039` is expected in current production docs. Older ids should appear only as clearly historical notes.
+`20260703_0047` is expected in current production docs. Older ids should appear only as clearly historical notes.

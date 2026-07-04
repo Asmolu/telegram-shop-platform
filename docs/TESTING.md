@@ -6,9 +6,9 @@ Run checks for the area changed. Documentation-only changes always require `git 
 
 ```bash
 cd backend
-python -m compileall app tests
-ruff check .
-pytest
+.\.venv\Scripts\python.exe -X pycache_prefix=tmp\compileall_cache -m compileall app tests scripts
+.\.venv\Scripts\ruff.exe check . --no-cache
+.\.venv\Scripts\pytest.exe -W error -o cache_dir=tmp\pytest_cache
 ```
 
 Strict warning mode:
@@ -83,10 +83,21 @@ rg -n "tsplatform\.ru|mini\.tsplatform\.ru|api\.tsplatform\.ru|seller\.tsplatfor
 Search for stale migration references:
 
 ```bash
-rg -n "20260628_0039" .
+rg -n "20260703_0047" .
 ```
 
-`20260628_0039` is the current documented production head. Older migration ids may appear only when clearly labeled as historical.
+`20260703_0047` is the current documented production head. Older migration ids may appear only when clearly labeled as historical.
+
+Manual smoke scenarios for the current release:
+
+- hidden product direct link vs public lists
+- return with media plus Telegram approve/reject
+- refund/restock processing
+- Look with clothing and footwear selectors
+- Look grouped cart/order display
+- route alias old product/category/Look links
+- mixed feed product and Look cards
+- backup notification to the backup group
 
 Search for notification and channel-entry wording when those areas change:
 

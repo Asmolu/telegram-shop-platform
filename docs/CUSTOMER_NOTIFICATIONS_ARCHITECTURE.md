@@ -219,7 +219,7 @@ Deploy log checks:
 
 ```bash
 cd /opt/telegram-shop
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
 ```
 
 Smoke surfaces:

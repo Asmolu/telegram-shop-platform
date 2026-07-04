@@ -15,7 +15,7 @@ This document covers routine production operations for StyleXac.
 | API health | `https://api.stylexac.ru/health` |
 | Mini App | `https://mini.stylexac.ru/` |
 | Seller Panel | `https://seller.stylexac.ru/` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Daily Status Check
 
@@ -33,7 +33,7 @@ curl -I https://seller.stylexac.ru/
 
 ```bash
 cd /opt/telegram-shop
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
 ```
@@ -47,7 +47,7 @@ Use the systemd backup service on production. Do not run a bare Python backup co
 ```bash
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
 Always run a backup before Alembic migrations.
@@ -62,13 +62,15 @@ The full deployment flow is documented in `docs/PRODUCTION_DEPLOYMENT.md`. The s
 ssh tsplatform-frankfurt
 cd /opt/telegram-shop
 git status --short
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
+sudo systemctl start telegram-shop-backup.service
+sudo systemctl status telegram-shop-backup.service --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 git fetch origin
 git pull --ff-only origin main
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml config >/tmp/telegram-shop-compose-check.yml
-sudo systemctl start telegram-shop-backup.service
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml build backend mini-app seller-panel
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic upgrade head
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic upgrade head
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d backend mini-app seller-panel
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 ```
@@ -99,6 +101,21 @@ Host Caddy routes:
 - uploads through backend/reverse proxy
 
 HTTP/3/QUIC must stay disabled unless a production compatibility test proves it is safe for Telegram WebView and VPN users.
+
+Old `tsplatform.ru` domains are stale and are not current production domains.
+
+## Telegram Diagnostics
+
+Verify Bot 2 groups without exposing tokens:
+
+```bash
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend \
+  python scripts/telegram_diagnostics.py --env-file .env.production
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend \
+  python scripts/telegram_diagnostics.py --env-file .env.production --send
+```
+
+Orders commands and manual payment/seller registration callbacks belong in `TELEGRAM_ORDERS_CHAT_ID`. Return callbacks belong in `TELEGRAM_RETURNS_CHAT_ID`. Backup notifications belong in `TELEGRAM_BACKUP_CHAT_ID`.
 
 ## Sensitive Data Handling
 

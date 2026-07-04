@@ -22,8 +22,12 @@ Desktop-first seller/admin dashboard for StyleXac.
 
 - seller/admin auth-related flows
 - product management
+- product visibility, returnability, and size type controls
 - product variant matrix
 - product image uploads
+- order management
+- returns list/detail, approve/reject, complete/cancel, refund/restock processing
+- Looks list/create/edit/archive, components, slug autofill, image upload
 - product image badge preview where edited
 - banners
 - promo codes

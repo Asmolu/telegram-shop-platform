@@ -22,12 +22,15 @@ Customer Telegram Mini App for StyleXac.
 ## Implemented Flows
 
 - feed
+- mixed product/Look feed
 - category
 - search
 - product detail
+- Looks list/detail
 - cart
 - profile
 - checkout
+- order detail and returns flow
 
 ## Current UI Behavior
 
@@ -40,6 +43,9 @@ Customer Telegram Mini App for StyleXac.
 - Cart delivery-price note: `Цена сформирована без учёта стоимости доставки.`
 - Cart promo input is keyboard-safe.
 - Discount badge tiers: `1-20%`, `21-40%`, `41-60%`, `61-80%`, `81-99%`.
+- Product/category/Look aliases are resolved through the backend and replaced with canonical URLs.
+- Look-sourced cart and order items are grouped under `Куплено из образа: <Look title>`.
+- Looks use separate clothing and footwear size selectors when both are needed.
 
 ## Auth and Session Behavior
 

@@ -4,10 +4,13 @@ All notable project changes are tracked here. Dates use ISO format.
 
 ## Unreleased
 
-- Rewrote project documentation for the current StyleXac production state.
+- Rewrote project documentation for the current TelegramShopPlatform / ICON STORE production state.
 - Documented current domains: `stylexac.ru`, `mini.stylexac.ru`, `api.stylexac.ru`, `seller.stylexac.ru`.
 - Documented Aeza Frankfurt production operations at `/opt/telegram-shop`.
-- Documented current migration head `20260628_0039`.
+- Documented current migration head `20260703_0047`.
+- Documented product visibility, returnability, and size group behavior.
+- Documented returns lifecycle, Telegram returns group callbacks, manual refund recording, and explicit restock.
+- Documented Looks/outfits, mixed feed behavior, grouped Look cart/order items, and route aliases.
 - Documented Bot 1 write-access flow for order/service notifications.
 - Documented customer campaign delivery eligibility and reports.
 - Documented Seller Panel `/channel-entry` flow.
@@ -16,7 +19,7 @@ All notable project changes are tracked here. Dates use ISO format.
 
 ## 2026-06-28
 
-- Deployed production commit `6245489 Add Bot 1 write access flow for order notifications`.
+- Added Bot 1 write-access persistence for customer service notifications.
 - Added Mini App write-access persistence for customer service notifications.
 - Updated service notification target resolution to support Bot 1 write-access users without silently enabling marketing.
 - Kept Bot 1 customer responsibilities separated from Bot 2 seller/admin responsibilities.

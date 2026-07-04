@@ -15,8 +15,7 @@ This document is the current production deploy runbook for StyleXac.
 | Mini App direct domain | `https://mini.stylexac.ru` |
 | API domain | `https://api.stylexac.ru` |
 | Seller Panel domain | `https://seller.stylexac.ru` |
-| Current migration head | `20260628_0039` |
-| Recent production commit | `6245489 Add Bot 1 write access flow for order notifications` |
+| Current migration head | `20260703_0047` |
 
 The production stack contains `backend`, `postgres`, `redis`, `mini-app`, and `seller-panel`. Host Caddy terminates TLS and reverse-proxies to the containers.
 
@@ -31,7 +30,7 @@ The production stack contains `backend`, `postgres`, `redis`, `mini-app`, and `s
 
 1. Confirm the target commit and changed services.
 2. Confirm whether Alembic migrations are present.
-3. Run a backup before any migration.
+3. Run and verify a backup before any migration.
 4. Avoid deploys while a customer campaign is actively sending unless the campaign can be paused.
 5. Confirm Bot 1 and Bot 2 tokens remain assigned to their correct responsibilities.
 
@@ -41,12 +40,15 @@ The production stack contains `backend`, `postgres`, `redis`, `mini-app`, and `s
 ssh tsplatform-frankfurt
 cd /opt/telegram-shop
 git status --short
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
+sudo systemctl start telegram-shop-backup.service
+sudo systemctl status telegram-shop-backup.service --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 git fetch origin
 git pull --ff-only origin main
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml config >/tmp/telegram-shop-compose-check.yml
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml build backend mini-app seller-panel
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic upgrade head
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic upgrade head
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d backend mini-app seller-panel
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 ```
@@ -60,23 +62,24 @@ Production backups are managed through systemd:
 ```bash
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
 Use the systemd service on production. Do not use a bare Python backup command on the host for normal production deploys.
+Do not deploy migrations if the backup fails.
 
 ## Migration Checks
 
 Current production head after the latest deploy is:
 
 ```text
-20260628_0039
+20260703_0047
 ```
 
 Check the current database revision after migration:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 ```
 
 If the host does not have a `python` command, use the backend Docker container or the project virtual environment for checks.
@@ -98,7 +101,7 @@ Expected result:
 ## Log Checks
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
 ```
@@ -124,6 +127,8 @@ Do not paste logs containing real secrets or raw production env values.
 | `redis` | Redis 7 cache/rate-limit/temporary state store | Internal Docker network |
 | `mini-app` | Built Mini App static service | Through `https://mini.stylexac.ru` and `https://stylexac.ru` |
 | `seller-panel` | Built Seller Panel static service | Through `https://seller.stylexac.ru` |
+
+Old `tsplatform.ru` domains are not current production domains. Current public production uses the `stylexac.ru` domain family.
 
 ## Telegram Bot Checks
 
@@ -163,6 +168,19 @@ For channel-entry deploys, verify:
 - History stores Telegram `message_id` and pin status.
 
 Do not test publish/pin in a production customer channel unless that channel is approved for operational tests.
+
+## Returns, Looks, Feed, and Alias Checks
+
+For the current release, verify:
+
+- hidden active products are absent from public lists but open by direct link
+- return requests with media notify the returns Telegram group
+- return approve/reject callbacks work only from the returns group and only for seller/admin identities
+- refund/restock processing records manual refund details and restocks only selected quantities
+- Looks with clothing and footwear components require separate size selections
+- Look-sourced cart/order items remain grouped in Mini App and Seller Panel order detail
+- old product/category/Look slugs resolve and canonicalize
+- `GET /api/v1/feed` returns both product and Look items when both exist
 
 ## Caddy and MTU Checks
 

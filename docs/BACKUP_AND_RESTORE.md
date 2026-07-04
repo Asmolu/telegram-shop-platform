@@ -24,7 +24,7 @@ On production, use the systemd service:
 ssh tsplatform-frankfurt
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
 Do not run a bare Python backup command on production for normal operations. Use the service because it captures the production paths, env, permissions, logging, and operational wrapper expected on the server.
@@ -53,15 +53,17 @@ cd /opt/telegram-shop
 git status --short
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 ```
 
 Expected current production migration after the latest deploy:
 
 ```text
-20260628_0039
+20260703_0047
 ```
+
+The service can run for several minutes. Yandex Disk upload may timeout and retry; use journal logs to confirm final success before deploying migrations.
 
 ## Restore Principles
 
@@ -107,7 +109,7 @@ curl -I https://seller.stylexac.ru/
 
 ```bash
 cd /opt/telegram-shop
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
 ```

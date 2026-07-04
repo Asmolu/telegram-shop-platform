@@ -1,6 +1,6 @@
-# StyleXac / Telegram Shop Platform
+# TelegramShopPlatform / ICON STORE
 
-StyleXac is a production Telegram commerce platform: a customer Telegram Mini App, a desktop Seller Panel, a FastAPI backend, and two Telegram bots with separated responsibilities.
+TelegramShopPlatform / ICON STORE is a production Telegram commerce platform: a customer Telegram Mini App, a desktop Seller Panel, a FastAPI backend, and two Telegram bots with separated responsibilities. The current production domain family is `stylexac.ru`.
 
 The repository is documentation-driven and module-oriented. Backend routers stay thin, services own business rules and transactions, repositories own SQLAlchemy queries, and PostgreSQL is the source of truth.
 
@@ -17,8 +17,7 @@ The repository is documentation-driven and module-oriented. Backend routers stay
 | Production path | `/opt/telegram-shop` |
 | Production compose file | `docker-compose.prod.yml` |
 | Production env file | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
-| Recent production commit | `6245489 Add Bot 1 write access flow for order notifications` |
+| Current migration head | `20260703_0047` |
 
 Reverse proxying is handled by host Caddy. HTTP/3/QUIC is intentionally disabled, and `tsplatform-mss-clamp.service` is intentionally enabled to improve Telegram WebView, VPN, and MTU compatibility.
 
@@ -48,10 +47,23 @@ Reverse proxying is handled by host Caddy. HTTP/3/QUIC is intentionally disabled
 
 ### Catalog
 
-- Categories, tags, products, product images, variants, inventory, product status, active/public visibility, and `old_price`.
+- Categories, tags, products, product images, variants, inventory, product status, active/public visibility, returnability, size groups, and `old_price`.
 - Search priority, search aliases, color synonym expansion, and typo-tolerant search through PostgreSQL `pg_trgm` when the extension is available.
 - Multi-category product assignments with priority values `1`, `2`, and `3`.
 - Product brand is displayed above the title in the Mini App product detail view.
+- `Product.is_listed=false` hides a product from public lists while keeping direct links available when the product is `ACTIVE`.
+- `Product.is_returnable` is snapshotted into `OrderItem.is_returnable` during checkout.
+- Product slugs and variant SKUs can be generated as numeric identifiers from `00001` to `99999`; `00000` is never generated.
+
+### Mixed Feed, Looks, and Route Aliases
+
+- `GET /api/v1/feed` returns mixed product and Look feed items for the Mini App main page.
+- Looks are independent outfit entities with custom images and LookItems referencing Products.
+- Active hidden products can be used inside Looks, but Looks do not have stock of their own.
+- Look add-to-cart validates selected components and independent clothing/footwear sizes before committing grouped cart items.
+- Cart, checkout, order detail, and Seller Panel order detail group Look-sourced items with `Куплено из образа: <Look title>`.
+- Product, category, and Look slug changes create `RouteAlias` rows so old public links continue resolving to canonical current URLs.
+- SKU aliasing is not implemented.
 
 ### Cart, Checkout, and Orders
 
@@ -61,6 +73,7 @@ Reverse proxying is handled by host Caddy. HTTP/3/QUIC is intentionally disabled
 - Product variant stock is checked and decremented inside checkout.
 - `OrderItem` stores an immutable purchased-product snapshot: product id, variant id, product name, size, grid, color, SKU, unit price, quantity, and subtotal.
 - Order status changes create audit entries and emit notifications only after successful persistence.
+- Delivered orders record `delivered_at`, which is used by the return window.
 - Current Mini App copy:
   - Cart: `Цена сформирована без учёта стоимости доставки.`
   - Product detail: `Мы подбираем размер по росту и весу.`
@@ -70,6 +83,16 @@ Reverse proxying is handled by host Caddy. HTTP/3/QUIC is intentionally disabled
 - Percentage and fixed-amount discounts.
 - Usage limits, per-user limits, active windows, and checkout integration.
 - `CouponUsage` records redemption snapshots.
+
+### Returns
+
+- Return requests are available only after `DELIVERED` orders, within a 14-day window.
+- One return request is allowed per order, with partial item quantities and media attachments.
+- Statuses are `PENDING`, `APPROVED`, `REJECTED`, `COMPLETED`, and `CANCELLED`.
+- Seller/admin users can approve, reject, cancel, complete, and process refund/restock details.
+- Refunds are recorded manually; there is no automatic payment-provider refund.
+- Restock happens only by explicit seller/admin choice and is delta-safe.
+- Return notifications go to the returns Telegram group with media attachments and approve/reject buttons.
 
 ### Uploads
 
@@ -167,6 +190,7 @@ If the local host does not have Python, Ruff, Pytest, or PostgreSQL-compatible s
 
 | File | Purpose |
 | --- | --- |
+| `docs/PROJECT_HANDOVER.md` | Comprehensive current production handover for developers/operators |
 | `docs/ARCHITECTURE.md` | Components, modules, data flows, backend boundaries |
 | `docs/ENVIRONMENT.md` | Environment variables and safe placeholder conventions |
 | `docs/PRODUCTION_DEPLOYMENT.md` | Production deploy, migrations, smoke checks, logs, rollback |

@@ -18,7 +18,7 @@ StyleXac is a Telegram-native commerce platform for selling products through a c
 | Production path | `/opt/telegram-shop` |
 | Production compose | `docker-compose.prod.yml` |
 | Production env | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Actors
 
@@ -53,10 +53,22 @@ Seller/admin routes must enforce the correct role. Customer Mini App routes must
 
 ### Catalog
 
-- Sellers/admins can manage categories, tags, products, images, variants, prices, `old_price`, inventory, active/public visibility, and search metadata.
+- Sellers/admins can manage categories, tags, products, images, variants, prices, `old_price`, inventory, active/public visibility, returnability, size groups, and search metadata.
 - Products can belong to multiple categories with priority values `1`, `2`, and `3`.
 - Search supports aliases, priority, color synonym expansion, and typo tolerance through PostgreSQL `pg_trgm` when available.
 - Mini App product detail displays brand above title.
+- Hidden active products do not appear in public lists but remain available by direct link and can be used inside Looks.
+- Product returnability is snapshotted into order items during checkout.
+
+### Feed, Looks, and Route Aliases
+
+- The main Mini App feed uses `GET /api/v1/feed` and can contain product and Look items.
+- Looks are independent outfit entities with custom images and product components.
+- Looks do not have stock of their own.
+- Look add-to-cart validates selected items, independent clothing/footwear sizes, and stock before committing grouped cart items.
+- Cart, checkout, order detail, and Seller Panel order detail group Look-sourced items.
+- Product, category, and Look slug changes create route aliases so old public links continue resolving to canonical current URLs.
+- SKU aliasing is not implemented.
 
 ### Cart and Checkout
 
@@ -76,6 +88,19 @@ Seller/admin routes must enforce the correct role. Customer Mini App routes must
 - Status changes create audit logs where required.
 - Customer and seller notifications are emitted after status persistence.
 - Order items must remain snapshots even if product data changes later.
+- Delivered orders record `delivered_at` for return-window calculation.
+
+### Returns
+
+- Returns are allowed only after `DELIVERED` orders and within a 14-day window.
+- One return request is allowed per order.
+- Partial returns and media attachments are supported.
+- Return statuses are `PENDING`, `APPROVED`, `REJECTED`, `COMPLETED`, and `CANCELLED`.
+- Customers can create eligible return requests and cancel own pending requests.
+- Seller/admin users can approve, reject, cancel, complete, and process manual refund/restock details.
+- Return Telegram notifications go to the returns group with approve/reject buttons.
+- Refunds are recorded manually; no automatic payment-provider refund exists.
+- Restock requires explicit seller/admin choice.
 
 ### Promo Codes
 
@@ -126,7 +151,7 @@ Seller/admin routes must enforce the correct role. Customer Mini App routes must
 ### Mini App
 
 - Mobile-first marketplace-style experience.
-- Implemented flows: feed, category, search, product detail, cart, profile, checkout.
+- Implemented flows: mixed feed, category, search, product detail, Looks list/detail, cart, profile, checkout, order detail, returns.
 - Floating help widget `Как совершить заказ?` appears on feed/category/search, is draggable, can be hidden/swiped to side, leaves a side tab, and restores on tab tap.
 - Cart promo input is keyboard-safe.
 - Bottom navigation is optimized for Telegram WebView.
@@ -135,7 +160,7 @@ Seller/admin routes must enforce the correct role. Customer Mini App routes must
 ### Seller Panel
 
 - Desktop-first dashboard-style experience.
-- Implemented areas: products, variant matrix, image uploads, banners, promo codes, customer notifications, channel entry, seller/admin auth-related flows, badge preview where present.
+- Implemented areas: products, variant matrix, image uploads, orders, returns, Looks, banners, promo codes, customer notifications, channel entry, seller/admin auth-related flows, badge preview where present.
 - Seller Panel domain: `https://seller.stylexac.ru`.
 
 ## Non-Functional Requirements

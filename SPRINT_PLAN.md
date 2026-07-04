@@ -11,8 +11,7 @@ This file is the current delivery record and forward checklist for StyleXac. His
 | Path | `/opt/telegram-shop` |
 | Compose | `docker-compose.prod.yml` |
 | Env | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
-| Recent production commit | `6245489 Add Bot 1 write access flow for order notifications` |
+| Current migration head | `20260703_0047` |
 
 ## Delivered Platform Areas
 
@@ -28,9 +27,14 @@ This file is the current delivery record and forward checklist for StyleXac. His
 | Product images/uploads | Delivered |
 | Product variants and inventory | Delivered |
 | Product search aliases and priority | Delivered |
+| Product visibility, returnability, and size groups | Delivered |
 | Multi-category product assignments | Delivered |
 | Cart and checkout | Delivered |
 | Order snapshots and stock decrement | Delivered |
+| Return requests, lifecycle, refund/restock | Delivered |
+| Looks/outfits and grouped Look cart/order items | Delivered |
+| Mixed product/Look feed | Delivered |
+| Route aliases for products, categories, and Looks | Delivered |
 | Promo codes and coupon usage | Delivered |
 | Manual payment flows | Delivered |
 | Reviews with moderation | Delivered |
@@ -84,13 +88,15 @@ Before production deploy:
 ssh tsplatform-frankfurt
 cd /opt/telegram-shop
 git status --short
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
+sudo systemctl start telegram-shop-backup.service
+sudo systemctl status telegram-shop-backup.service --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 git fetch origin
 git pull --ff-only origin main
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml config >/tmp/telegram-shop-compose-check.yml
-sudo systemctl start telegram-shop-backup.service
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml build backend mini-app seller-panel
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic upgrade head
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic upgrade head
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml up -d backend mini-app seller-panel
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 ```
@@ -106,7 +112,7 @@ curl -I https://seller.stylexac.ru/
 Logs:
 
 ```bash
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=200 backend
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
 docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
 ```

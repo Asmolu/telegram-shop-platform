@@ -15,7 +15,7 @@ This file records the current Frankfurt production posture and the checks that m
 | Mini App domain | `https://mini.stylexac.ru` |
 | API domain | `https://api.stylexac.ru` |
 | Seller Panel domain | `https://seller.stylexac.ru` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Services
 
@@ -52,13 +52,13 @@ docker compose --env-file backend/.env.production -f docker-compose.prod.yml ps
 
 ```bash
 cd /opt/telegram-shop
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm --no-deps backend alembic current
+docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
 ```
 
 Expected current head:
 
 ```text
-20260628_0039
+20260703_0047
 ```
 
 ## Reverse Proxy Compatibility

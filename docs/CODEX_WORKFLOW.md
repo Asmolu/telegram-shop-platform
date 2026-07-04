@@ -6,11 +6,11 @@ This repository can be edited by Codex or another AI coding agent, but changes m
 
 | Area | Current value |
 | --- | --- |
-| Product | StyleXac / TelegramShopPlatform |
+| Product | TelegramShopPlatform / ICON STORE |
 | Production domains | `stylexac.ru`, `mini.stylexac.ru`, `api.stylexac.ru`, `seller.stylexac.ru` |
 | Production server | Aeza Frankfurt |
 | Production path | `/opt/telegram-shop` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Before Editing
 
@@ -127,6 +127,14 @@ Telegram Mini App `initData` must always be validated server-side. Raw `initData
 - Current service notification fallback can use `telegram_user_id` when write access is granted.
 - Campaign delivery requires real Bot 1 private-chat state.
 - Delivery failures must be sanitized.
+
+## Current Release Feature Rules
+
+- Product visibility, returnability, and size groups are production behavior.
+- Returns are allowed after delivered orders, use the returns Telegram group, and require manual refund/restock processing.
+- Looks are independent entities, not Products, and Look-sourced cart/order items must stay grouped.
+- Route aliases preserve old product, category, and Look slugs but do not implement SKU aliasing.
+- See `docs/PROJECT_HANDOVER.md` for the current production handover.
 
 ## Channel Entry Rules
 

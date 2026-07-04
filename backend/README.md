@@ -23,7 +23,7 @@ FastAPI backend for StyleXac / TelegramShopPlatform.
 | Production path | `/opt/telegram-shop` |
 | Production compose | `docker-compose.prod.yml` |
 | Production env | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260703_0047` |
 
 ## Module Structure
 
@@ -56,14 +56,18 @@ Rules:
 | `categories` | Categories |
 | `channel_entry` | Bot 1 channel publish/pin flow |
 | `customer_notifications` | Bot 1 subscriptions, write access, service notifications, campaigns |
+| `feed` | Mixed public feed of products and Looks |
 | `favorites` | Favorite products |
 | `idempotency` | Idempotent checkout support |
+| `looks` | Look/outfit entities, images, product components, Look cart add |
 | `manual_payments` | Manual payment settings, receipts, expiration |
 | `notifications` | Seller/admin notification helpers |
 | `orders` | Checkout, order snapshots, order status |
 | `products` | Products, images, variants, search |
 | `promo_codes` | Coupons and usage limits |
+| `returns` | Return requests, attachments, lifecycle, refund/restock |
 | `reviews` | Purchase-gated moderated reviews |
+| `route_aliases` | Durable old slug resolution for products, categories, and Looks |
 | `seller_auth` | Seller/admin auth |
 | `seller_bot` | Bot 2 seller/admin flows |
 | `statistics` | Dashboard statistics |
@@ -162,7 +166,7 @@ alembic current
 Current production head:
 
 ```text
-20260628_0039
+20260703_0047
 ```
 
 ## Production Deploy Reference

@@ -18,7 +18,7 @@ Use the systemd service:
 ssh tsplatform-frankfurt
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
 Normal production operations must use the service, not a bare Python command.
@@ -30,7 +30,7 @@ Normal production operations must use the service, not a bare Python command.
 | PostgreSQL dump | Yes | Contains users, orders, catalog, coupons, subscriptions, campaigns, audit logs |
 | Uploads archive | Yes | Contains product, banner, category, tag, review, campaign, receipt, and temporary upload folders |
 | Commit hash | Yes | Identifies application version |
-| Alembic revision | Yes | Current production head is `20260628_0039` |
+| Alembic revision | Yes | Current production head is `20260703_0047` |
 | Compose file name | Yes | Production uses `docker-compose.prod.yml` |
 | Env values | No | Store secrets only in the secure production secret location |
 
@@ -70,8 +70,10 @@ Use:
 
 ```bash
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
+
+Yandex Disk upload may occasionally timeout and retry. Treat the backup as successful only after the service exits successfully and the final journal lines confirm completion.
 
 ## Telegram Notifications
 
