@@ -146,7 +146,7 @@ async def test_profile_update_does_not_change_existing_order_snapshot() -> None:
     user = _user()
     order = Order(
         id=1,
-        order_number="ORD-00000001",
+        order_number="ORD-000001",
         user_id=user.id,
         status=OrderStatus.NEW,
         subtotal_amount=Decimal("100.00"),

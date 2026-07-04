@@ -1324,6 +1324,10 @@ class Order(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    payment_success_banner_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1727,6 +1731,16 @@ class SellerPaymentSettings(Base):
     seller_bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     seller_recipient_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_manual_sbp_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    payment_success_banner_image_path: Mapped[str | None] = mapped_column(
+        String(1024),
+        nullable=True,
+    )
+    payment_success_banner_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,

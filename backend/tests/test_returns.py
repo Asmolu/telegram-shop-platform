@@ -1718,7 +1718,7 @@ def _order(
 ) -> Order:
     order = Order(
         id=order_id,
-        order_number=f"ORD-{order_id:08d}",
+        order_number=f"ORD-{order_id:06d}",
         user_id=user_id,
         status=status_value,
         subtotal_amount=Decimal("59.90"),

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell, TopBar } from './AppShell';
@@ -113,7 +113,12 @@ describe('AppShell floating order help', () => {
   afterEach(() => {
     cleanup();
     delete window.Telegram;
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: undefined });
+    document.documentElement.style.removeProperty('--keyboard-inset');
+    document.documentElement.classList.remove('keyboard-input-focused', 'keyboard-open');
+    delete document.documentElement.dataset.keyboardOpen;
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     window.localStorage.clear();
   });
 
@@ -126,7 +131,7 @@ describe('AppShell floating order help', () => {
     expect(widget.textContent).toContain('Как совершить заказ?');
   });
 
-  it('can be hidden to the left and restored from the side tab', () => {
+  it('can be hidden to the left and opened from the side tab', async () => {
     render(<AppShell><div>Feed content</div></AppShell>);
 
     const widget = screen.getByRole('button', { name: /Как совершить заказ/i });
@@ -134,18 +139,19 @@ describe('AppShell floating order help', () => {
     dispatchPointer(window, 'pointermove', { clientX: 50, clientY: 690, pointerId: 1 });
     dispatchPointer(window, 'pointerup', { clientX: 30, clientY: 690, pointerId: 1 });
 
-    expect(screen.queryByRole('button', { name: /Как совершить заказ/i })).toBeNull();
+    expect(screen.queryByText('Как совершить заказ?')).toBeNull();
     const tab = document.querySelector<HTMLButtonElement>('.floating-help-tab--left');
 
     expect(tab).not.toBeNull();
     expect(tab?.textContent).toBe('');
     expect(tab?.querySelector('.floating-help-tab__chevron')).not.toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     fireEvent.click(tab!);
 
-    expect(screen.getByRole('button', { name: /Как совершить заказ/i })).toBeTruthy();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/faq?topic=order&returnTo=%2Fmain');
   });
 
-  it('can be hidden to the right and restored from the side tab', () => {
+  it('can be hidden to the right and opened from the side tab', async () => {
     render(<AppShell><div>Search content</div></AppShell>);
 
     const widget = screen.getByRole('button', { name: /Как совершить заказ/i });
@@ -153,15 +159,73 @@ describe('AppShell floating order help', () => {
     dispatchPointer(window, 'pointermove', { clientX: 380, clientY: 690, pointerId: 2 });
     dispatchPointer(window, 'pointerup', { clientX: 390, clientY: 690, pointerId: 2 });
 
-    expect(screen.queryByRole('button', { name: /Как совершить заказ/i })).toBeNull();
+    expect(screen.queryByText('Как совершить заказ?')).toBeNull();
     const tab = document.querySelector<HTMLButtonElement>('.floating-help-tab--right');
 
     expect(tab).not.toBeNull();
     expect(tab?.textContent).toBe('');
     expect(tab?.querySelector('.floating-help-tab__chevron')).not.toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     fireEvent.click(tab!);
 
-    expect(screen.getByRole('button', { name: /Как совершить заказ/i })).toBeTruthy();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/faq?topic=order&returnTo=%2Fmain');
+  });
+
+  it('drags the side tab vertically, stores the position, and suppresses accidental open', () => {
+    render(<AppShell><div>Feed content</div></AppShell>);
+
+    const widget = screen.getByRole('button', { name: /Как совершить заказ/i });
+    dispatchPointer(widget, 'pointerdown', { button: 0, clientX: 260, clientY: 690, pointerId: 3 });
+    dispatchPointer(window, 'pointermove', { clientX: 50, clientY: 690, pointerId: 3 });
+    dispatchPointer(window, 'pointerup', { clientX: 30, clientY: 690, pointerId: 3 });
+
+    const tab = document.querySelector<HTMLButtonElement>('.floating-help-tab--left');
+    expect(tab).not.toBeNull();
+
+    dispatchPointer(tab!, 'pointerdown', { button: 0, clientX: 4, clientY: 640, pointerId: 4 });
+    dispatchPointer(window, 'pointermove', { clientX: 4, clientY: 520, pointerId: 4 });
+    dispatchPointer(window, 'pointerup', { clientX: 4, clientY: 520, pointerId: 4 });
+    fireEvent.click(tab!);
+
+    const stored = JSON.parse(window.localStorage.getItem('telegram_shop_order_help_widget_v1') ?? '{}');
+    expect(stored.hiddenSide).toBe('left');
+    expect(stored.position.y).toBeLessThan(640);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps focused Mini App form inputs visible when the keyboard opens', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        addEventListener: vi.fn(),
+        height: 520,
+        offsetLeft: 0,
+        offsetTop: 0,
+        removeEventListener: vi.fn(),
+        width: 390,
+      },
+    });
+
+    render(
+      <AppShell>
+        <form>
+          <label>Search field<input /></label>
+          <label>Checkout city<input /></label>
+          <label>Profile comment<textarea /></label>
+        </form>
+      </AppShell>,
+    );
+
+    fireEvent.focusIn(screen.getByLabelText('Search field'));
+    expect(document.documentElement.classList.contains('keyboard-open')).toBe(true);
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('280px');
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+
+    fireEvent.focusIn(screen.getByLabelText('Checkout city'));
+    fireEvent.focusIn(screen.getByLabelText('Profile comment'));
+
+    expect(document.documentElement.classList.contains('keyboard-input-focused')).toBe(true);
   });
 });
 

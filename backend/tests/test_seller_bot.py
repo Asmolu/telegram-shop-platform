@@ -99,7 +99,7 @@ class FakeSellerBotRepository:
         )
         order = SimpleNamespace(
             id=10,
-            order_number="ORD-10",
+            order_number="ORD-000010",
             status="PROCESSING",
             delivery_method="CDEK",
             contact_name="Иван",
@@ -157,7 +157,7 @@ class FakeSellerBotRepository:
         )
         return SimpleNamespace(
             id=order_id,
-            order_number=f"ORD-{order_id}",
+            order_number=f"ORD-{order_id:06d}",
             status=OrderStatus.PROCESSING,
             delivery_method=OrderDeliveryMethod.CDEK,
             contact_name="Иван Иванов",
@@ -438,7 +438,7 @@ async def test_active_orders_command_is_russian_and_complete(
     assert len(messages) == 1
     message = messages[0]
     assert "📋 Активные заказы: 1" in message
-    assert "ORD-10 (ID 10)" in message
+    assert "ORD-000010 (ID 10)" in message
     assert "Статус заказа: В обработке" in message
     assert "Статус оплаты: Оплата на проверке" in message
     assert "Доставка: СДЭК" in message

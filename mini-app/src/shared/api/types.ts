@@ -480,6 +480,18 @@ export type OrderList = {
   items: Order[];
 };
 
+export type PaymentSuccessBannerPending = {
+  order_id: number;
+  order_number: string;
+  image_path: string;
+  image_url: string;
+};
+
+export type PaymentSuccessBannerSeen = {
+  order_id: number;
+  seen_at: string;
+};
+
 export type ReturnRequestStatus =
   | 'PENDING'
   | 'APPROVED'

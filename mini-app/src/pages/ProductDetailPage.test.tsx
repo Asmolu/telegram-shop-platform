@@ -156,7 +156,7 @@ describe('ProductDetailPage visual polish', () => {
     expect(container.querySelector('.color-button:not(.is-selected)')?.classList.contains('variant-chip')).toBe(true);
     expect(container.querySelector('.color-button.is-unavailable')?.classList.contains('variant-chip--unavailable')).toBe(true);
     expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*overflow:\s*hidden/s);
-    expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*background:\s*color-mix\(in srgb, var\(--surface-elevated\) 92%, var\(--surface-soft\)\)/s);
+    expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*background:\s*var\(--control-secondary-bg\)/s);
     expect(styles).toMatch(/\.variant-button,\s*\.color-button\s*{[^}]*box-shadow:\s*none/s);
     expect(styles).toMatch(/\.variant-chip--selected,\s*\.variant-button\.is-selected,\s*\.color-button\.is-selected\s*{[^}]*box-shadow:\s*none/s);
     expect(styles).toMatch(/\.variant-chip:disabled\s*{[^}]*opacity:\s*1/s);

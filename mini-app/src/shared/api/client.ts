@@ -549,6 +549,7 @@ export function isSafeReadPath(path: string) {
     /^\/orders$/,
     /^\/orders\/\d+$/,
     /^\/orders\/\d+\/payment$/,
+    /^\/orders\/payment-success-banner\/pending$/,
     /^\/users\/me$/,
     /^\/users\/me\/personal-data$/,
     /^\/customer-notifications\/me\/subscription$/,

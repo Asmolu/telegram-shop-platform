@@ -544,6 +544,18 @@ export interface SellerPaymentSettingsPayload {
   seller_recipient_name: string | null;
 }
 
+export interface PaymentSuccessBannerSettings {
+  enabled: boolean;
+  image_path: string | null;
+  image_url: string | null;
+  updated_at: string | null;
+}
+
+export interface PaymentSuccessBannerSettingsPayload {
+  enabled: boolean;
+  image_path: string | null;
+}
+
 export interface ManualPayment {
   id: number;
   order_id: number;

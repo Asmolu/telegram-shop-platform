@@ -61,7 +61,7 @@ describe('OrderSuccessPage details', () => {
   it('renders order summary, payment status, product details, totals, and delivery data', async () => {
     const { container } = render(<OrderSuccessPage />);
 
-    expect(await screen.findByText('Заказ ORD-00000099')).toBeTruthy();
+    expect(await screen.findByText('Заказ ORD-000099')).toBeTruthy();
     expect(screen.getAllByText('Новый').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Оплата на проверке').length).toBeGreaterThan(0);
     expect(screen.getByText('Line Break Hoodie')).toBeTruthy();
@@ -134,7 +134,7 @@ describe('OrderSuccessPage details', () => {
 
     render(<OrderSuccessPage />);
 
-    expect(await screen.findByText('Заказ ORD-00000099')).toBeTruthy();
+    expect(await screen.findByText('Заказ ORD-000099')).toBeTruthy();
     expect(screen.queryByLabelText('Действия с заказом')).toBeNull();
   });
 
@@ -181,7 +181,7 @@ function returnEligibilityFixture(overrides: Partial<ReturnEligibility> = {}): R
 function orderFixture(overrides: Partial<Order> = {}): Order {
   return {
     id: 99,
-    order_number: 'ORD-00000099',
+    order_number: 'ORD-000099',
     user_id: 1,
     status: 'NEW',
     subtotal_amount: '200.00',

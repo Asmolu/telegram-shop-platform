@@ -1132,3 +1132,41 @@ def test_product_image_derivatives_migration_and_model_contract() -> None:
     assert ProductImage.__table__.c.card_path.type.length == 1024
     assert ProductImage.__table__.c.detail_path.nullable is True
     assert ProductImage.__table__.c.detail_path.type.length == 1024
+
+
+def test_sequential_order_numbers_and_paid_banner_migration_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260704_0048_sequential_order_numbers_and_paid_banner.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "sequential_order_numbers_and_paid_banner",
+        migration_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260703_0047"
+    assert "CREATE SEQUENCE IF NOT EXISTS order_number_seq" in content
+    assert "ORD-MIGRATING" in content
+    assert "row_number() OVER (ORDER BY created_at ASC, id ASC)" in content
+    assert "lpad(numbered_orders.seq::text, 6, '0')" in content
+    assert "setval" in content
+    assert "payment_success_banner_seen_at" in content
+    assert "payment_success_banner_image_path" in content
+    assert "payment_success_banner_enabled" in content
+    assert "manual_payments.status = 'APPROVED'" in content
+    assert Order.__table__.c.payment_success_banner_seen_at.nullable is True
+    assert (
+        SellerPaymentSettings.__table__.c.payment_success_banner_image_path.type.length
+        == 1024
+    )
+    assert (
+        SellerPaymentSettings.__table__.c.payment_success_banner_enabled.nullable
+        is False
+    )

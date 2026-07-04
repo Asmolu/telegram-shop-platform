@@ -14,6 +14,8 @@ from app.modules.orders.schemas import (
     OrderList,
     OrderRead,
     OrderStatusUpdate,
+    PaymentSuccessBannerPendingRead,
+    PaymentSuccessBannerSeenRead,
 )
 from app.modules.orders.service import OrdersService
 
@@ -59,6 +61,17 @@ async def list_current_user_orders(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> OrderList:
     return await service.list_current_user_orders(current_user.id, limit=limit, offset=offset)
+
+
+@router.get(
+    "/payment-success-banner/pending",
+    response_model=PaymentSuccessBannerPendingRead | None,
+)
+async def get_pending_payment_success_banner(
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[OrdersService, Depends(get_orders_service)],
+) -> PaymentSuccessBannerPendingRead | None:
+    return await service.get_pending_payment_success_banner(current_user.id)
 
 
 @router.get("/admin", response_model=OrderList)
@@ -118,6 +131,21 @@ async def send_order_customer_message(
         actor_user_id=current_user.id,
         text=text,
         photo=photo,
+    )
+
+
+@router.post(
+    "/{order_id}/payment-success-banner/seen",
+    response_model=PaymentSuccessBannerSeenRead,
+)
+async def mark_payment_success_banner_seen(
+    order_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[OrdersService, Depends(get_orders_service)],
+) -> PaymentSuccessBannerSeenRead:
+    return await service.mark_payment_success_banner_seen(
+        user_id=current_user.id,
+        order_id=order_id,
     )
 
 

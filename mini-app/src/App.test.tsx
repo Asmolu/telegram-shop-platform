@@ -56,8 +56,11 @@ vi.mock('./shared/network/NetworkProvider', async () => {
 });
 
 vi.mock('./shared/api', () => ({
+  getApiBaseUrl: () => 'https://api.example.test/api/v1',
   getBanners: vi.fn().mockResolvedValue({ items: [], meta: { limit: 20, offset: 0, total: 0 } }),
   getCart: vi.fn().mockResolvedValue({ quantity_total: 0 }),
+  getPendingPaymentSuccessBanner: vi.fn().mockResolvedValue(null),
+  markPaymentSuccessBannerSeen: vi.fn().mockResolvedValue(undefined),
   trackBannerClick: vi.fn().mockResolvedValue(undefined),
 }));
 

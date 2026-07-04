@@ -37,6 +37,8 @@ import type {
   Order,
   OrderStatus,
   PageList,
+  PaymentSuccessBannerSettings,
+  PaymentSuccessBannerSettingsPayload,
   Product,
   ProductCreate,
   ProductSlugList,
@@ -342,6 +344,19 @@ export const api = {
       apiRequest<SellerPaymentSettings>('/seller/settings/payment', {
         method: 'PUT',
         body,
+      }),
+  },
+  paymentSuccessBanner: {
+    get: () =>
+      apiRequest<PaymentSuccessBannerSettings>('/settings/admin/payment-success-banner'),
+    update: (body: PaymentSuccessBannerSettingsPayload) =>
+      apiRequest<PaymentSuccessBannerSettings>('/settings/admin/payment-success-banner', {
+        method: 'POST',
+        body,
+      }),
+    delete: () =>
+      apiRequest<PaymentSuccessBannerSettings>('/settings/admin/payment-success-banner', {
+        method: 'DELETE',
       }),
   },
   manualPayments: {

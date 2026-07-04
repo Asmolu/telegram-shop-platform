@@ -10,6 +10,7 @@ import { normalizeAssetUrl } from '../utils/images';
 import { getMotionAwareScrollBehavior } from '../utils/motion';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../utils/banners';
 import { BackIcon } from './Icons';
+import { useKeyboardInset } from './useKeyboardSafeArea';
 import mensStyleLogo from '../assets/mens-style-logo.webp';
 
 const navItems = [
@@ -24,12 +25,12 @@ const AGGRESSIVE_POPUP_SESSION_KEY = 'telegram_shop_aggressive_popup_dismissed';
 const POPUP_SESSION_KEY = 'telegram_shop_popup_dismissed';
 const FLOATING_HELP_STORAGE_KEY = 'telegram_shop_order_help_widget_v1';
 const FLOATING_HELP_MARGIN = 12;
-const FLOATING_HELP_BOTTOM_GUARD = 104;
+const FLOATING_HELP_BOTTOM_GUARD = 96;
 const FLOATING_HELP_DISMISS_DISTANCE = 80;
 const FLOATING_HELP_DRAG_THRESHOLD = 8;
 const FLOATING_HELP_THROW_VELOCITY = 0.45;
-const FLOATING_HELP_DEFAULT_SIZE = { width: 216, height: 46 };
-const FLOATING_HELP_TAB_SIZE = { width: 46, height: 62 };
+const FLOATING_HELP_DEFAULT_SIZE = { width: 164, height: 38 };
+const FLOATING_HELP_TAB_SIZE = { width: 28, height: 38 };
 
 type FloatingHelpHiddenSide = 'left' | 'right';
 type FloatingHelpPosition = {
@@ -115,9 +116,13 @@ function writeFloatingHelpState(state: FloatingHelpState) {
 }
 
 function getViewportRect() {
-  const width = window.innerWidth || document.documentElement.clientWidth || 430;
-  const height = window.innerHeight || document.documentElement.clientHeight || 720;
-  return { left: 0, top: 0, right: width, bottom: height, width, height };
+  const visualViewport = window.visualViewport;
+  const left = visualViewport?.offsetLeft ?? 0;
+  const top = visualViewport?.offsetTop ?? 0;
+  const width = visualViewport?.width ?? window.innerWidth ?? document.documentElement.clientWidth ?? 430;
+  const height = visualViewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight ?? 720;
+
+  return { left, top, right: left + width, bottom: top + height, width, height };
 }
 
 function getMiniAppFrameRect(element: HTMLElement | null) {
@@ -295,6 +300,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { currentPath, pathname, navigate } = useRouter();
   const { isAuthenticated, telegramUser, user } = useAuth();
   const { state: networkState, retry: retryNetwork } = useNetworkState();
+  useKeyboardInset();
   const [cartCount, setCartCount] = React.useState(0);
   const [aggressiveBanners, setAggressiveBanners] = React.useState<Banner[]>([]);
   const [popupBanners, setPopupBanners] = React.useState<Banner[]>([]);
@@ -533,9 +539,9 @@ function FloatingOrderHelp({
     isDragging,
     isReady,
     onPointerDown,
+    onTabPointerDown,
     position,
     ref,
-    restore,
     shouldSuppressClick,
     tabStyle,
   } = useDraggableFloatingHelp();
@@ -547,11 +553,19 @@ function FloatingOrderHelp({
   if (hiddenSide) {
     return (
       <button
-        className={`floating-help-tab floating-help-tab--${hiddenSide}`}
+        className={`floating-help-tab floating-help-tab--${hiddenSide} ${isDragging ? 'is-dragging' : ''}`}
         style={tabStyle}
         type="button"
-        aria-label="Вернуть подсказку"
-        onClick={() => restore(hiddenSide)}
+        aria-label="Как совершить заказ?"
+        onClick={(event) => {
+          if (shouldSuppressClick()) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          onOpen();
+        }}
+        onPointerDown={onTabPointerDown}
       >
         <span className="floating-help-tab__chevron" aria-hidden="true" />
       </button>
@@ -781,22 +795,101 @@ function useDraggableFloatingHelp() {
     };
   }, [cancelDragFrame, scheduleDragState, setFloatingState]);
 
-  const restore = React.useCallback((side: FloatingHelpHiddenSide) => {
-    const bounds = getFloatingHelpBounds(null);
-    const currentPosition = stateRef.current.position ?? getDefaultFloatingHelpPosition(null);
-    const nextPosition = clampFloatingHelpPosition(
-      {
-        x: side === 'left' ? bounds.minX : bounds.maxX,
-        y: currentPosition.y,
-      },
-      null,
-    );
+  const onTabPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
 
-    setFloatingState({
-      hiddenSide: null,
-      position: nextPosition,
-    });
-  }, [setFloatingState]);
+    const hiddenSide = stateRef.current.hiddenSide;
+    if (!hiddenSide) {
+      return;
+    }
+
+    const startPosition = stateRef.current.position ?? getDefaultFloatingHelpPosition(null);
+    const startY = event.clientY;
+    const pointerId = event.pointerId;
+    const pointerTarget = event.currentTarget;
+    const dragState = {
+      lastPosition: startPosition,
+      moved: false,
+    };
+
+    cleanupRef.current?.();
+    cancelDragFrame();
+    pointerTarget.setPointerCapture?.(pointerId);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      const deltaY = moveEvent.clientY - startY;
+      if (!dragState.moved && Math.abs(deltaY) <= FLOATING_HELP_DRAG_THRESHOLD) {
+        return;
+      }
+      if (!dragState.moved) {
+        dragState.moved = true;
+        setIsDragging(true);
+        pointerTarget.classList.add('is-dragging');
+      }
+
+      const bounds = getFloatingHelpBounds(null, FLOATING_HELP_TAB_SIZE);
+      const nextPosition = {
+        x: startPosition.x,
+        y: clampNumber(startPosition.y + deltaY, bounds.minY, bounds.maxY),
+      };
+
+      dragState.lastPosition = nextPosition;
+      scheduleDragState({
+        hiddenSide,
+        position: nextPosition,
+      });
+      moveEvent.preventDefault();
+    };
+
+    const finishDrag = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+      cancelDragFrame();
+      setIsDragging(false);
+      pointerTarget.classList.remove('is-dragging');
+      pointerTarget.releasePointerCapture?.(pointerId);
+
+      if (!dragState.moved) {
+        return;
+      }
+
+      const bounds = getFloatingHelpBounds(null, FLOATING_HELP_TAB_SIZE);
+      const nextPosition = {
+        x: dragState.lastPosition.x,
+        y: clampNumber(dragState.lastPosition.y, bounds.minY, bounds.maxY),
+      };
+
+      suppressNextClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 0);
+      setFloatingState({
+        hiddenSide,
+        position: nextPosition,
+      });
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+    cleanupRef.current = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      pointerTarget.classList.remove('is-dragging');
+      cancelDragFrame();
+    };
+  }, [cancelDragFrame, scheduleDragState, setFloatingState]);
 
   const shouldSuppressClick = React.useCallback(() => {
     if (!suppressNextClickRef.current) {
@@ -827,9 +920,9 @@ function useDraggableFloatingHelp() {
     isDragging,
     isReady,
     onPointerDown,
+    onTabPointerDown,
     position: state.position ?? getDefaultFloatingHelpPosition(ref.current),
     ref,
-    restore,
     shouldSuppressClick,
     tabStyle,
   };

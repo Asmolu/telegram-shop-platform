@@ -727,7 +727,7 @@ async def test_submit_attempts_configured_seller_bot_notification(
     assert result.status == ManualPaymentStatus.SUBMITTED
     assert result.delivery_method == OrderDeliveryMethod.CDEK
     assert len(telegram.messages) == 1
-    assert "ORD-00000010" in telegram.messages[0][1]
+    assert "ORD-000010" in telegram.messages[0][1]
     assert "Способ доставки: СДЭК" in telegram.messages[0][1]
     assert "Без фото" in telegram.messages[0][1]
     assert "https://seller.stylexac.ru/orders?payment=1" in telegram.messages[0][1]
@@ -813,7 +813,7 @@ async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
         {
             "payment_id": 17,
             "order_id": 10,
-            "order_number": "ORD-10",
+            "order_number": "ORD-000010",
             "user_id": 1,
             "customer_username": "customer",
             "customer_phone": "+79990000000",
@@ -834,7 +834,7 @@ async def test_submitted_event_with_receipt_sends_photo_and_review_buttons(
     assert telegram.photos[0][3] == "image/png"
     caption = telegram.photos[0][4]
     assert caption is not None
-    assert "ORD-10" in caption
+    assert "ORD-000010" in caption
     assert "Способ доставки: СДЭК" in caption
     assert "Без фото" not in caption
     keyboard = telegram.photos[0][5]
@@ -865,7 +865,7 @@ async def test_submitted_event_without_receipt_uses_clean_text_note(
         {
             "payment_id": 18,
             "order_id": 11,
-            "order_number": "ORD-11",
+            "order_number": "ORD-000011",
             "user_id": 2,
             "customer_username": None,
             "customer_phone": "+79991111111",
@@ -906,7 +906,7 @@ async def test_submit_after_receipt_upload_sends_seller_photo() -> None:
     assert submitted.receipt_image_path == uploaded.receipt_image_path
     assert telegram.messages == []
     assert telegram.photos[0][1] == b"image"
-    assert "ORD-00000010" in (telegram.photos[0][4] or "")
+    assert "ORD-000010" in (telegram.photos[0][4] or "")
     assert repository.payments[1].seller_telegram_message_id == 707
 
 
@@ -1295,7 +1295,7 @@ def _order_and_variant() -> tuple[Order, ProductVariant]:
     )
     order = Order(
         id=10,
-        order_number="ORD-00000010",
+        order_number="ORD-000010",
         user_id=1,
         user=user,
         status=OrderStatus.NEW,

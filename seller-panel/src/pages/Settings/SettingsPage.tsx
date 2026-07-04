@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { API_BASE_URL, ApiError, api } from '../../shared/api';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { API_BASE_URL, ApiError, api, resolveMediaUrl } from '../../shared/api';
 import { clearStoredToken, getTokenStorageScope } from '../../shared/auth/tokenStorage';
 import { useI18n } from '../../shared/i18n';
 
@@ -12,6 +12,9 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
   const tokenScope = getTokenStorageScope();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bannerSaving, setBannerSaving] = useState(false);
+  const [bannerDeleting, setBannerDeleting] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -20,16 +23,28 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
     bankName: '',
     recipientName: '',
   });
+  const [bannerForm, setBannerForm] = useState({
+    enabled: false,
+    imagePath: '',
+    imageUrl: '',
+  });
 
   useEffect(() => {
-    api.paymentSettings
-      .get()
-      .then((settings) => {
+    Promise.all([
+      api.paymentSettings.get(),
+      api.paymentSuccessBanner.get(),
+    ])
+      .then(([settings, bannerSettings]) => {
         setForm({
           enabled: settings.is_manual_sbp_enabled,
           phone: settings.seller_phone_display ?? '',
           bankName: settings.seller_bank_name ?? '',
           recipientName: settings.seller_recipient_name ?? '',
+        });
+        setBannerForm({
+          enabled: bannerSettings.enabled,
+          imagePath: bannerSettings.image_path ?? '',
+          imageUrl: bannerSettings.image_url ?? '',
         });
       })
       .catch(handleError)
@@ -68,13 +83,95 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
     }
   }
 
+  async function uploadPaymentSuccessBanner(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    if (!file.type.startsWith('image/')) {
+      setError('Загрузите изображение в формате JPG, PNG или WebP.');
+      return;
+    }
+
+    setBannerUploading(true);
+    try {
+      const uploaded = await api.banners.uploadImage(file, undefined, 'vertical_banner');
+      setBannerForm((current) => ({
+        ...current,
+        imagePath: uploaded.file_path,
+        imageUrl: uploaded.url,
+      }));
+      setNotice('Баннер загружен. Сохраните настройки, чтобы применить его.');
+    } catch (requestError) {
+      handleError(requestError);
+    } finally {
+      setBannerUploading(false);
+    }
+  }
+
+  async function savePaymentSuccessBannerSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    if (bannerForm.enabled && !bannerForm.imagePath) {
+      setError('Загрузите изображение перед включением баннера.');
+      return;
+    }
+
+    setBannerSaving(true);
+    try {
+      const settings = await api.paymentSuccessBanner.update({
+        enabled: bannerForm.enabled,
+        image_path: bannerForm.imagePath || null,
+      });
+      setBannerForm({
+        enabled: settings.enabled,
+        imagePath: settings.image_path ?? '',
+        imageUrl: settings.image_url ?? '',
+      });
+      setNotice('Настройки баннера после оплаты сохранены.');
+    } catch (requestError) {
+      handleError(requestError);
+    } finally {
+      setBannerSaving(false);
+    }
+  }
+
+  async function deletePaymentSuccessBanner() {
+    setError(null);
+    setNotice(null);
+    setBannerDeleting(true);
+    try {
+      const settings = await api.paymentSuccessBanner.delete();
+      setBannerForm({
+        enabled: settings.enabled,
+        imagePath: settings.image_path ?? '',
+        imageUrl: settings.image_url ?? '',
+      });
+      setNotice('Баннер после оплаты удален.');
+    } catch (requestError) {
+      handleError(requestError);
+    } finally {
+      setBannerDeleting(false);
+    }
+  }
+
   function clearToken() {
     clearStoredToken();
     onAuthExpired();
   }
 
+  const bannerPreviewUrl = resolveMediaUrl(bannerForm.imageUrl || bannerForm.imagePath);
+  const bannerBusy = loading || bannerSaving || bannerDeleting || bannerUploading;
+
   return (
     <div className="page-stack">
+      {error ? <div className="error-banner">{error}</div> : null}
+      {notice ? <div className="success-banner">{notice}</div> : null}
+
       <section className="panel payment-settings-panel">
         <div className="section-heading">
           <div>
@@ -88,9 +185,6 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
             {form.enabled ? 'Включено' : 'Выключено'}
           </span>
         </div>
-
-        {error ? <div className="error-banner">{error}</div> : null}
-        {notice ? <div className="success-banner">{notice}</div> : null}
 
         <form className="payment-settings-form" onSubmit={savePaymentSettings}>
           <label className="toggle-field payment-settings-toggle">
@@ -154,6 +248,87 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
           <button className="button button-primary" disabled={loading || saving} type="submit">
             {saving ? 'Сохраняем...' : 'Сохранить настройки оплаты'}
           </button>
+        </form>
+      </section>
+
+      <section className="panel paid-banner-settings-panel">
+        <div className="section-heading">
+          <div>
+            <h2>Баннер после подтверждения оплаты</h2>
+            <p>
+              Показывается покупателю в Mini App один раз после подтверждения оплаты продавцом.
+            </p>
+          </div>
+          <span className={`payment-setting-state ${bannerForm.enabled ? 'is-enabled' : ''}`}>
+            {bannerForm.enabled ? 'Включено' : 'Выключено'}
+          </span>
+        </div>
+
+        <form className="payment-settings-form" onSubmit={savePaymentSuccessBannerSettings}>
+          <label className="toggle-field payment-settings-toggle">
+            <input
+              checked={bannerForm.enabled}
+              disabled={bannerBusy}
+              type="checkbox"
+              onChange={(event) =>
+                setBannerForm((current) => ({ ...current, enabled: event.target.checked }))
+              }
+            />
+            <span>
+              <strong>Показывать баннер после оплаты</strong>
+              <small>Появится только для подтвержденных продавцом заказов.</small>
+            </span>
+          </label>
+
+          <div className="paid-banner-settings-grid">
+            <div className="paid-banner-preview">
+              {bannerPreviewUrl ? (
+                <img
+                  alt="Баннер после подтверждения оплаты"
+                  className="paid-banner-preview__media"
+                  src={bannerPreviewUrl}
+                />
+              ) : (
+                <span className="paid-banner-preview__empty">9:16</span>
+              )}
+            </div>
+
+            <div className="paid-banner-controls">
+              <label>
+                <span>Изображение</span>
+                <input
+                  accept="image/*"
+                  disabled={bannerBusy}
+                  type="file"
+                  onChange={uploadPaymentSuccessBanner}
+                />
+                <small>Вертикальный формат 9:16. Используются общие лимиты загрузок.</small>
+              </label>
+
+              {bannerForm.imagePath ? (
+                <p className="paid-banner-path">{bannerForm.imagePath}</p>
+              ) : null}
+
+              <div className="settings-action-row">
+                <button
+                  className="button button-primary"
+                  disabled={bannerBusy}
+                  type="submit"
+                >
+                  {bannerSaving ? 'Сохраняем...' : 'Сохранить баннер'}
+                </button>
+                <button
+                  className="button button-secondary"
+                  disabled={bannerBusy || !bannerForm.imagePath}
+                  type="button"
+                  onClick={deletePaymentSuccessBanner}
+                >
+                  {bannerDeleting ? 'Удаляем...' : 'Удалить'}
+                </button>
+              </div>
+              {bannerUploading ? <p className="paid-banner-path">Загружаем изображение...</p> : null}
+            </div>
+          </div>
         </form>
       </section>
 

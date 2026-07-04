@@ -1,19 +1,25 @@
 from collections.abc import Iterable
 
-from sqlalchemy import delete, or_, select
+from fastapi import status
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.errors import AppError
 from app.db.models import (
     Cart,
     CartItem,
+    ManualPayment,
+    ManualPaymentStatus,
     Order,
     OrderItem,
     OrderStatus,
     Product,
     ProductVariant,
+    SellerPaymentSettings,
     User,
 )
+from app.modules.orders.numbering import format_order_number
 
 
 class OrdersRepository:
@@ -21,6 +27,17 @@ class OrdersRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def next_order_number(self) -> str:
+        result = await self.session.execute(text("SELECT nextval('order_number_seq')"))
+        sequence_value = int(result.scalar_one())
+        try:
+            return format_order_number(sequence_value)
+        except ValueError as exc:
+            raise AppError(
+                "Order number sequence exhausted",
+                status.HTTP_409_CONFLICT,
+            ) from exc
 
     async def get_cart_for_checkout(self, user_id: int) -> Cart | None:
         result = await self.session.execute(
@@ -113,6 +130,54 @@ class OrdersRepository:
             .options(*self._order_detail_loads())
             .where(Order.user_id == user_id, Order.id == order_id)
         )
+        return result.scalar_one_or_none()
+
+    async def get_payment_success_banner_settings(self) -> SellerPaymentSettings | None:
+        result = await self.session.execute(
+            select(SellerPaymentSettings).where(SellerPaymentSettings.id == 1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_pending_payment_success_banner_order(self, *, user_id: int) -> Order | None:
+        result = await self.session.execute(
+            select(Order)
+            .options(selectinload(Order.manual_payment))
+            .join(ManualPayment, ManualPayment.order_id == Order.id)
+            .where(
+                Order.user_id == user_id,
+                Order.payment_success_banner_seen_at.is_(None),
+                ManualPayment.status == ManualPaymentStatus.APPROVED,
+            )
+            .order_by(
+                ManualPayment.approved_at.desc().nullslast(),
+                Order.created_at.desc(),
+                Order.id.desc(),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_paid_order_for_user_for_banner(
+        self,
+        *,
+        user_id: int,
+        order_id: int,
+        for_update: bool = False,
+    ) -> Order | None:
+        statement = (
+            select(Order)
+            .options(selectinload(Order.manual_payment))
+            .join(ManualPayment, ManualPayment.order_id == Order.id)
+            .where(
+                Order.id == order_id,
+                Order.user_id == user_id,
+                ManualPayment.status == ManualPaymentStatus.APPROVED,
+            )
+        )
+        if for_update:
+            statement = statement.with_for_update()
+
+        result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
     def add(self, instance: Order | OrderItem) -> None:

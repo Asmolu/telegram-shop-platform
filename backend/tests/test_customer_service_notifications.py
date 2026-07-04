@@ -86,7 +86,7 @@ async def test_eligible_customer_receives_order_created_service_notification() -
     assert delivery.status == CustomerServiceNotificationDeliveryStatus.SENT
     assert delivery.telegram_message_id == 123
     assert delivery.sent_at == _now()
-    assert sender.messages == [(100, "Заказ создан\n\nЗаказ ORD-00000001 создан. Сумма: 99.80.")]
+    assert sender.messages == [(100, "Заказ создан\n\nЗаказ ORD-000001 создан. Сумма: 99.80.")]
     assert repository.deliveries == [delivery]
     assert session.rolled_back is False
 
@@ -264,27 +264,27 @@ async def test_telegram_429_records_sanitized_rate_limit_metadata() -> None:
         (
             OrderStatus.PROCESSING.value,
             ORDER_PROCESSING_CUSTOMER,
-            "Заказ принят в обработку\n\nЗаказ ORD-00000001 принят в обработку.",
+            "Заказ принят в обработку\n\nЗаказ ORD-000001 принят в обработку.",
         ),
         (
             OrderStatus.SHIPPED.value,
             ORDER_SHIPPED_CUSTOMER,
-            "Заказ отправлен\n\nЗаказ ORD-00000001 отправлен.",
+            "Заказ отправлен\n\nЗаказ ORD-000001 отправлен.",
         ),
         (
             OrderStatus.DELIVERED.value,
             ORDER_DELIVERED_CUSTOMER,
-            "Заказ доставлен\n\nЗаказ ORD-00000001 доставлен.",
+            "Заказ доставлен\n\nЗаказ ORD-000001 доставлен.",
         ),
         (
             OrderStatus.CANCELLED.value,
             ORDER_CANCELLED_CUSTOMER,
-            "Заказ отменён\n\nЗаказ ORD-00000001 отменён.",
+            "Заказ отменён\n\nЗаказ ORD-000001 отменён.",
         ),
         (
             OrderStatus.NEW.value,
             ORDER_STATUS_CHANGED_CUSTOMER,
-            "Статус заказа изменён\n\nСтатус заказа ORD-00000001: Новый.",
+            "Статус заказа изменён\n\nСтатус заказа ORD-000001: Новый.",
         ),
     ],
 )
@@ -298,7 +298,7 @@ async def test_order_status_update_creates_customer_status_notification_when_eli
     delivery = await service.notify_order_status_changed(
         {
             "order_id": 1,
-            "order_number": "ORD-00000001",
+            "order_number": "ORD-000001",
             "user_id": 1,
             "previous_status": OrderStatus.PROCESSING.value,
             "new_status": new_status,
@@ -318,7 +318,7 @@ async def test_order_status_update_skips_when_customer_subscription_is_missing()
     delivery = await service.notify_order_status_changed(
         {
             "order_id": 1,
-            "order_number": "ORD-00000001",
+            "order_number": "ORD-000001",
             "user_id": 1,
             "previous_status": OrderStatus.NEW.value,
             "new_status": OrderStatus.PROCESSING.value,
@@ -427,7 +427,7 @@ def _subscription(
 def _order_created_payload() -> dict[str, object]:
     return {
         "order_id": 1,
-        "order_number": "ORD-00000001",
+        "order_number": "ORD-000001",
         "user_id": 1,
         "subtotal_amount": "119.80",
         "discount_amount": "20.00",

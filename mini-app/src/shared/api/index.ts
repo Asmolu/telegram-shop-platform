@@ -18,6 +18,8 @@ import type {
   ManualPayment,
   Order,
   OrderList,
+  PaymentSuccessBannerPending,
+  PaymentSuccessBannerSeen,
   PersonalData,
   PersonalDataUpdate,
   Product,
@@ -259,6 +261,24 @@ export function getOrders(options: ApiRequestOptions = {}) {
 
 export function getOrder(orderId: number, options: ApiRequestOptions = {}) {
   return apiRequest<Order>(`/orders/${orderId}`, options);
+}
+
+export function getPendingPaymentSuccessBanner(options: ApiRequestOptions = {}) {
+  return apiRequest<PaymentSuccessBannerPending | null>(
+    '/orders/payment-success-banner/pending',
+    { ...options, networkImpact: options.networkImpact ?? 'local' },
+  );
+}
+
+export function markPaymentSuccessBannerSeen(orderId: number) {
+  return apiRequest<PaymentSuccessBannerSeen>(
+    `/orders/${orderId}/payment-success-banner/seen`,
+    {
+      method: 'POST',
+      networkImpact: 'local',
+      retry: false,
+    },
+  );
 }
 
 export function getReturnEligibility(orderId: number, options: ApiRequestOptions = {}) {

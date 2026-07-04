@@ -2,13 +2,13 @@ import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
-from secrets import token_hex
 from typing import Protocol
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import (
     Cart,
@@ -34,7 +34,14 @@ from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.notifications.service import NotificationsEventPublisher
 from app.modules.orders.repository import OrdersRepository
-from app.modules.orders.schemas import OrderCheckoutCreate, OrderList, OrderRead, OrderStatusUpdate
+from app.modules.orders.schemas import (
+    OrderCheckoutCreate,
+    OrderList,
+    OrderRead,
+    OrderStatusUpdate,
+    PaymentSuccessBannerPendingRead,
+    PaymentSuccessBannerSeenRead,
+)
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
 
 logger = logging.getLogger(__name__)
@@ -152,11 +159,13 @@ class OrdersService:
                 code=payload.promo_code,
                 subtotal=subtotal,
             )
+            order_number = await self.repository.next_order_number()
             order = self._build_order(
                 user_id=user_id,
                 payload=payload,
                 subtotal=subtotal,
                 promo_calculation=promo_calculation,
+                order_number=order_number,
             )
             self.repository.add(order)
             await self.session.flush()
@@ -312,6 +321,61 @@ class OrdersService:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
         return OrderRead.model_validate(order)
 
+    async def get_pending_payment_success_banner(
+        self,
+        user_id: int,
+    ) -> PaymentSuccessBannerPendingRead | None:
+        banner_settings = await self.repository.get_payment_success_banner_settings()
+        if (
+            banner_settings is None
+            or not banner_settings.payment_success_banner_enabled
+            or not banner_settings.payment_success_banner_image_path
+        ):
+            return None
+
+        order = await self.repository.get_pending_payment_success_banner_order(user_id=user_id)
+        if order is None:
+            return None
+
+        image_path = banner_settings.payment_success_banner_image_path
+        return PaymentSuccessBannerPendingRead(
+            order_id=order.id,
+            order_number=order.order_number,
+            image_path=image_path,
+            image_url=settings.public_upload_url_for(image_path),
+        )
+
+    async def mark_payment_success_banner_seen(
+        self,
+        *,
+        user_id: int,
+        order_id: int,
+    ) -> PaymentSuccessBannerSeenRead:
+        order = await self.repository.get_paid_order_for_user_for_banner(
+            user_id=user_id,
+            order_id=order_id,
+            for_update=True,
+        )
+        if order is None:
+            raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
+
+        if order.payment_success_banner_seen_at is None:
+            order.payment_success_banner_seen_at = datetime.now(UTC)
+            try:
+                await self.session.commit()
+            except IntegrityError as exc:
+                await self.session.rollback()
+                raise AppError(
+                    "Payment success banner update failed",
+                    status.HTTP_409_CONFLICT,
+                ) from exc
+
+        assert order.payment_success_banner_seen_at is not None
+        return PaymentSuccessBannerSeenRead(
+            order_id=order.id,
+            seen_at=order.payment_success_banner_seen_at,
+        )
+
     async def update_order_status(
         self,
         order_id: int,
@@ -447,6 +511,7 @@ class OrdersService:
         payload: OrderCheckoutCreate,
         subtotal: Decimal,
         promo_calculation: PromoCodeCalculation | None,
+        order_number: str,
     ) -> Order:
         discount = Decimal("0.00")
         total = subtotal
@@ -459,7 +524,7 @@ class OrdersService:
             promo_code_code = promo_calculation.promo_code.code
 
         return Order(
-            order_number=self._generate_order_number(),
+            order_number=order_number,
             user_id=user_id,
             status=OrderStatus.NEW,
             subtotal_amount=subtotal,
@@ -498,6 +563,3 @@ class OrdersService:
             (item.product.base_price * item.quantity for item in items),
             Decimal("0.00"),
         )
-
-    def _generate_order_number(self) -> str:
-        return f"ORD-{token_hex(6).upper()}"

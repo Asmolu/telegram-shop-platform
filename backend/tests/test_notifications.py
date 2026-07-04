@@ -136,7 +136,7 @@ async def test_order_created_event_creates_and_sends_seller_notification(
     assert stored.sent_at is not None
     assert len(telegram.messages) == 1
     message = telegram.messages[0]
-    assert "<b>🛍 Новый заказ #ORD-00000001</b>" in message
+    assert "<b>🛍 Новый заказ #ORD-000001</b>" in message
     assert "ID заказа: 1" in message
     assert "ID клиента: 1" in message
     assert "Клиент" in message
@@ -192,7 +192,7 @@ async def test_order_created_seller_notification_can_send_photo_caption() -> Non
     photo_url, caption = telegram.photos[0]
     assert photo_url == "https://api.stylexac.ru/uploads/products/hoodie.jpg"
     assert caption is not None
-    assert caption.startswith("<b>🛍 Новый заказ #ORD-00000001</b>")
+    assert caption.startswith("<b>🛍 Новый заказ #ORD-000001</b>")
     assert "ID товара: 10" in caption
     assert "Фото: https://api.stylexac.ru/uploads/products/hoodie.jpg" in caption
     assert telegram.photo_parse_modes == ["HTML"]
@@ -255,7 +255,7 @@ async def test_promo_used_event_creates_internal_notification() -> None:
         name=PROMO_USED,
         payload={
             "order_id": 1,
-            "order_number": "ORD-00000001",
+            "order_number": "ORD-000001",
             "user_id": 1,
             "promo_code": "SAVE10",
             "discount_amount": "20.00",
@@ -280,7 +280,7 @@ async def test_order_status_changed_event_creates_seller_notification() -> None:
         name=ORDER_STATUS_CHANGED,
         payload={
             "order_id": 1,
-            "order_number": "ORD-00000001",
+            "order_number": "ORD-000001",
             "user_id": 1,
             "previous_status": "NEW",
             "new_status": "PROCESSING",
@@ -294,7 +294,7 @@ async def test_order_status_changed_event_creates_seller_notification() -> None:
     assert stored.status == NotificationStatus.SENT
     assert telegram.messages == [
         "🔄 Статус заказа изменён\n\n"
-        "Заказ: ORD-00000001\n"
+        "Заказ: ORD-000001\n"
         "Было: Новый\n"
         "Стало: В обработке"
     ]
@@ -308,7 +308,7 @@ async def test_order_shipped_event_creates_internal_user_notification() -> None:
         name=ORDER_SHIPPED,
         payload={
             "order_id": 1,
-            "order_number": "ORD-00000001",
+            "order_number": "ORD-000001",
             "user_id": 1,
             "status": "SHIPPED",
         },
@@ -334,7 +334,7 @@ async def test_failed_telegram_notification_retry_sends_again() -> None:
     assert retried.status == NotificationStatus.SENT
     assert repository.notifications[1].error_message is None
     assert telegram.messages == [
-        "<b>New order ORD-00000001</b>\n\nOrder ORD-00000001 was created."
+        "<b>New order ORD-000001</b>\n\nOrder ORD-000001 was created."
     ]
     assert telegram.parse_modes == ["HTML"]
 
@@ -407,8 +407,8 @@ def _notification(status: NotificationStatus = NotificationStatus.SENT) -> Notif
         id=1,
         user_id=None,
         type=ORDER_CREATED,
-        title="New order ORD-00000001",
-        message="Order ORD-00000001 was created.",
+        title="New order ORD-000001",
+        message="Order ORD-000001 was created.",
         payload=_order_created_payload(),
         channel=NotificationChannel.TELEGRAM,
         status=status,
@@ -426,7 +426,7 @@ def _notification_read() -> NotificationRead:
 def _order_created_payload() -> dict[str, object]:
     return {
         "order_id": 1,
-        "order_number": "ORD-00000001",
+        "order_number": "ORD-000001",
         "user_id": 1,
         "subtotal_amount": "119.80",
         "discount_amount": "20.00",

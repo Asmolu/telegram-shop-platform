@@ -146,7 +146,7 @@ class FakeManualPaymentsService:
             self.current_status = ManualPaymentStatus.APPROVED
         return SimpleNamespace(
             id=payment_id,
-            order_number="ORD-17",
+            order_number="ORD-000017",
             status=ManualPaymentStatus.APPROVED,
             reject_reason=None,
         )
@@ -173,7 +173,7 @@ class FakeManualPaymentsService:
             self.current_status = ManualPaymentStatus.REJECTED
         return SimpleNamespace(
             id=payment_id,
-            order_number="ORD-17",
+            order_number="ORD-000017",
             status=ManualPaymentStatus.REJECTED,
             reject_reason=reject_reason,
         )
@@ -183,7 +183,7 @@ class FakeManualPaymentsService:
             raise AppError("Payment not found", status.HTTP_404_NOT_FOUND)
         return SimpleNamespace(
             id=payment_id,
-            order_number="ORD-17",
+            order_number="ORD-000017",
             status=self.terminal_status,
             reject_reason=None,
         )
@@ -267,7 +267,7 @@ class FakeReturnRequestsService:
             id=return_request_id,
             return_number="RET-00000007",
             order_id=17,
-            order_number="ORD-00000017",
+            order_number="ORD-000017",
             user_id=3,
             customer_name="Ada",
             customer_phone="+79999999999",

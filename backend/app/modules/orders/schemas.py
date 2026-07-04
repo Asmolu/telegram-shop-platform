@@ -175,6 +175,18 @@ class OrderList(BaseModel):
     items: list[OrderRead]
 
 
+class PaymentSuccessBannerPendingRead(BaseModel):
+    order_id: int
+    order_number: str
+    image_path: str
+    image_url: str
+
+
+class PaymentSuccessBannerSeenRead(BaseModel):
+    order_id: int
+    seen_at: datetime
+
+
 def _loaded_relationship(instance: object | None, name: str) -> object | None:
     if instance is None:
         return None

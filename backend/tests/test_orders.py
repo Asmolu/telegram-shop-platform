@@ -38,10 +38,13 @@ from app.db.models import (
 from app.events.names import ORDER_CREATED, ORDER_SHIPPED, ORDER_STATUS_CHANGED, PROMO_USED
 from app.main import create_app
 from app.modules.notifications.service import NotificationsEventPublisher, NotificationsService
+from app.modules.orders.numbering import ORDER_NUMBER_MAX, format_order_number
 from app.modules.orders.router import get_orders_service
 from app.modules.orders.schemas import OrderCheckoutCreate, OrderItemRead, OrderStatusUpdate
 from app.modules.orders.service import InternalOrderEventPublisher, OrdersService
 from app.modules.promo_codes.service import PromoCodeCalculation
+from app.modules.settings.router import get_settings_service
+from app.modules.settings.schemas import PaymentSuccessBannerSettingsRead
 from app.modules.telegram.service import TelegramDeliveryError
 
 
@@ -263,7 +266,23 @@ class FakeOrdersRepository:
         self.orders: dict[int, Order] = {}
         self.variants: dict[int, ProductVariant] = {}
         self.next_order_id = 1
+        self.next_order_sequence = 1
         self.next_order_item_id = 1
+        self.banner_settings = SellerPaymentSettings(
+            id=1,
+            payment_success_banner_enabled=False,
+            payment_success_banner_image_path=None,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+
+    async def next_order_number(self) -> str:
+        try:
+            order_number = format_order_number(self.next_order_sequence)
+        except ValueError as exc:
+            raise AppError("Order number sequence exhausted", 409) from exc
+        self.next_order_sequence += 1
+        return order_number
 
     async def get_cart_for_checkout(self, user_id: int) -> Cart | None:
         return self.carts.get(user_id)
@@ -304,6 +323,38 @@ class FakeOrdersRepository:
     async def get_for_user(self, *, user_id: int, order_id: int) -> Order | None:
         order = self.orders.get(order_id)
         if order is None or order.user_id != user_id:
+            return None
+        return order
+
+    async def get_payment_success_banner_settings(self) -> SellerPaymentSettings | None:
+        return self.banner_settings
+
+    async def get_pending_payment_success_banner_order(self, *, user_id: int) -> Order | None:
+        orders = [
+            order
+            for order in self.orders.values()
+            if order.user_id == user_id
+            and order.payment_success_banner_seen_at is None
+            and order.manual_payment is not None
+            and order.manual_payment.status == ManualPaymentStatus.APPROVED
+        ]
+        return sorted(orders, key=lambda order: order.id, reverse=True)[0] if orders else None
+
+    async def get_paid_order_for_user_for_banner(
+        self,
+        *,
+        user_id: int,
+        order_id: int,
+        for_update: bool = False,
+    ) -> Order | None:
+        del for_update
+        order = self.orders.get(order_id)
+        if (
+            order is None
+            or order.user_id != user_id
+            or order.manual_payment is None
+            or order.manual_payment.status != ManualPaymentStatus.APPROVED
+        ):
             return None
         return order
 
@@ -374,6 +425,7 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
 
     order = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
 
+    assert order.order_number == "ORD-000001"
     assert order.user_id == 1
     assert order.status == OrderStatus.NEW
     assert order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
@@ -415,6 +467,38 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
     assert event_payload["contact"]["delivery_method_label"] == "Маршруткой"
     assert event_payload["seller_panel_url"] == "https://seller.stylexac.ru/orders"
     assert events.commit_states == [True]
+
+
+@pytest.mark.asyncio
+async def test_checkout_assigns_sequential_human_order_numbers() -> None:
+    service, repository, _, _ = _orders_service()
+
+    first = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+    repository.carts[1] = _cart(user_id=1)
+    repository.variants = {
+        item.product_variant_id: item.product_variant
+        for item in repository.carts[1].items
+    }
+    second = await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert first.order_number == "ORD-000001"
+    assert second.order_number == "ORD-000002"
+    assert all(
+        order.order_number.startswith("ORD-") and len(order.order_number) == 10
+        for order in (first, second)
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_exhausted_order_number_sequence() -> None:
+    service, repository, session, _ = _orders_service()
+    repository.next_order_sequence = ORDER_NUMBER_MAX + 1
+
+    with pytest.raises(AppError, match="Order number sequence exhausted"):
+        await service.checkout_current_user_cart(user_id=1, payload=_checkout_payload())
+
+    assert session.rolled_back is True
+    assert repository.orders == {}
 
 
 @pytest.mark.asyncio
@@ -1079,7 +1163,7 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
             ORDER_STATUS_CHANGED,
             {
                 "order_id": 10,
-                "order_number": "ORD-00000010",
+                "order_number": "ORD-000010",
                 "user_id": 1,
                 "previous_status": "NEW",
                 "new_status": "SHIPPED",
@@ -1089,7 +1173,7 @@ async def test_seller_admin_can_list_and_update_orders() -> None:
             ORDER_SHIPPED,
             {
                 "order_id": 10,
-                "order_number": "ORD-00000010",
+                "order_number": "ORD-000010",
                 "user_id": 1,
                 "status": "SHIPPED",
             },
@@ -1179,7 +1263,7 @@ async def test_order_status_update_does_not_fail_when_seller_notification_fails(
             ORDER_STATUS_CHANGED,
             {
                 "order_id": 10,
-                "order_number": "ORD-00000010",
+                "order_number": "ORD-000010",
                 "user_id": 1,
                 "previous_status": "NEW",
                 "new_status": "PROCESSING",
@@ -1261,6 +1345,88 @@ async def test_order_status_update_records_audit_log() -> None:
     assert audit_service.logs[0]["entity_id"] == 10
 
 
+@pytest.mark.asyncio
+async def test_pending_payment_success_banner_returns_latest_paid_unseen_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "public_uploads_url", "https://api.stylexac.ru/uploads/")
+    service, repository, _, _ = _orders_service()
+    repository.banner_settings.payment_success_banner_enabled = True
+    repository.banner_settings.payment_success_banner_image_path = "banners/paid.webp"
+    older_order = _order(order_id=10, user_id=1)
+    newer_order = _order(order_id=11, user_id=1)
+    older_order.manual_payment = _approved_payment(older_order)
+    newer_order.manual_payment = _approved_payment(newer_order)
+    repository.orders[10] = older_order
+    repository.orders[11] = newer_order
+
+    banner = await service.get_pending_payment_success_banner(user_id=1)
+
+    assert banner is not None
+    assert banner.order_id == 11
+    assert banner.order_number == "ORD-000011"
+    assert banner.image_path == "banners/paid.webp"
+    assert banner.image_url == "https://api.stylexac.ru/uploads/banners/paid.webp"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "image_path", "payment_status", "seen_at"),
+    [
+        (False, "banners/paid.webp", ManualPaymentStatus.APPROVED, None),
+        (True, None, ManualPaymentStatus.APPROVED, None),
+        (True, "banners/paid.webp", ManualPaymentStatus.PENDING, None),
+        (
+            True,
+            "banners/paid.webp",
+            ManualPaymentStatus.APPROVED,
+            datetime(2026, 5, 27, tzinfo=UTC),
+        ),
+    ],
+)
+async def test_pending_payment_success_banner_requires_enabled_paid_unseen_order(
+    enabled: bool,
+    image_path: str | None,
+    payment_status: ManualPaymentStatus,
+    seen_at: datetime | None,
+) -> None:
+    service, repository, _, _ = _orders_service()
+    repository.banner_settings.payment_success_banner_enabled = enabled
+    repository.banner_settings.payment_success_banner_image_path = image_path
+    order = _order(order_id=10, user_id=1)
+    order.manual_payment = _approved_payment(order)
+    order.manual_payment.status = payment_status
+    order.payment_success_banner_seen_at = seen_at
+    repository.orders[10] = order
+
+    assert await service.get_pending_payment_success_banner(user_id=1) is None
+
+
+@pytest.mark.asyncio
+async def test_mark_payment_success_banner_seen_marks_own_paid_order() -> None:
+    service, repository, session, _ = _orders_service()
+    order = _order(order_id=10, user_id=1)
+    order.manual_payment = _approved_payment(order)
+    repository.orders[10] = order
+
+    result = await service.mark_payment_success_banner_seen(user_id=1, order_id=10)
+
+    assert result.order_id == 10
+    assert result.seen_at == repository.orders[10].payment_success_banner_seen_at
+    assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_mark_payment_success_banner_seen_rejects_other_user_order() -> None:
+    service, repository, _, _ = _orders_service()
+    order = _order(order_id=10, user_id=2)
+    order.manual_payment = _approved_payment(order)
+    repository.orders[10] = order
+
+    with pytest.raises(AppError, match="Order not found"):
+        await service.mark_payment_success_banner_seen(user_id=1, order_id=10)
+
+
 def test_orders_require_authentication() -> None:
     with TestClient(create_app()) as client:
         list_response = client.get("/api/v1/orders")
@@ -1340,6 +1506,53 @@ def test_order_admin_routes_allow_seller_to_update_status() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "PROCESSING"
     assert response.json()["items"][0]["variant_size_grid"] == "clothing_alpha"
+
+
+def test_payment_success_banner_customer_routes_require_authentication() -> None:
+    with TestClient(create_app()) as client:
+        pending_response = client.get("/api/v1/orders/payment-success-banner/pending")
+        seen_response = client.post("/api/v1/orders/1/payment-success-banner/seen")
+
+    assert pending_response.status_code == 401
+    assert seen_response.status_code == 401
+
+
+def test_payment_success_banner_settings_routes_require_seller_or_admin() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/settings/admin/payment-success-banner")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Insufficient permissions"}
+
+
+def test_payment_success_banner_settings_routes_allow_seller() -> None:
+    app = create_app()
+
+    class FakeSettingsService:
+        async def get_payment_success_banner_settings(self) -> PaymentSuccessBannerSettingsRead:
+            return PaymentSuccessBannerSettingsRead(
+                enabled=True,
+                image_path="banners/paid.webp",
+                image_url="/uploads/banners/paid.webp",
+                updated_at=None,
+            )
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_settings_service] = lambda: FakeSettingsService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/settings/admin/payment-success-banner")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["enabled"] is True
+    assert response.json()["image_path"] == "banners/paid.webp"
 
 
 def _orders_service(
@@ -1429,7 +1642,7 @@ def _cart(
 def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.NEW) -> Order:
     return Order(
         id=order_id,
-        order_number=f"ORD-{order_id:08d}",
+        order_number=f"ORD-{order_id:06d}",
         user_id=user_id,
         status=status_value,
         subtotal_amount=Decimal("59.90"),
@@ -1546,7 +1759,7 @@ def _order_response(status_value: str = "NEW") -> dict[str, object]:
     now = _now().isoformat()
     return {
         "id": 1,
-        "order_number": "ORD-00000001",
+        "order_number": "ORD-000001",
         "user_id": 1,
         "status": status_value,
         "subtotal_amount": "59.90",
@@ -1593,6 +1806,27 @@ def _user(role: UserRole) -> User:
         created_at=_now(),
         updated_at=_now(),
     )
+
+
+def _approved_payment(order: Order) -> ManualPayment:
+    payment = ManualPayment(
+        id=order.id,
+        order_id=order.id,
+        order=order,
+        method=ManualPaymentMethod.SBP_PHONE,
+        amount=order.total_amount,
+        currency=ManualPaymentCurrency.RUB,
+        seller_phone_e164="+79999999999",
+        seller_phone_display="+7 (999) 999-99-99",
+        payment_comment=f"Заказ #{order.id}",
+        status=ManualPaymentStatus.APPROVED,
+        expires_at=_now(),
+        approved_at=_now(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    order.manual_payment = payment
+    return payment
 
 
 def _now() -> datetime:

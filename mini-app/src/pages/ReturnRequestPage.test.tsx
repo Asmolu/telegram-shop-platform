@@ -148,7 +148,7 @@ describe('ReturnRequestPage', () => {
 function orderFixture(overrides: Partial<Order> = {}): Order {
   return {
     id: 99,
-    order_number: 'ORD-00000099',
+    order_number: 'ORD-000099',
     user_id: 1,
     status: 'DELIVERED',
     subtotal_amount: '200.00',
@@ -205,7 +205,7 @@ function returnRequestFixture(overrides: Partial<ReturnRequest> = {}): ReturnReq
     id: 7,
     return_number: 'RET-00000007',
     order_id: 99,
-    order_number: 'ORD-00000099',
+    order_number: 'ORD-000099',
     user_id: 1,
     status: 'PENDING',
     reason: 'Не подошёл размер',
