@@ -253,6 +253,7 @@ export type LookCard = {
   price: string | number;
   old_price?: string | number | null;
   item_count: number;
+  default_selected_item_ids: number[];
   is_available: boolean;
   available_sizes: string[];
   available_clothing_sizes: string[];
@@ -492,6 +493,10 @@ export type PaymentSuccessBannerPending = {
   order_number: string;
   image_path: string;
   image_url: string;
+  created_at: string;
+  total_amount: string;
+  delivery_method?: OrderDeliveryMethod | null;
+  payment_status: ManualPaymentStatus;
 };
 
 export type PaymentSuccessBannerSeen = {
@@ -681,4 +686,11 @@ export type CustomerNotificationWriteAccessRequest = {
 export type CustomerNotificationStartLink = {
   bot_start_link?: string | null;
   start_command: string;
+};
+
+export type SellerContactSettings = {
+  telegram_url?: string | null;
+  whatsapp_url?: string | null;
+  instagram_url?: string | null;
+  updated_at?: string | null;
 };

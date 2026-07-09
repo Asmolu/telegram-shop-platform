@@ -22,7 +22,7 @@ export function LookSourceHeader({
         )}
       </span>
       <div>
-        <strong>Куплено из образа: {title}</strong>
+        <strong>Добавлено из образа: {title}</strong>
         {subtotal !== undefined && subtotal !== null ? (
           <small>{formatPrice(subtotal)}</small>
         ) : null}

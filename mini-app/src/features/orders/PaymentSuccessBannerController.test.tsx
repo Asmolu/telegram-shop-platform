@@ -10,6 +10,7 @@ import {
 const apiMocks = vi.hoisted(() => ({
   pending: vi.fn(),
   seen: vi.fn(),
+  contacts: vi.fn(),
 }));
 
 vi.mock('../../shared/auth/AuthProvider', () => ({
@@ -22,6 +23,7 @@ vi.mock('../../shared/router/RouterProvider', () => ({
 
 vi.mock('../../shared/api', () => ({
   getApiBaseUrl: () => 'https://api.example.test/api/v1',
+  getSellerContactSettings: apiMocks.contacts,
   getPendingPaymentSuccessBanner: apiMocks.pending,
   markPaymentSuccessBannerSeen: apiMocks.seen,
 }));
@@ -34,6 +36,15 @@ describe('PaymentSuccessBannerController', () => {
       order_number: 'ORD-000001',
       image_path: 'banners/paid.webp',
       image_url: '/uploads/banners/paid.webp',
+      created_at: '2026-07-02T12:00:00Z',
+      total_amount: '7262.00',
+      delivery_method: 'CDEK',
+      payment_status: 'APPROVED',
+    });
+    apiMocks.contacts.mockResolvedValue({
+      telegram_url: 'https://t.me/stylexac',
+      whatsapp_url: '',
+      instagram_url: null,
     });
     apiMocks.seen.mockResolvedValue({
       order_id: 1,
@@ -56,6 +67,10 @@ describe('PaymentSuccessBannerController', () => {
 
     expect(overlay.className).toContain('payment-success-banner-overlay');
     expect(image?.getAttribute('src')).toContain('/uploads/banners/paid.webp');
+    expect(screen.getByText('Заказ ORD-000001')).toBeTruthy();
+    expect(screen.getByText('Дата покупки: 02 июля 2026')).toBeTruthy();
+    expect(screen.getByText('Платёж: Оплачено')).toBeTruthy();
+    expect(screen.getByText((_, element) => element?.textContent === 'Сумма: 7 262 ₽')).toBeTruthy();
     expect(getPendingPaymentSuccessBanner).toHaveBeenCalled();
   });
 
@@ -73,7 +88,7 @@ describe('PaymentSuccessBannerController', () => {
     expect(markPaymentSuccessBannerSeen).toHaveBeenCalledWith(1);
   });
 
-  it('also closes when the customer taps the banner image itself', async () => {
+  it('does not close when the customer taps the banner image itself', async () => {
     render(<PaymentSuccessBannerController />);
 
     const overlay = await screen.findByRole('button', {
@@ -83,10 +98,19 @@ describe('PaymentSuccessBannerController', () => {
     expect(image).not.toBeNull();
     fireEvent.click(image!);
 
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Покупка ORD-000001/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Покупка ORD-000001/ })).toBeTruthy();
+    expect(markPaymentSuccessBannerSeen).not.toHaveBeenCalled();
+  });
+
+  it('opens seller contacts from the banner data card', async () => {
+    render(<PaymentSuccessBannerController />);
+
+    await screen.findByRole('button', {
+      name: 'Покупка ORD-000001 завершена',
     });
-    expect(markPaymentSuccessBannerSeen).toHaveBeenCalledWith(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Связаться с продавцом' }));
+
+    expect(await screen.findByText('Связаться с продавцом в Telegram')).toBeTruthy();
   });
 
   it('does not render when there is no pending paid banner', async () => {

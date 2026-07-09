@@ -12,7 +12,7 @@ const i18nSource = readFileSync(new URL('../src/shared/i18n/index.tsx', import.m
 test('seller order detail groups Look-sourced order items', () => {
   assert.match(pageSource, /isLookSourceOrderItem/);
   assert.match(pageSource, /order-look-group-row/);
-  assert.match(pageSource, /Куплено из образа:/);
+  assert.match(pageSource, /Добавлено из образа:/);
   assert.match(pageSource, /source_look_title/);
   assert.match(pageSource, /orderLookGroupSubtotal/);
 });

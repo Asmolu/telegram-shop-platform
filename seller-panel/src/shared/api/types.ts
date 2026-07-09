@@ -563,6 +563,19 @@ export interface PaymentSuccessBannerSettingsPayload {
   image_path: string | null;
 }
 
+export interface SellerContactSettings {
+  telegram_url: string | null;
+  whatsapp_url: string | null;
+  instagram_url: string | null;
+  updated_at: string | null;
+}
+
+export interface SellerContactSettingsPayload {
+  telegram_url: string | null;
+  whatsapp_url: string | null;
+  instagram_url: string | null;
+}
+
 export interface ManualPayment {
   id: number;
   order_id: number;

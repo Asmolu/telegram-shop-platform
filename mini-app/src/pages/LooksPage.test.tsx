@@ -14,6 +14,7 @@ const routerMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../shared/router/RouterProvider', () => ({
+  getAuthPath: (returnTo: string) => `/auth?returnTo=${encodeURIComponent(returnTo)}`,
   isFirstLevelRoutePath: () => false,
   Link: ({ children, to, ...props }: React.PropsWithChildren<{ to: string }>) => (
     <a href={to} {...props}>{children}</a>
@@ -30,6 +31,10 @@ vi.mock('../shared/router/RouterProvider', () => ({
   ),
 }));
 
+vi.mock('../shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ isAuthenticated: true }),
+}));
+
 vi.mock('../shared/api', () => ({
   getApiBaseUrl: vi.fn(() => ''),
   getLooks: vi.fn().mockResolvedValue({
@@ -42,6 +47,7 @@ vi.mock('../shared/api', () => ({
       price: '1500.00',
       old_price: null,
       item_count: 2,
+      default_selected_item_ids: [10, 11],
       is_available: true,
       available_sizes: ['M', 'L'],
       available_clothing_sizes: ['M', 'L'],

@@ -20,7 +20,18 @@ import {
 import { useQuickCartPicker } from '../features/catalog/useQuickCartPicker';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, Link, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, InlineNotice, LookSourceHeader, PageLoader, ProductCard, TopBar } from '../shared/ui';
+import {
+  EmptyState,
+  ErrorState,
+  InlineNotice,
+  LookSourceHeader,
+  PageLoader,
+  ProductCard,
+  PromoToast,
+  TopBar,
+  promoToastFromMessage,
+  type PromoToastState,
+} from '../shared/ui';
 import { getTelegramWebApp } from '../shared/telegram/webApp';
 import { formatDate, formatOrderStatus, formatPrice, getDisplayOldPrice } from '../shared/utils/format';
 import { normalizeAssetUrl } from '../shared/utils/images';
@@ -49,6 +60,7 @@ export function CartPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [promoToast, setPromoToast] = React.useState<PromoToastState | null>(null);
   const [promoCode, setPromoCode] = React.useState('');
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
 
@@ -183,9 +195,11 @@ export function CartPage() {
       const result = await validatePromoCode(code);
       setPromoValidation(result);
       setPromoCode(result.code);
-      setNotice('Промокод применен.');
+      showPromoToast('Успешно!', 'success');
     } catch (promoError) {
-      setNotice(getPromoErrorMessage(promoError));
+      const message = getPromoErrorMessage(promoError);
+      const toast = promoToastFromMessage(message);
+      showPromoToast(toast.text, toast.tone);
     }
   }
 
@@ -196,8 +210,14 @@ export function CartPage() {
       setPromoCode(result.code);
     } catch (promoError) {
       setPromoValidation(null);
-      setNotice(getPromoErrorMessage(promoError));
+      const message = getPromoErrorMessage(promoError);
+      const toast = promoToastFromMessage(message);
+      showPromoToast(toast.text, toast.tone);
     }
+  }
+
+  function showPromoToast(text: string, tone: PromoToastState['tone']) {
+    setPromoToast({ id: Date.now(), text, tone });
   }
 
   function updatePromoCode(value: string) {
@@ -256,6 +276,7 @@ export function CartPage() {
           <button type="button" onClick={() => setNotice(null)}>×</button>
         </InlineNotice>
       ) : null}
+      <PromoToast toast={promoToast} onDismiss={() => setPromoToast(null)} />
 
       {loading ? <PageLoader text="Загружаем покупки..." /> : null}
       {!loading && error ? <ErrorState message={error} actionLabel="Повторить" onAction={() => void load()} /> : null}

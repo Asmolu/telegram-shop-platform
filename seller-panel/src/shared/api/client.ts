@@ -58,6 +58,8 @@ import type {
   ReviewStatus,
   SellerPaymentSettings,
   SellerPaymentSettingsPayload,
+  SellerContactSettings,
+  SellerContactSettingsPayload,
   SellerBotActionResponse,
   SellerBotStatus,
   SellerRegistrationResendCodeResponse,
@@ -357,6 +359,15 @@ export const api = {
     delete: () =>
       apiRequest<PaymentSuccessBannerSettings>('/settings/admin/payment-success-banner', {
         method: 'DELETE',
+      }),
+  },
+  sellerContacts: {
+    get: () =>
+      apiRequest<SellerContactSettings>('/settings/admin/seller-contacts'),
+    update: (body: SellerContactSettingsPayload) =>
+      apiRequest<SellerContactSettings>('/settings/admin/seller-contacts', {
+        method: 'PUT',
+        body,
       }),
   },
   manualPayments: {

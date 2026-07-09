@@ -10,6 +10,8 @@ from app.modules.settings.repository import SettingsRepository
 from app.modules.settings.schemas import (
     PaymentSuccessBannerSettingsRead,
     PaymentSuccessBannerSettingsUpdate,
+    SellerContactSettingsRead,
+    SellerContactSettingsUpdate,
 )
 
 
@@ -27,6 +29,39 @@ class SettingsService:
     async def get_payment_success_banner_settings(self) -> PaymentSuccessBannerSettingsRead:
         payment_settings = await self.repository.get_payment_settings()
         return self._payment_success_banner_response(payment_settings)
+
+    async def get_seller_contact_settings(self) -> SellerContactSettingsRead:
+        payment_settings = await self.repository.get_payment_settings()
+        return self._seller_contact_response(payment_settings)
+
+    async def update_seller_contact_settings(
+        self,
+        payload: SellerContactSettingsUpdate,
+        *,
+        actor_user_id: int,
+    ) -> SellerContactSettingsRead:
+        payment_settings = await self.repository.get_payment_settings()
+        before_data = self._seller_contact_audit_data(payment_settings)
+        if payment_settings is None:
+            payment_settings = SellerPaymentSettings(id=1)
+            self.repository.add(payment_settings)
+
+        payment_settings.seller_contact_telegram_url = payload.telegram_url
+        payment_settings.seller_contact_whatsapp_url = payload.whatsapp_url
+        payment_settings.seller_contact_instagram_url = payload.instagram_url
+        payment_settings.updated_by_user_id = actor_user_id
+
+        await self.audit_service.record_action(
+            actor_user_id=actor_user_id,
+            action="seller_contact.settings_updated",
+            entity_type="seller_payment_settings",
+            entity_id=1,
+            before_data=before_data,
+            after_data=self._seller_contact_audit_data(payment_settings),
+        )
+        await self._commit("Seller contact settings update failed")
+        await self._refresh_if_supported(payment_settings)
+        return self._seller_contact_response(payment_settings)
 
     async def update_payment_success_banner_settings(
         self,
@@ -135,5 +170,30 @@ class SettingsService:
             enabled=payment_settings.payment_success_banner_enabled,
             image_path=image_path,
             image_url=settings.public_upload_url_for(image_path) if image_path else None,
+            updated_at=payment_settings.updated_at,
+        )
+
+    def _seller_contact_audit_data(
+        self,
+        payment_settings: SellerPaymentSettings | None,
+    ) -> dict[str, object] | None:
+        if payment_settings is None:
+            return None
+        return {
+            "seller_contact_telegram_url": payment_settings.seller_contact_telegram_url,
+            "seller_contact_whatsapp_url": payment_settings.seller_contact_whatsapp_url,
+            "seller_contact_instagram_url": payment_settings.seller_contact_instagram_url,
+        }
+
+    def _seller_contact_response(
+        self,
+        payment_settings: SellerPaymentSettings | None,
+    ) -> SellerContactSettingsRead:
+        if payment_settings is None:
+            return SellerContactSettingsRead(updated_at=None)
+        return SellerContactSettingsRead(
+            telegram_url=payment_settings.seller_contact_telegram_url,
+            whatsapp_url=payment_settings.seller_contact_whatsapp_url,
+            instagram_url=payment_settings.seller_contact_instagram_url,
             updated_at=payment_settings.updated_at,
         )

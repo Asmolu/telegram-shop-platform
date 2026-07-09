@@ -85,7 +85,7 @@ describe('OrderSuccessPage details', () => {
 
     render(<OrderSuccessPage />);
 
-    expect(await screen.findByText('Куплено из образа: City Look')).toBeTruthy();
+    expect(await screen.findByText('Добавлено из образа: City Look')).toBeTruthy();
     expect(screen.getByText('Look Shirt')).toBeTruthy();
     expect(screen.getByText('Look Pants')).toBeTruthy();
     expect(screen.getByText('Line Break Hoodie')).toBeTruthy();

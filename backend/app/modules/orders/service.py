@@ -347,6 +347,10 @@ class OrdersService:
             order_number=order.order_number,
             image_path=image_path,
             image_url=settings.public_upload_url_for(image_path),
+            created_at=order.created_at,
+            total_amount=order.total_amount,
+            delivery_method=order.delivery_method,
+            payment_status=ManualPaymentStatus.APPROVED.value,
         )
 
     async def mark_payment_success_banner_seen(

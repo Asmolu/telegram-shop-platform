@@ -698,7 +698,7 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                       <tr className="order-look-group-row">
                         <td colSpan={5}>
                           <div>
-                            <strong>Куплено из образа: {item.source_look_title?.trim() || 'Образ'}</strong>
+                            <strong>Добавлено из образа: {item.source_look_title?.trim() || 'Образ'}</strong>
                             <small>{formatMoney(orderLookGroupSubtotal(lookGroupItems), language)}</small>
                           </div>
                         </td>

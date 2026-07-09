@@ -47,7 +47,6 @@ export function EmptyState({
 }) {
   return (
     <div className="state-block">
-      <div className="state-icon">∅</div>
       <h2>{title}</h2>
       {message ? <p>{message}</p> : null}
       {actionLabel && onAction ? (

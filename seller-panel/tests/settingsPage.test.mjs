@@ -28,6 +28,18 @@ test('seller api client has paid confirmation banner endpoints and payload types
   assert.match(typesSource, /interface PaymentSuccessBannerSettingsPayload/);
 });
 
+test('settings page exposes seller contact URL controls', () => {
+  assert.match(pageSource, /Контакты продавца/);
+  assert.match(pageSource, /Telegram URL/);
+  assert.match(pageSource, /WhatsApp URL/);
+  assert.match(pageSource, /Instagram URL/);
+  assert.match(pageSource, /api\.sellerContacts\.get/);
+  assert.match(pageSource, /api\.sellerContacts\.update/);
+  assert.match(clientSource, /\/settings\/admin\/seller-contacts/);
+  assert.match(typesSource, /interface SellerContactSettings/);
+  assert.match(typesSource, /interface SellerContactSettingsPayload/);
+});
+
 test('paid confirmation banner preview keeps vertical mobile aspect', () => {
   assert.match(stylesSource, /paid-banner-settings-grid/);
   assert.match(stylesSource, /aspect-ratio: 9 \/ 16/);

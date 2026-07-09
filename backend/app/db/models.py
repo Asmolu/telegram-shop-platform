@@ -1753,6 +1753,9 @@ class SellerPaymentSettings(Base):
         default=False,
         server_default="false",
     )
+    seller_contact_telegram_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    seller_contact_whatsapp_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    seller_contact_instagram_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

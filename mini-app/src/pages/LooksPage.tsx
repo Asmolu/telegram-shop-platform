@@ -4,14 +4,28 @@ import {
   toApiErrorMessage,
   type LookCard as LookCardType,
 } from '../shared/api';
-import { useRouter } from '../shared/router/RouterProvider';
-import { EmptyState, ErrorState, LookCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+import { useAuth } from '../shared/auth/AuthProvider';
+import { getAuthPath, useRouter } from '../shared/router/RouterProvider';
+import { EmptyState, ErrorState, InlineNotice, LookCard, ProductGridSkeleton, TopBar } from '../shared/ui';
+import { useQuickLookCartPicker } from '../features/catalog/useQuickLookCartPicker';
 
 export function LooksPage() {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
+  const { isAuthenticated } = useAuth();
   const [looks, setLooks] = React.useState<LookCardType[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
+  const quickLookCart = useQuickLookCartPicker({
+    requireAuth: () => {
+      if (isAuthenticated) {
+        return true;
+      }
+      navigate(getAuthPath(currentPath));
+      return false;
+    },
+    onNotice: setNotice,
+  });
 
   const loadLooks = React.useCallback(async () => {
     setLoading(true);
@@ -33,6 +47,14 @@ export function LooksPage() {
   return (
     <div className="page page--looks">
       <TopBar title="Образы" variant="marketplace" backFallback="/main" />
+      {notice ? (
+        <InlineNotice tone={notice.includes('добавлен') ? 'success' : 'warning'}>
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)}>
+            ×
+          </button>
+        </InlineNotice>
+      ) : null}
 
       {loading ? <ProductGridSkeleton count={6} /> : null}
       {!loading && error ? (
@@ -54,10 +76,12 @@ export function LooksPage() {
               look={look}
               imageFetchPriority={index === 0 ? 'high' : 'auto'}
               imageLoading={index === 0 ? 'eager' : 'lazy'}
+              onAddToCart={quickLookCart.addToCart}
             />
           ))}
         </div>
       ) : null}
+      {quickLookCart.picker}
     </div>
   );
 }

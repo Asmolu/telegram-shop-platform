@@ -1,7 +1,6 @@
 import React from 'react';
 import { useRouter } from '../shared/router/RouterProvider';
-import { TopBar } from '../shared/ui';
-import { SUPPORT_TELEGRAM_URL, openTelegramLink } from '../shared/telegram/webApp';
+import { SellerContactCard, TopBar } from '../shared/ui';
 
 const faqItems = [
   {
@@ -41,6 +40,7 @@ export function FaqPage() {
   const topic = searchParams.get('topic');
   const initialOpenIndex = Math.max(0, faqItems.findIndex((item) => item.id === topic));
   const [openIndex, setOpenIndex] = React.useState(initialOpenIndex);
+  const [contactsOpen, setContactsOpen] = React.useState(false);
 
   React.useEffect(() => {
     const nextIndex = faqItems.findIndex((item) => item.id === topic);
@@ -66,10 +66,12 @@ export function FaqPage() {
       <button
         className="primary-button full-width faq-contact-button"
         type="button"
-        onClick={() => openTelegramLink(SUPPORT_TELEGRAM_URL)}
+        aria-expanded={contactsOpen}
+        onClick={() => setContactsOpen((current) => !current)}
       >
         Связаться с продавцом
       </button>
+      {contactsOpen ? <SellerContactCard className="faq-contact-card" /> : null}
     </div>
   );
 }

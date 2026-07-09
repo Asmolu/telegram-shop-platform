@@ -188,6 +188,10 @@ class PaymentSuccessBannerPendingRead(BaseModel):
     order_number: str
     image_path: str
     image_url: str
+    created_at: datetime
+    total_amount: Decimal
+    delivery_method: OrderDeliveryMethod | None = None
+    payment_status: str = "APPROVED"
 
 
 class PaymentSuccessBannerSeenRead(BaseModel):

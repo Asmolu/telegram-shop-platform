@@ -9,6 +9,8 @@ from app.modules.audit.service import AuditService
 from app.modules.settings.schemas import (
     PaymentSuccessBannerSettingsRead,
     PaymentSuccessBannerSettingsUpdate,
+    SellerContactSettingsRead,
+    SellerContactSettingsUpdate,
 )
 from app.modules.settings.service import SettingsService
 
@@ -30,6 +32,42 @@ async def get_payment_success_banner_settings(
     service: Annotated[SettingsService, Depends(get_settings_service)],
 ) -> PaymentSuccessBannerSettingsRead:
     return await service.get_payment_success_banner_settings()
+
+
+@router.get(
+    "/seller-contacts",
+    response_model=SellerContactSettingsRead,
+)
+async def get_public_seller_contact_settings(
+    service: Annotated[SettingsService, Depends(get_settings_service)],
+) -> SellerContactSettingsRead:
+    return await service.get_seller_contact_settings()
+
+
+@router.get(
+    "/admin/seller-contacts",
+    response_model=SellerContactSettingsRead,
+)
+async def get_admin_seller_contact_settings(
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[SettingsService, Depends(get_settings_service)],
+) -> SellerContactSettingsRead:
+    return await service.get_seller_contact_settings()
+
+
+@router.put(
+    "/admin/seller-contacts",
+    response_model=SellerContactSettingsRead,
+)
+async def update_admin_seller_contact_settings(
+    payload: SellerContactSettingsUpdate,
+    current_user: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    service: Annotated[SettingsService, Depends(get_settings_service)],
+) -> SellerContactSettingsRead:
+    return await service.update_seller_contact_settings(
+        payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.post(

@@ -323,7 +323,7 @@ describe('CheckoutPage item details', () => {
 
     render(<CheckoutPage />);
 
-    expect(await screen.findByText('Куплено из образа: City Look')).toBeTruthy();
+    expect(await screen.findByText('Добавлено из образа: City Look')).toBeTruthy();
     expect(screen.getByText('Look Shirt')).toBeTruthy();
     expect(screen.getByText('Look Pants')).toBeTruthy();
     expect(screen.getByText('Compact Hoodie')).toBeTruthy();

@@ -15,6 +15,7 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
   const [bannerSaving, setBannerSaving] = useState(false);
   const [bannerDeleting, setBannerDeleting] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  const [contactsSaving, setContactsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -28,13 +29,19 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
     imagePath: '',
     imageUrl: '',
   });
+  const [contactsForm, setContactsForm] = useState({
+    telegramUrl: '',
+    whatsappUrl: '',
+    instagramUrl: '',
+  });
 
   useEffect(() => {
     Promise.all([
       api.paymentSettings.get(),
       api.paymentSuccessBanner.get(),
+      api.sellerContacts.get(),
     ])
-      .then(([settings, bannerSettings]) => {
+      .then(([settings, bannerSettings, contactSettings]) => {
         setForm({
           enabled: settings.is_manual_sbp_enabled,
           phone: settings.seller_phone_display ?? '',
@@ -45,6 +52,11 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
           enabled: bannerSettings.enabled,
           imagePath: bannerSettings.image_path ?? '',
           imageUrl: bannerSettings.image_url ?? '',
+        });
+        setContactsForm({
+          telegramUrl: contactSettings.telegram_url ?? '',
+          whatsappUrl: contactSettings.whatsapp_url ?? '',
+          instagramUrl: contactSettings.instagram_url ?? '',
         });
       })
       .catch(handleError)
@@ -156,6 +168,30 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
       handleError(requestError);
     } finally {
       setBannerDeleting(false);
+    }
+  }
+
+  async function saveSellerContacts(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    setContactsSaving(true);
+    try {
+      const settings = await api.sellerContacts.update({
+        telegram_url: contactsForm.telegramUrl.trim() || null,
+        whatsapp_url: contactsForm.whatsappUrl.trim() || null,
+        instagram_url: contactsForm.instagramUrl.trim() || null,
+      });
+      setContactsForm({
+        telegramUrl: settings.telegram_url ?? '',
+        whatsappUrl: settings.whatsapp_url ?? '',
+        instagramUrl: settings.instagram_url ?? '',
+      });
+      setNotice('Контакты продавца сохранены.');
+    } catch (requestError) {
+      handleError(requestError);
+    } finally {
+      setContactsSaving(false);
     }
   }
 
@@ -329,6 +365,60 @@ export function SettingsPage({ onAuthExpired }: PageProps) {
               {bannerUploading ? <p className="paid-banner-path">Загружаем изображение...</p> : null}
             </div>
           </div>
+        </form>
+      </section>
+
+      <section className="panel seller-contact-settings-panel">
+        <div className="section-heading">
+          <div>
+            <h2>Контакты продавца</h2>
+            <p>Ссылки отображаются в FAQ и в баннере после подтверждения оплаты.</p>
+          </div>
+        </div>
+
+        <form className="payment-settings-form" onSubmit={saveSellerContacts}>
+          <div className="form-grid">
+            <label>
+              <span>Telegram URL</span>
+              <input
+                disabled={loading || contactsSaving}
+                inputMode="url"
+                placeholder="https://t.me/username"
+                value={contactsForm.telegramUrl}
+                onChange={(event) =>
+                  setContactsForm((current) => ({ ...current, telegramUrl: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              <span>WhatsApp URL</span>
+              <input
+                disabled={loading || contactsSaving}
+                inputMode="url"
+                placeholder="https://wa.me/79999999999"
+                value={contactsForm.whatsappUrl}
+                onChange={(event) =>
+                  setContactsForm((current) => ({ ...current, whatsappUrl: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              <span>Instagram URL</span>
+              <input
+                disabled={loading || contactsSaving}
+                inputMode="url"
+                placeholder="https://instagram.com/username"
+                value={contactsForm.instagramUrl}
+                onChange={(event) =>
+                  setContactsForm((current) => ({ ...current, instagramUrl: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+
+          <button className="button button-primary" disabled={loading || contactsSaving} type="submit">
+            {contactsSaving ? 'Сохраняем...' : 'Сохранить контакты'}
+          </button>
         </form>
       </section>
 

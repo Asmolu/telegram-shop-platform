@@ -185,6 +185,7 @@ class LookCardRead(BaseModel):
     price: Decimal
     old_price: Decimal | None = None
     item_count: int
+    default_selected_item_ids: list[int] = Field(default_factory=list)
     is_available: bool
     available_sizes: list[str] = Field(default_factory=list)
     available_clothing_sizes: list[str] = Field(default_factory=list)

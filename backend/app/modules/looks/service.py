@@ -660,6 +660,7 @@ class LooksService:
             price=price,
             old_price=old_price,
             item_count=len(look.items),
+            default_selected_item_ids=[item.id for item in selected_items],
             is_available=size_summary.is_available,
             available_sizes=size_summary.available_sizes,
             available_clothing_sizes=size_summary.available_clothing_sizes,

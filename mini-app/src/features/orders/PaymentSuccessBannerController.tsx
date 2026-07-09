@@ -6,6 +6,8 @@ import {
 } from '../../shared/api';
 import { useAuth } from '../../shared/auth/AuthProvider';
 import { useRouter } from '../../shared/router/RouterProvider';
+import { SellerContactCard } from '../../shared/ui';
+import { formatPrice } from '../../shared/utils/format';
 import { normalizeAssetUrl } from '../../shared/utils/images';
 
 const DISMISSED_STORAGE_KEY = 'stylexac.paymentSuccessBanner.dismissedOrderIds';
@@ -16,6 +18,7 @@ export function PaymentSuccessBannerController() {
   const [pendingBanner, setPendingBanner] = React.useState<PaymentSuccessBannerPending | null>(
     null,
   );
+  const [contactsOpen, setContactsOpen] = React.useState(false);
 
   const fetchPendingBanner = React.useCallback(async () => {
     if (!isAuthenticated) {
@@ -62,6 +65,7 @@ export function PaymentSuccessBannerController() {
     const orderId = pendingBanner.order_id;
     rememberOrderDismissedLocally(orderId);
     setPendingBanner(null);
+    setContactsOpen(false);
     void markPaymentSuccessBannerSeen(orderId).catch(() => undefined);
   }, [pendingBanner]);
 
@@ -74,20 +78,70 @@ export function PaymentSuccessBannerController() {
     return null;
   }
 
+  const showDeliveryNote = pendingBanner.delivery_method === 'CDEK' || pendingBanner.delivery_method === 'WB';
+
   return (
-    <button
+    <div
       aria-label={`Покупка ${pendingBanner.order_number} завершена`}
       className="payment-success-banner-overlay"
-      type="button"
+      role="button"
+      tabIndex={0}
       onClick={closeBanner}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          closeBanner();
+        }
+      }}
     >
-      <img
-        alt=""
-        className="payment-success-banner-overlay__image"
-        src={imageUrl}
-      />
-    </button>
+      <section
+        className="payment-success-banner-card"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <img
+          alt=""
+          className="payment-success-banner-overlay__image"
+          src={imageUrl}
+        />
+        <div className="payment-success-banner-data">
+          <strong>Заказ {pendingBanner.order_number}</strong>
+          <span>Дата покупки: {formatPaidBannerDate(pendingBanner.created_at)}</span>
+          <span>Платёж: Оплачено</span>
+          <span>Сумма: {formatPrice(pendingBanner.total_amount)}</span>
+          {showDeliveryNote ? (
+            <p>Необходимо связаться с продавцом для оплаты доставки.</p>
+          ) : null}
+          <div className="payment-success-banner-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              aria-expanded={contactsOpen}
+              onClick={() => setContactsOpen((current) => !current)}
+            >
+              Связаться с продавцом
+            </button>
+            <button className="primary-button" type="button" onClick={closeBanner}>
+              Продолжить
+            </button>
+          </div>
+          {contactsOpen ? <SellerContactCard className="payment-success-banner-contacts" /> : null}
+        </div>
+      </section>
+    </div>
   );
+}
+
+function formatPaidBannerDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(date).replace(/\s?г\.$/, '');
 }
 
 function isOrderDismissedLocally(orderId: number) {

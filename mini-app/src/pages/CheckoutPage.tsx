@@ -20,7 +20,17 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, getSafeReturnTo, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
-import { EmptyState, ErrorState, InlineNotice, LookSourceHeader, PageLoader, TopBar } from '../shared/ui';
+import {
+  EmptyState,
+  ErrorState,
+  InlineNotice,
+  LookSourceHeader,
+  PageLoader,
+  PromoToast,
+  TopBar,
+  promoToastFromMessage,
+  type PromoToastState,
+} from '../shared/ui';
 import { hashCorrelationKey, trackTelemetry } from '../shared/telemetry';
 import { runLockedAction } from '../shared/utils/actionLock';
 import { formatPrice, getDisplayOldPrice, getUserDisplayName } from '../shared/utils/format';
@@ -86,6 +96,7 @@ export function CheckoutPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [promoToast, setPromoToast] = React.useState<PromoToastState | null>(null);
   const [subscription, setSubscription] =
     React.useState<CustomerNotificationSubscription | null>(null);
   const [notificationPromptDismissed, setNotificationPromptDismissed] = React.useState(false);
@@ -146,7 +157,9 @@ export function CheckoutPage() {
           } catch (promoError) {
             if (!cancelled) {
               setPromoValidation(null);
-              setNotice(getPromoErrorMessage(promoError));
+              const message = getPromoErrorMessage(promoError);
+              const toast = promoToastFromMessage(message);
+              showPromoToast(toast.text, toast.tone);
             }
           }
         }
@@ -212,10 +225,16 @@ export function CheckoutPage() {
       const result = await validatePromoCode(code);
       setPromoValidation(result);
       setPromoCode(result.code);
-      setNotice('Промокод применен.');
+      showPromoToast('Успешно!', 'success');
     } catch (promoError) {
-      setNotice(getPromoErrorMessage(promoError));
+      const message = getPromoErrorMessage(promoError);
+      const toast = promoToastFromMessage(message);
+      showPromoToast(toast.text, toast.tone);
     }
+  }
+
+  function showPromoToast(text: string, tone: PromoToastState['tone']) {
+    setPromoToast({ id: Date.now(), text, tone });
   }
 
   function updatePromoCode(value: string) {
@@ -328,7 +347,9 @@ export function CheckoutPage() {
           promoCodeForOrder = await getValidatedPromoCodeForCheckout();
         } catch (promoError) {
           setPromoValidation(null);
-          setNotice(getPromoErrorMessage(promoError));
+          const message = getPromoErrorMessage(promoError);
+          const toast = promoToastFromMessage(message);
+          showPromoToast(toast.text, toast.tone);
           return;
         }
 
@@ -438,6 +459,7 @@ export function CheckoutPage() {
               <button type="button" onClick={() => setNotice(null)}>×</button>
             </InlineNotice>
           ) : null}
+          <PromoToast toast={promoToast} onDismiss={() => setPromoToast(null)} />
 
           <section className="summary-card checkout-summary-card">
             <h2>Корзина</h2>
@@ -560,6 +582,9 @@ export function CheckoutPage() {
                 <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
               ) : null}
             </div>
+            <p className="checkout-size-hint">
+              Пожалуйста, укажите рост и вес — мы подберём размер по вашим параметрам.
+            </p>
             <div className="two-inputs">
               <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
               <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>

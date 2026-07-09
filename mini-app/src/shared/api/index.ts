@@ -33,6 +33,7 @@ import type {
   ReturnRequestPayload,
   Review,
   ReviewList,
+  SellerContactSettings,
   Tag,
   TokenResponse,
   User,
@@ -301,6 +302,10 @@ export function markPaymentSuccessBannerSeen(orderId: number) {
       retry: false,
     },
   );
+}
+
+export function getSellerContactSettings(options: ApiRequestOptions = {}) {
+  return apiRequest<SellerContactSettings>('/settings/seller-contacts', options);
 }
 
 export function getReturnEligibility(orderId: number, options: ApiRequestOptions = {}) {

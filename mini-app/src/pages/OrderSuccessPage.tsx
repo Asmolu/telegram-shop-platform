@@ -174,7 +174,6 @@ function OrderDetailContent({
   return (
     <div className="order-detail">
       <section className="success-card order-detail-hero">
-        <div className="success-icon">✓</div>
         <h1>Заказ создан</h1>
         <p>Заказ {order.order_number}</p>
         <strong>{formatPrice(order.total_amount)}</strong>

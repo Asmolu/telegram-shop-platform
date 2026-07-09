@@ -11,15 +11,16 @@ import {
 import { useAuth } from '../shared/auth/AuthProvider';
 import { SearchAutocomplete } from '../features/catalog/SearchAutocomplete';
 import { scheduleRoutePrefetch } from '../shared/router/routePrefetch';
-import { useRouter, withReturnTo } from '../shared/router/RouterProvider';
+import { getAuthPath, useRouter, withReturnTo } from '../shared/router/RouterProvider';
 import { EmptyState, ErrorState, InlineNotice, LookCard, ProductCard, ProductGridSkeleton, TopBar } from '../shared/ui';
 import { copyTextToClipboard, getBannerAction, getBannerCtaLabel } from '../shared/utils/banners';
 import { normalizeAssetUrl } from '../shared/utils/images';
 import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
 import { useProductActions } from '../features/catalog/useProductActions';
+import { useQuickLookCartPicker } from '../features/catalog/useQuickLookCartPicker';
 
 export function MainPage() {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const { isAuthenticated } = useAuth();
   const [feedItems, setFeedItems] = React.useState<FeedItem[]>([]);
   const [banners, setBanners] = React.useState<Banner[]>([]);
@@ -28,9 +29,20 @@ export function MainPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [bannerNotice, setBannerNotice] = React.useState<string | null>(null);
+  const [lookNotice, setLookNotice] = React.useState<string | null>(null);
   const { addToCart, sizePicker, toggleFavorite, notice, clearNotice } = useProductActions({
     favoriteIds,
     setFavoriteIds,
+  });
+  const lookCart = useQuickLookCartPicker({
+    requireAuth: () => {
+      if (isAuthenticated) {
+        return true;
+      }
+      navigate(getAuthPath(currentPath));
+      return false;
+    },
+    onNotice: setLookNotice,
   });
 
   React.useEffect(() => {
@@ -135,6 +147,14 @@ export function MainPage() {
           </button>
         </InlineNotice>
       ) : null}
+      {lookNotice ? (
+        <InlineNotice tone={lookNotice.includes('добавлен') ? 'success' : 'warning'}>
+          <span>{lookNotice}</span>
+          <button type="button" onClick={() => setLookNotice(null)}>
+            ×
+          </button>
+        </InlineNotice>
+      ) : null}
 
       {horizontalBanners.length > 0 ? <BannerCarousel banners={horizontalBanners} onNotice={setBannerNotice} /> : null}
       {verticalBanners.length > 0 ? <VerticalBannerGrid banners={verticalBanners} onNotice={setBannerNotice} /> : null}
@@ -163,12 +183,14 @@ export function MainPage() {
                 imageLoading={index === 0 ? 'eager' : 'lazy'}
                 key={`look-${item.look.id}`}
                 look={item.look}
+                onAddToCart={lookCart.addToCart}
               />
             )
           ))}
         </div>
       ) : null}
       {sizePicker}
+      {lookCart.picker}
     </div>
   );
 }
