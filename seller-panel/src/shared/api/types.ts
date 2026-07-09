@@ -14,7 +14,13 @@ export type ProductImageBadgeColor =
   | 'white';
 export type ProductImageBadgePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
-export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
+export type OrderDeliveryMethod =
+  | 'ROUTE_TAXI'
+  | 'CITY_DELIVERY'
+  | 'OZON'
+  | 'WB'
+  | 'CDEK'
+  | 'PICKUP';
 export type ItemSourceType = 'LOOK' | string;
 export type ManualPaymentStatus =
   | 'PENDING'
@@ -326,6 +332,7 @@ export interface Order {
   promo_code_id: number | null;
   promo_code_code: string | null;
   total_amount: ApiDecimal;
+  delivery_price?: ApiDecimal;
   contact_name: string;
   contact_phone: string;
   delivery_method: OrderDeliveryMethod | null;
@@ -565,6 +572,7 @@ export interface ManualPayment {
   customer_name: string;
   customer_phone: string;
   delivery_method: OrderDeliveryMethod | null;
+  delivery_price?: ApiDecimal;
   method: 'SBP_PHONE';
   amount: ApiDecimal;
   currency: 'RUB';

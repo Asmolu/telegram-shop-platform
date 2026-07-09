@@ -23,6 +23,7 @@ ORDER_DELIVERY_METHOD_ENUM = postgresql.ENUM(
     "OZON",
     "WB",
     "CDEK",
+    "PICKUP",
     name="order_delivery_method",
     create_type=False,
 )

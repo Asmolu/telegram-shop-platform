@@ -1302,6 +1302,7 @@ def _order_and_variant() -> tuple[Order, ProductVariant]:
         subtotal_amount=Decimal("200.00"),
         discount_amount=Decimal("20.00"),
         total_amount=Decimal("180.00"),
+        delivery_price=Decimal("0.00"),
         contact_name="Ivan Ivanov",
         contact_phone="+79990000000",
         delivery_method=OrderDeliveryMethod.CDEK,

@@ -29,12 +29,13 @@ import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo'
 import { displaySize } from '../shared/utils/sizes';
 import { groupLookSourcedItems } from '../shared/utils/sourceGroups';
 
-const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string }[] = [
-  { value: 'ROUTE_TAXI', label: 'Маршруткой' },
-  { value: 'CITY_DELIVERY', label: 'Доставка по городу (Хасавюрт)' },
-  { value: 'OZON', label: 'Озон доставка' },
-  { value: 'WB', label: 'ВБ доставка' },
-  { value: 'CDEK', label: 'СДЭК' },
+const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string; price: number }[] = [
+  { value: 'ROUTE_TAXI', label: 'Маршруткой', price: 200 },
+  { value: 'CITY_DELIVERY', label: 'Доставка по городу', price: 300 },
+  { value: 'OZON', label: 'Озон доставка', price: 200 },
+  { value: 'WB', label: 'ВБ доставка', price: 0 },
+  { value: 'CDEK', label: 'СДЭК', price: 0 },
+  { value: 'PICKUP', label: 'Самовывоз', price: 0 },
 ];
 const NOTIFICATION_WRITE_ACCESS_SOURCE = 'mini_app_request_write_access';
 const BOT_1_NOTIFICATION_START_LINK = 'https://t.me/CheckYouStyleBot?start=notifications';
@@ -66,6 +67,14 @@ function checkoutProductImageSrcSet(thumbnailUrl?: string | null, imageUrl?: str
 
 function cartItemsSubtotal(items: CartItem[]) {
   return items.reduce((total, item) => total + Number(item.subtotal), 0);
+}
+
+function deliveryPriceFor(method: OrderDeliveryMethod) {
+  return DELIVERY_METHODS.find((item) => item.value === method)?.price ?? 0;
+}
+
+function formatDeliveryPrice(price: number) {
+  return `+${formatPrice(price)}`;
 }
 
 export function CheckoutPage() {
@@ -299,8 +308,11 @@ export function CheckoutPage() {
         setNotice('Выберите товары для оформления.');
         return;
       }
-      if (!form.contactName.trim() || !form.phone.trim() || !form.city.trim()) {
-        setNotice('Заполните имя, телефон и город.');
+      const addressRequired = deliveryMethod !== 'PICKUP';
+      if (!form.contactName.trim() || !form.phone.trim() || (addressRequired && !form.city.trim())) {
+        setNotice(addressRequired
+          ? 'Заполните имя, телефон и адрес.'
+          : 'Заполните имя и телефон.');
         return;
       }
       if (!deliveryMethod) {
@@ -380,6 +392,9 @@ export function CheckoutPage() {
 
   const selectedItems = cart?.items.filter((item) => item.is_selected) ?? [];
   const selectedTotal = cart?.selected_total ?? cart?.total ?? '0';
+  const deliveryPrice = deliveryPriceFor(deliveryMethod);
+  const goodsTotalAfterDiscount = Number(promoValidation?.total_amount ?? selectedTotal);
+  const finalTotal = goodsTotalAfterDiscount + deliveryPrice;
   const serviceNotificationsAvailable = areServiceNotificationsAvailable(subscription);
   const notificationAvailabilityStatus = subscription?.availability_status;
   const showNotificationPrompt = Boolean(
@@ -447,7 +462,8 @@ export function CheckoutPage() {
             <div><span>Выбрано</span><strong>{cart.selected_quantity_total}</strong></div>
             <div><span>Товары</span><strong>{formatPrice(selectedTotal)}</strong></div>
             <div><span>Скидка</span><strong>{formatPrice(promoValidation?.discount_amount ?? 0)}</strong></div>
-            <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(promoValidation?.total_amount ?? selectedTotal)}</strong></div>
+            <div><span>Доставка</span><strong>{formatPrice(deliveryPrice)}</strong></div>
+            <div className="summary-card__total"><span>Итого</span><strong>{formatPrice(finalTotal)}</strong></div>
           </section>
 
           <form className="promo-form" onSubmit={applyPromo}>
@@ -513,35 +529,37 @@ export function CheckoutPage() {
           <form className="checkout-form" onSubmit={submitCheckout}>
             <label>Получатель<input value={form.contactName} onChange={(event) => updateField('contactName', event.target.value)} required /></label>
             <label>Телефон<input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} required inputMode="tel" /></label>
-            <label>Город<input value={form.city} onChange={(event) => updateField('city', event.target.value)} required /></label>
-            <label
+            <label>Адрес (город, улица, номер дома)<input value={form.city} onChange={(event) => updateField('city', event.target.value)} required={deliveryMethod !== 'PICKUP'} /></label>
+            <div
               className="delivery-method-field"
               aria-invalid={deliveryMethodError ? 'true' : undefined}
               aria-describedby={deliveryMethodError ? 'delivery-method-error' : undefined}
             >
               <span>Способ доставки</span>
-              <span className="delivery-method-select">
-                <select
-                  name="delivery-method"
-                  value={deliveryMethod}
-                  onChange={(event) => {
-                    checkoutKeyRef.current = null;
-                    setDeliveryMethod(event.target.value as OrderDeliveryMethod);
-                    setDeliveryMethodError(null);
-                    setNotice(null);
-                  }}
-                >
-                  {DELIVERY_METHODS.map((method) => (
-                    <option value={method.value} key={method.value}>
-                      {method.label}
-                    </option>
-                  ))}
-                </select>
+              <span className="delivery-method-options" role="radiogroup">
+                {DELIVERY_METHODS.map((method) => (
+                  <button
+                    aria-checked={deliveryMethod === method.value}
+                    className="delivery-method-option"
+                    key={method.value}
+                    role="radio"
+                    type="button"
+                    onClick={() => {
+                      checkoutKeyRef.current = null;
+                      setDeliveryMethod(method.value);
+                      setDeliveryMethodError(null);
+                      setNotice(null);
+                    }}
+                  >
+                    <span>{method.label}</span>
+                    <strong>{formatDeliveryPrice(method.price)}</strong>
+                  </button>
+                ))}
               </span>
               {deliveryMethodError ? (
                 <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
               ) : null}
-            </label>
+            </div>
             <div className="two-inputs">
               <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
               <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>

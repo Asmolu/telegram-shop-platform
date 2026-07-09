@@ -143,8 +143,10 @@ async def test_order_created_event_creates_and_sends_seller_notification(
     assert "Товары" in message
     assert "Промокод: SAVE10" in message
     assert "Скидка: 20 ₽" in message
+    assert "Доставка: 0 ₽" in message
     assert "К оплате: 99,80 ₽" in message
     assert "Способ доставки: СДЭК" in message
+    assert "Адрес: Moscow" in message
     assert "Панель продавца: https://seller.stylexac.ru/orders" in message
     assert telegram.parse_modes == ["HTML"]
     assert session.commits == 2
@@ -430,6 +432,7 @@ def _order_created_payload() -> dict[str, object]:
         "user_id": 1,
         "subtotal_amount": "119.80",
         "discount_amount": "20.00",
+        "delivery_price": "0.00",
         "total_amount": "99.80",
         "promo_code_id": 7,
         "promo_code": "SAVE10",
@@ -459,6 +462,7 @@ def _detailed_order_created_payload() -> dict[str, object]:
             "status": "NEW",
             "payment_status": "PENDING",
             "created_at": "2026-05-27T12:00:00+00:00",
+            "delivery_price": "0.00",
             "customer": {
                 "user_id": 1,
                 "telegram_id": 42,

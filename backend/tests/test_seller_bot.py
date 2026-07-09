@@ -598,7 +598,7 @@ async def test_orders_command_formats_detail_and_buttons(
     assert "Способ доставки: СДЭК" in message
     assert "Имя: Иван Иванов" in message
     assert "Телефон: +79990000000" in message
-    assert "Адрес/город: г. Москва, ул. Тверская, 1" in message
+    assert "Адрес: г. Москва, ул. Тверская, 1" in message
     assert "Комментарий: Позвонить перед доставкой" in message
     assert markup["inline_keyboard"][0][0]["text"] == "SHIPPED"
     assert markup["inline_keyboard"][0][0]["callback_data"] == "seller_order:ship:16"

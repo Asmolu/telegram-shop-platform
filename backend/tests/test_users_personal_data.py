@@ -152,6 +152,7 @@ async def test_profile_update_does_not_change_existing_order_snapshot() -> None:
         subtotal_amount=Decimal("100.00"),
         discount_amount=Decimal("0.00"),
         total_amount=Decimal("100.00"),
+        delivery_price=Decimal("0.00"),
         contact_name="Original recipient",
         contact_phone="+10000000000",
         delivery_address="Original city",

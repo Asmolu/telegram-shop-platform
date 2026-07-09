@@ -597,7 +597,7 @@ class SellerBotService:
             f"Способ доставки: {delivery_method_label(order.delivery_method)}",
             f"Имя: {order.contact_name or MISSING_VALUE}",
             f"Телефон: {order.contact_phone or MISSING_VALUE}",
-            f"Адрес/город: {order.delivery_address or MISSING_VALUE}",
+            f"Адрес: {order.delivery_address or MISSING_VALUE}",
             f"Комментарий: {order.delivery_comment or MISSING_VALUE}",
             "",
             "Товары:",
@@ -660,6 +660,7 @@ class SellerBotService:
         lines.extend(
             (
                 "",
+                f"Доставка: {format_rubles(getattr(order, 'delivery_price', '0.00'))}",
                 f"К оплате: {format_rubles(order.total_amount)}",
                 f"Панель продавца: {_seller_panel_order_url(order.id)}",
             )

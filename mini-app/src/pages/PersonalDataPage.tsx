@@ -161,7 +161,7 @@ export function PersonalDataPage() {
               <input value={form.contactPhone} maxLength={32} inputMode="tel" onChange={(event) => updateField('contactPhone', event.target.value)} />
             </label>
             <label>
-              Город
+              Адрес (город, улица, номер дома)
               <input value={form.city} maxLength={255} onChange={(event) => updateField('city', event.target.value)} />
             </label>
             <div className="two-inputs">

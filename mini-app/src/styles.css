@@ -3908,36 +3908,44 @@ label {
 }
 
 .delivery-method-field {
+  display: grid;
+  gap: 8px;
   min-width: 0;
 }
 
-.delivery-method-select {
-  position: relative;
-  display: block;
-  min-width: 0;
+.delivery-method-options {
+  display: grid;
+  gap: 8px;
 }
 
-.delivery-method-select::after {
-  position: absolute;
-  top: 50%;
-  right: 14px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--muted);
-  border-bottom: 2px solid var(--muted);
-  content: '';
-  pointer-events: none;
-  transform: translateY(-70%) rotate(45deg);
-}
-
-.delivery-method-select select {
+.delivery-method-option {
+  display: flex;
   min-height: 48px;
-  padding-right: 42px;
-  appearance: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--text);
   cursor: pointer;
+  font: inherit;
+  padding: 12px 14px;
+  text-align: left;
 }
 
-.delivery-method-field[aria-invalid='true'] select {
+.delivery-method-option[aria-checked='true'] {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(218, 34, 78, 0.12);
+}
+
+.delivery-method-option strong {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-size: 14px;
+}
+
+.delivery-method-field[aria-invalid='true'] .delivery-method-option {
   border-color: var(--danger);
 }
 

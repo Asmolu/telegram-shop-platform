@@ -120,6 +120,7 @@ class OrderDeliveryMethod(StrEnum):
     OZON = "OZON"
     WB = "WB"
     CDEK = "CDEK"
+    PICKUP = "PICKUP"
 
 
 class ManualPaymentMethod(StrEnum):
@@ -1308,6 +1309,12 @@ class Order(Base):
     )
     promo_code_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    delivery_price: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_phone: Mapped[str] = mapped_column(String(32), nullable=False)
     delivery_method: Mapped[OrderDeliveryMethod | None] = mapped_column(

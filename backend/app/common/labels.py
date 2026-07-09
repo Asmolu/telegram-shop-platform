@@ -27,10 +27,11 @@ PAYMENT_STATUS_LABELS: dict[ManualPaymentStatus, str] = {
 
 DELIVERY_METHOD_LABELS: dict[OrderDeliveryMethod, str] = {
     OrderDeliveryMethod.ROUTE_TAXI: "Маршруткой",
-    OrderDeliveryMethod.CITY_DELIVERY: "Доставка по городу (Хасавюрт)",
-    OrderDeliveryMethod.OZON: "Ozon доставка",
-    OrderDeliveryMethod.WB: "WB доставка",
+    OrderDeliveryMethod.CITY_DELIVERY: "Доставка по городу",
+    OrderDeliveryMethod.OZON: "Озон доставка",
+    OrderDeliveryMethod.WB: "ВБ доставка",
     OrderDeliveryMethod.CDEK: "СДЭК",
+    OrderDeliveryMethod.PICKUP: "Самовывоз",
 }
 
 BACKUP_STATUS_LABELS = {

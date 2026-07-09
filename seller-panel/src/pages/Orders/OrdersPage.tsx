@@ -624,6 +624,10 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                   <dd>{formatMoney(selectedOrder.discount_amount, language)}</dd>
                 </div>
                 <div>
+                  <dt>{t('orders.deliveryPrice')}</dt>
+                  <dd>{formatMoney(selectedOrder.delivery_price ?? 0, language)}</dd>
+                </div>
+                <div>
                   <dt>{t('common.total')}</dt>
                   <dd>{formatMoney(selectedOrder.total_amount, language)}</dd>
                 </div>

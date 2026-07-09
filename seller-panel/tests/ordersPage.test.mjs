@@ -7,6 +7,7 @@ const pageSource = readFileSync(
   'utf8',
 );
 const typesSource = readFileSync(new URL('../src/shared/api/types.ts', import.meta.url), 'utf8');
+const i18nSource = readFileSync(new URL('../src/shared/i18n/index.tsx', import.meta.url), 'utf8');
 
 test('seller order detail groups Look-sourced order items', () => {
   assert.match(pageSource, /isLookSourceOrderItem/);
@@ -23,4 +24,11 @@ test('seller order item type exposes nullable Look source metadata', () => {
   assert.match(typesSource, /source_look_slug\?: string \| null/);
   assert.match(typesSource, /source_look_title\?: string \| null/);
   assert.match(typesSource, /source_look_image_url\?: string \| null/);
+});
+
+test('seller order detail exposes address label and delivery price snapshot', () => {
+  assert.match(i18nSource, /'orders.address': 'Адрес'/);
+  assert.match(i18nSource, /'orders.deliveryPrice': 'Доставка'/);
+  assert.match(pageSource, /selectedOrder\.delivery_price/);
+  assert.match(typesSource, /delivery_price\?: ApiDecimal/);
 });

@@ -1726,6 +1726,7 @@ def _order(
         promo_code_id=None,
         promo_code_code=None,
         total_amount=Decimal("59.90"),
+        delivery_price=Decimal("0.00"),
         contact_name="Ada",
         contact_phone="+79999999999",
         delivery_method=OrderDeliveryMethod.ROUTE_TAXI,

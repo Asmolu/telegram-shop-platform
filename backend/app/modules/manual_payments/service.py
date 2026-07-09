@@ -972,6 +972,7 @@ class ManualPaymentsService:
                 order.delivery_method.value if order.delivery_method is not None else None
             ),
             "delivery_method_label": delivery_method_label(order.delivery_method),
+            "delivery_price": str(order.delivery_price),
             "amount": str(payment.amount),
             "payment_comment": payment.payment_comment,
             "expires_at": payment.expires_at.isoformat(),
@@ -1002,6 +1003,7 @@ class ManualPaymentsService:
             customer_name=order.contact_name,
             customer_phone=order.contact_phone,
             delivery_method=order.delivery_method,
+            delivery_price=order.delivery_price,
             method=payment.method,
             amount=payment.amount,
             currency=payment.currency,

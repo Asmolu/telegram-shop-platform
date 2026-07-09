@@ -61,6 +61,7 @@ class ManualPaymentRead(BaseModel):
     customer_name: str
     customer_phone: str
     delivery_method: OrderDeliveryMethod | None = None
+    delivery_price: Decimal = Decimal("0.00")
     method: ManualPaymentMethod
     amount: Decimal
     currency: ManualPaymentCurrency

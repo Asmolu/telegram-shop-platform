@@ -6,6 +6,7 @@ import {
   getCart,
   getCustomerNotificationSubscription,
   recordCustomerNotificationWriteAccess,
+  validatePromoCode,
   type Cart,
   type CustomerNotificationSubscription,
 } from '../shared/api';
@@ -81,6 +82,7 @@ describe('CheckoutPage notification write access', () => {
     vi.mocked(checkoutCart).mockClear();
     vi.mocked(getCart).mockResolvedValue(cartFixture());
     vi.mocked(getCustomerNotificationSubscription).mockResolvedValue(subscriptionFixture());
+    vi.mocked(validatePromoCode).mockReset();
     vi.mocked(recordCustomerNotificationWriteAccess).mockClear();
     vi.mocked(recordCustomerNotificationWriteAccess).mockResolvedValue(
       subscriptionFixture({
@@ -162,6 +164,7 @@ describe('CheckoutPage item details', () => {
     vi.mocked(checkoutCart).mockClear();
     vi.mocked(getCart).mockResolvedValue(cartFixture());
     vi.mocked(getCustomerNotificationSubscription).mockResolvedValue(subscriptionFixture());
+    vi.mocked(validatePromoCode).mockReset();
   });
 
   it('renders selected checkout items with cart-like image, product details, quantity, and price', async () => {
@@ -253,7 +256,7 @@ describe('CheckoutPage item details', () => {
   it('keeps checkout submit wired after rendering detailed item cards', async () => {
     render(<CheckoutPage />);
 
-    fireEvent.change(await screen.findByLabelText('Город'), { target: { value: 'Хасавюрт' } });
+    fireEvent.change(await screen.findByLabelText('Адрес (город, улица, номер дома)'), { target: { value: 'Хасавюрт' } });
     fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
 
     await waitFor(() => expect(checkoutCart).toHaveBeenCalledWith(
@@ -264,6 +267,55 @@ describe('CheckoutPage item details', () => {
       }),
       'checkout-key',
     ));
+  });
+
+  it('allows pickup checkout without address', async () => {
+    render(<CheckoutPage />);
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Самовывоз/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
+
+    await waitFor(() => expect(checkoutCart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery_method: 'PICKUP',
+        delivery_address: '',
+      }),
+      'checkout-key',
+    ));
+  });
+
+  it('shows paid delivery price rows and includes delivery in checkout total', async () => {
+    render(<CheckoutPage />);
+
+    expect(await screen.findByRole('radio', { name: /Маршруткой\+200/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /ВБ доставка\+0/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\+200/ }));
+
+    const summary = screen.getByText('Доставка').closest('div');
+    expect(summary?.textContent).toContain('200');
+    expect(screen.getByText('Итого').closest('div')?.textContent).toContain('400');
+  });
+
+  it('shows promo discount before adding delivery to the final total', async () => {
+    vi.mocked(validatePromoCode).mockResolvedValueOnce({
+      code: 'SAVE50',
+      discount_type: 'FIXED',
+      discount_value: '50.00',
+      subtotal_amount: '200.00',
+      discount_amount: '50.00',
+      total_amount: '150.00',
+    });
+
+    render(<CheckoutPage />);
+
+    fireEvent.change(await screen.findByPlaceholderText('Введите промокод'), { target: { value: 'save50' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    await screen.findByText(/SAVE50/);
+    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\+200/ }));
+
+    expect(screen.getByText('Скидка').closest('div')?.textContent).toContain('50');
+    expect(screen.getByText('Доставка').closest('div')?.textContent).toContain('200');
+    expect(screen.getByText('Итого').closest('div')?.textContent).toContain('350');
   });
 
   it('groups Look items in the checkout summary without changing totals', async () => {

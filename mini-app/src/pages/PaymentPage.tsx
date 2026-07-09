@@ -578,9 +578,10 @@ function byteBucket(bytes: number): '0' | '1kb' | '10kb' | '100kb' | '1mb' | 'la
 function deliveryMethodLabel(method: OrderDeliveryMethod): string {
   return {
     ROUTE_TAXI: 'Маршруткой',
-    CITY_DELIVERY: 'Доставка по городу (Хасавюрт)',
+    CITY_DELIVERY: 'Доставка по городу',
     OZON: 'Озон доставка',
     WB: 'ВБ доставка',
     CDEK: 'СДЭК',
+    PICKUP: 'Самовывоз',
   }[method];
 }

@@ -775,6 +775,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
       {orders.map((order) => {
         const promoCode = order.promo_code_code ?? order.promo_code;
         const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
+        const deliveryPrice = Number(order.delivery_price ?? 0);
         const paymentStatus = order.manual_payment?.status;
         const displayStatus = paymentStatus
           ? formatPaymentStatus(paymentStatus)
@@ -802,6 +803,8 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                   <strong>−{formatPrice(discountAmount)}</strong>
                 </>
               ) : null}
+              <span>Доставка</span>
+              <strong>{formatPrice(deliveryPrice)}</strong>
             </div>
 
             <div className="order-item-list">

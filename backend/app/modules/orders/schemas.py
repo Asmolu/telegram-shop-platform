@@ -23,7 +23,7 @@ class OrderCheckoutCreate(BaseModel):
     contact_name: str = Field(min_length=1, max_length=255)
     contact_phone: str = Field(min_length=1, max_length=32)
     delivery_method: OrderDeliveryMethod
-    delivery_address: str = Field(min_length=1)
+    delivery_address: str | None = None
     delivery_comment: str | None = None
     promo_code: str | None = Field(
         default=None,
@@ -38,6 +38,13 @@ class OrderCheckoutCreate(BaseModel):
         if value is None:
             return None
         return value.strip().upper()
+
+    @field_validator("delivery_address", "delivery_comment")
+    @classmethod
+    def trim_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
 
 
 class OrderStatusUpdate(BaseModel):
@@ -134,6 +141,7 @@ class OrderRead(BaseModel):
     promo_code_id: int | None = None
     promo_code_code: str | None = None
     total_amount: Decimal
+    delivery_price: Decimal = Decimal("0.00")
     contact_name: str
     contact_phone: str
     delivery_method: OrderDeliveryMethod | None = None

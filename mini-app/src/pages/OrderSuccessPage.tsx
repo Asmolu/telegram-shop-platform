@@ -17,9 +17,10 @@ import { groupLookSourcedItems } from '../shared/utils/sourceGroups';
 const DELIVERY_METHOD_LABELS: Record<string, string> = {
   ROUTE_TAXI: 'Маршруткой',
   CITY_DELIVERY: 'Доставка по городу',
-  OZON: 'Ozon доставка',
-  WB: 'WB доставка',
+  OZON: 'Озон доставка',
+  WB: 'ВБ доставка',
   CDEK: 'СДЭК',
+  PICKUP: 'Самовывоз',
 };
 
 function formatDeliveryMethod(method: Order['delivery_method']) {
@@ -164,6 +165,7 @@ function OrderDetailContent({
 }) {
   const promoCode = order.promo_code_code ?? order.promo_code;
   const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
+  const deliveryPrice = Number(order.delivery_price ?? 0);
   const paymentStatus = order.manual_payment?.status ?? null;
   const deliveryCommentLines = getDeliveryCommentLines(order.delivery_comment);
   const hasReturnRequest = returnEligibility?.reason_code === 'return_request_exists'
@@ -238,6 +240,7 @@ function OrderDetailContent({
           ) : (
             <div><dt>Скидка</dt><dd>{formatPrice(0)}</dd></div>
           )}
+          <div><dt>Доставка</dt><dd>{formatPrice(deliveryPrice)}</dd></div>
           <div><dt>Статус оплаты</dt><dd>{formatPaymentStatus(paymentStatus)}</dd></div>
           <div className="order-detail-list__total"><dt>Итого</dt><dd>{formatPrice(order.total_amount ?? order.total)}</dd></div>
         </dl>
@@ -248,7 +251,7 @@ function OrderDetailContent({
         <dl className="order-detail-list">
           <div><dt>Получатель</dt><dd>{order.contact_name}</dd></div>
           <div><dt>Телефон</dt><dd>{order.contact_phone}</dd></div>
-          <div><dt>Город</dt><dd>{order.delivery_address}</dd></div>
+          <div><dt>Адрес</dt><dd>{order.delivery_address || 'Не указан'}</dd></div>
           <div><dt>Способ</dt><dd>{formatDeliveryMethod(order.delivery_method)}</dd></div>
           {deliveryCommentLines.length > 0 ? (
             <div><dt>Комментарий</dt><dd>{deliveryCommentLines.join(' · ')}</dd></div>

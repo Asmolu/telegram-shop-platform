@@ -20,6 +20,7 @@ def order_created_payload(order: Order) -> dict[str, object]:
         "items": [_order_item_payload(item) for item in order.items],
         "subtotal_amount": _money(order.subtotal_amount),
         "discount_amount": _money(order.discount_amount),
+        "delivery_price": _money(order.delivery_price),
         "total_amount": _money(order.total_amount),
         "promo_code_id": order.promo_code_id,
         "promo_code": order.promo_code_code,

@@ -428,7 +428,8 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
     assert order.order_number == "ORD-000001"
     assert order.user_id == 1
     assert order.status == OrderStatus.NEW
-    assert order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
+    assert order.delivery_method == OrderDeliveryMethod.CDEK
+    assert order.delivery_price == Decimal("0.00")
     assert order.total_amount == Decimal("119.80")
     assert order.items[0].product_name == "Hoodie"
     assert order.items[0].variant_size == "M"
@@ -463,8 +464,9 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
     assert event_payload["items"][0]["variant_sku"] == "HOODIE-M-BLK"
     assert event_payload["items"][0]["quantity"] == 2
     assert event_payload["contact"]["name"] == "Ada Lovelace"
-    assert event_payload["contact"]["delivery_method"] == "ROUTE_TAXI"
-    assert event_payload["contact"]["delivery_method_label"] == "Маршруткой"
+    assert event_payload["delivery_price"] == "0.00"
+    assert event_payload["contact"]["delivery_method"] == "CDEK"
+    assert event_payload["contact"]["delivery_method_label"] == "СДЭК"
     assert event_payload["seller_panel_url"] == "https://seller.stylexac.ru/orders"
     assert events.commit_states == [True]
 
@@ -665,6 +667,56 @@ async def test_checkout_stores_each_supported_delivery_method(
 
 
 @pytest.mark.asyncio
+async def test_checkout_with_pickup_succeeds_without_address() -> None:
+    service, repository, _, _ = _orders_service()
+    payload = _checkout_payload_json()
+    payload["delivery_method"] = OrderDeliveryMethod.PICKUP.value
+    payload["delivery_address"] = ""
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate.model_validate(payload),
+    )
+
+    assert order.delivery_method == OrderDeliveryMethod.PICKUP
+    assert order.delivery_address == ""
+    assert order.delivery_price == Decimal("0.00")
+    assert order.total_amount == Decimal("119.80")
+    assert repository.orders[order.id].delivery_price == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_checkout_with_paid_delivery_requires_address() -> None:
+    service, _, _, _ = _orders_service()
+    payload = _checkout_payload_json()
+    payload["delivery_method"] = OrderDeliveryMethod.ROUTE_TAXI.value
+    payload["delivery_address"] = " "
+
+    with pytest.raises(AppError, match="Delivery address is required"):
+        await service.checkout_current_user_cart(
+            user_id=1,
+            payload=OrderCheckoutCreate.model_validate(payload),
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkout_stores_delivery_price_snapshot_and_total_includes_delivery() -> None:
+    service, repository, _, events = _orders_service()
+    payload = _checkout_payload_json()
+    payload["delivery_method"] = OrderDeliveryMethod.ROUTE_TAXI.value
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate.model_validate(payload),
+    )
+
+    assert order.delivery_price == Decimal("200.00")
+    assert order.total_amount == Decimal("319.80")
+    assert repository.orders[order.id].delivery_price == Decimal("200.00")
+    assert events.events[0][1]["delivery_price"] == "200.00"
+
+
+@pytest.mark.asyncio
 async def test_checkout_customer_notifications_emit_after_successful_commit() -> None:
     service, _, session, _ = _orders_service()
     seller_events = FakeOrderEventPublisher(session)
@@ -745,6 +797,28 @@ async def test_checkout_with_valid_promo_discount_types_applies_discount(
     assert order.discount_amount == discount_amount
     assert order.total_amount == expected_total
     assert order.promo_code_code == "SAVE10"
+
+
+@pytest.mark.asyncio
+async def test_checkout_promo_discount_does_not_discount_delivery() -> None:
+    service, _, _, _ = _orders_service(
+        promo_codes_service=FakePromoCodesService(discount_amount=Decimal("119.80")),
+    )
+    payload = _checkout_payload_json()
+    payload["delivery_method"] = OrderDeliveryMethod.ROUTE_TAXI.value
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate(
+            **payload,
+            promo_code="save10",
+        ),
+    )
+
+    assert order.subtotal_amount == Decimal("119.80")
+    assert order.discount_amount == Decimal("119.80")
+    assert order.delivery_price == Decimal("200.00")
+    assert order.total_amount == Decimal("200.00")
 
 
 @pytest.mark.asyncio
@@ -1110,7 +1184,7 @@ async def test_user_can_list_own_orders() -> None:
     orders = await service.list_current_user_orders(user_id=1)
 
     assert [order.user_id for order in orders.items] == [1]
-    assert orders.items[0].delivery_method == OrderDeliveryMethod.ROUTE_TAXI
+    assert orders.items[0].delivery_method == OrderDeliveryMethod.CDEK
 
 
 @pytest.mark.asyncio
@@ -1133,8 +1207,10 @@ async def test_order_detail_returns_delivery_method() -> None:
     customer_order = await service.get_current_user_order(user_id=1, order_id=10)
     seller_order = await service.get_order(order_id=10)
 
-    assert customer_order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
-    assert seller_order.delivery_method == OrderDeliveryMethod.ROUTE_TAXI
+    assert customer_order.delivery_method == OrderDeliveryMethod.CDEK
+    assert seller_order.delivery_method == OrderDeliveryMethod.CDEK
+    assert customer_order.delivery_price == Decimal("0.00")
+    assert seller_order.delivery_price == Decimal("0.00")
 
 
 @pytest.mark.asyncio
@@ -1648,9 +1724,10 @@ def _order(order_id: int, user_id: int, status_value: OrderStatus = OrderStatus.
         subtotal_amount=Decimal("59.90"),
         discount_amount=Decimal("0.00"),
         total_amount=Decimal("59.90"),
+        delivery_price=Decimal("0.00"),
         contact_name="Ada Lovelace",
         contact_phone="+10000000000",
-        delivery_method=OrderDeliveryMethod.ROUTE_TAXI,
+        delivery_method=OrderDeliveryMethod.CDEK,
         delivery_address="Main street",
         delivery_comment=None,
         delivered_at=None,
@@ -1749,7 +1826,7 @@ def _checkout_payload_json() -> dict[str, str]:
     return {
         "contact_name": "Ada Lovelace",
         "contact_phone": "+10000000000",
-        "delivery_method": "ROUTE_TAXI",
+        "delivery_method": "CDEK",
         "delivery_address": "Main street",
         "delivery_comment": "Door code 42",
     }
@@ -1765,9 +1842,10 @@ def _order_response(status_value: str = "NEW") -> dict[str, object]:
         "subtotal_amount": "59.90",
         "discount_amount": "0.00",
         "total_amount": "59.90",
+        "delivery_price": "0.00",
         "contact_name": "Ada Lovelace",
         "contact_phone": "+10000000000",
-        "delivery_method": "ROUTE_TAXI",
+        "delivery_method": "CDEK",
         "delivery_address": "Main street",
         "delivery_comment": None,
         "items": [

@@ -33,6 +33,7 @@ from app.modules.customer_notifications.service import CustomerServiceNotificati
 from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.notifications.service import NotificationsEventPublisher
+from app.modules.orders.delivery import delivery_price_for_method, is_delivery_address_required
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import (
     OrderCheckoutCreate,
@@ -146,6 +147,7 @@ class OrdersService:
             self._validate_cart_not_empty(cart)
             assert cart is not None
             checkout_items = self._selected_cart_items(cart)
+            self._validate_checkout_delivery(payload)
             payment_settings = await self.manual_payments_service.require_checkout_settings()
 
             variants_by_id = await self.repository.lock_variants_by_ids(
@@ -154,6 +156,7 @@ class OrdersService:
             self._validate_checkout_items(checkout_items, variants_by_id)
 
             subtotal = self._calculate_subtotal(checkout_items)
+            delivery_price = delivery_price_for_method(payload.delivery_method)
             promo_calculation = await self._validate_promo_code(
                 user_id=user_id,
                 code=payload.promo_code,
@@ -164,6 +167,7 @@ class OrdersService:
                 user_id=user_id,
                 payload=payload,
                 subtotal=subtotal,
+                delivery_price=delivery_price,
                 promo_calculation=promo_calculation,
                 order_number=order_number,
             )
@@ -504,24 +508,32 @@ class OrdersService:
             if item.quantity > variant.available_quantity:
                 raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
 
+    def _validate_checkout_delivery(self, payload: OrderCheckoutCreate) -> None:
+        if is_delivery_address_required(payload.delivery_method) and not (
+            payload.delivery_address or ""
+        ).strip():
+            raise AppError("Delivery address is required", status.HTTP_400_BAD_REQUEST)
+
     def _build_order(
         self,
         *,
         user_id: int,
         payload: OrderCheckoutCreate,
         subtotal: Decimal,
+        delivery_price: Decimal,
         promo_calculation: PromoCodeCalculation | None,
         order_number: str,
     ) -> Order:
         discount = Decimal("0.00")
-        total = subtotal
+        discounted_goods_total = subtotal
         promo_code_id = None
         promo_code_code = None
         if promo_calculation is not None:
             discount = promo_calculation.discount_amount
-            total = promo_calculation.total_amount
+            discounted_goods_total = promo_calculation.total_amount
             promo_code_id = promo_calculation.promo_code.id
             promo_code_code = promo_calculation.promo_code.code
+        total = discounted_goods_total + delivery_price
 
         return Order(
             order_number=order_number,
@@ -532,10 +544,11 @@ class OrdersService:
             promo_code_id=promo_code_id,
             promo_code_code=promo_code_code,
             total_amount=total,
+            delivery_price=delivery_price,
             contact_name=payload.contact_name,
             contact_phone=payload.contact_phone,
             delivery_method=payload.delivery_method,
-            delivery_address=payload.delivery_address,
+            delivery_address=(payload.delivery_address or "").strip(),
             delivery_comment=payload.delivery_comment,
         )
 

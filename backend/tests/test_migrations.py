@@ -1072,6 +1072,27 @@ def test_order_delivery_method_migration_and_model_contract() -> None:
     assert Order.__table__.c.delivery_method.nullable is True
 
 
+def test_order_delivery_price_snapshot_migration_and_model_contract() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260705_0049_add_order_delivery_price_snapshot.py"
+    )
+    spec = importlib.util.spec_from_file_location("add_order_delivery_price", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    content = migration_path.read_text()
+
+    assert migration.down_revision == "20260704_0048"
+    assert "PICKUP" in content
+    assert "delivery_price" in content
+    assert Order.__table__.c.delivery_price.nullable is False
+    assert str(Order.__table__.c.delivery_price.server_default.arg) == "0.00"
+
+
 def test_manual_payment_telegram_message_refs_migration_and_model_contract() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

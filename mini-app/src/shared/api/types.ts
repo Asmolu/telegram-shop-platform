@@ -27,7 +27,13 @@ export type ProductResolveVariantStatus =
   | 'sku_not_for_product'
   | 'inactive';
 export type OrderStatus = 'NEW' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
-export type OrderDeliveryMethod = 'ROUTE_TAXI' | 'CITY_DELIVERY' | 'OZON' | 'WB' | 'CDEK';
+export type OrderDeliveryMethod =
+  | 'ROUTE_TAXI'
+  | 'CITY_DELIVERY'
+  | 'OZON'
+  | 'WB'
+  | 'CDEK'
+  | 'PICKUP';
 export type ItemSourceType = 'LOOK' | string;
 export type ManualPaymentStatus =
   | 'PENDING'
@@ -454,6 +460,7 @@ export type Order = {
   promo_code?: string | null;
   promo_applied?: boolean;
   total_amount: string;
+  delivery_price?: string;
   subtotal?: string;
   discount?: string;
   total?: string;
@@ -595,6 +602,7 @@ export type ManualPayment = {
   customer_name: string;
   customer_phone: string;
   delivery_method?: OrderDeliveryMethod | null;
+  delivery_price?: string | number;
   method: 'SBP_PHONE';
   amount: string;
   currency: 'RUB';

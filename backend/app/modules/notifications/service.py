@@ -289,6 +289,7 @@ class NotificationsService:
         created_at = self._payload_value(payload, "created_at", fallback="")
         subtotal = self._payload_value(payload, "subtotal_amount", fallback="0.00")
         discount = self._payload_value(payload, "discount_amount", fallback="0.00")
+        delivery_price = self._payload_value(payload, "delivery_price", fallback="0.00")
         total = self._payload_value(payload, "total_amount", fallback="0.00")
         promo = self._payload_value(payload, "promo_code", fallback=MISSING_VALUE)
         seller_panel_url = self._payload_value(
@@ -313,6 +314,7 @@ class NotificationsService:
             f"Товары: {format_rubles(subtotal)}",
             f"Промокод: {promo or MISSING_VALUE}",
             f"Скидка: {format_rubles(discount)}",
+            f"Доставка: {format_rubles(delivery_price)}",
             f"К оплате: {format_rubles(total)}",
             "",
             "Доставка и контакты",
@@ -379,7 +381,7 @@ class NotificationsService:
             f"Способ доставки: {contact.get('delivery_method_label') or MISSING_VALUE}",
             f"Имя: {contact.get('name') or MISSING_VALUE}",
             f"Телефон: {contact.get('phone') or MISSING_VALUE}",
-            f"Адрес/город: {contact.get('delivery_address') or MISSING_VALUE}",
+            f"Адрес: {contact.get('delivery_address') or MISSING_VALUE}",
             f"Комментарий: {contact.get('delivery_comment') or MISSING_VALUE}",
             f"Telegram: @{username}" if username else f"Telegram: {MISSING_VALUE}",
         ]

@@ -72,6 +72,10 @@ describe('OrderSuccessPage details', () => {
     expect(screen.getByText('SAVE10', { exact: false })).toBeTruthy();
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
     expect(screen.getByText('+79990000000')).toBeTruthy();
+    expect(screen.getByText('Адрес')).toBeTruthy();
+    expect(screen.getByText('Хасавюрт')).toBeTruthy();
+    expect(screen.getAllByText('Доставка').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('200 ₽').length).toBeGreaterThan(0);
     expect(screen.getByText('Рост: 180 · Вес: 75')).toBeTruthy();
     expect(container.querySelector('.order-detail-item__image img')?.getAttribute('src')).toBe('/uploads/products/thumb.webp');
   });
@@ -190,13 +194,14 @@ function orderFixture(overrides: Partial<Order> = {}): Order {
     promo_code_code: 'SAVE10',
     promo_code: 'SAVE10',
     promo_applied: true,
-    total_amount: '180.00',
+    total_amount: '380.00',
+    delivery_price: '200.00',
     subtotal: '200.00',
     discount: '20.00',
-    total: '180.00',
+    total: '380.00',
     contact_name: 'Ada Lovelace',
     contact_phone: '+79990000000',
-    delivery_method: 'CDEK',
+    delivery_method: 'ROUTE_TAXI',
     delivery_address: 'Хасавюрт',
     delivery_comment: 'Рост: 180\nВес: 75',
     manual_payment: {
