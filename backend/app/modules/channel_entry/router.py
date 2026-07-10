@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import get_db_session, require_roles
@@ -25,6 +25,8 @@ from app.modules.channel_entry.schemas import (
 )
 from app.modules.channel_entry.service import ChannelEntryService
 from app.modules.telegram.service import TelegramService
+from app.modules.uploads.schemas import ChannelEntryPhotoUploadRead
+from app.modules.uploads.service import UploadsService
 
 router = APIRouter(prefix="/channel-entry", tags=["channel-entry"])
 
@@ -37,6 +39,12 @@ def get_channel_entry_service(
         telegram_service=TelegramService(bot_token=settings.telegram_customer_bot_token),
         audit_service=AuditService(session),
     )
+
+
+def get_uploads_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> UploadsService:
+    return UploadsService(session)
 
 
 @router.get("/config", response_model=ChannelEntryConfigRead)
@@ -104,6 +112,20 @@ async def preview(
     service: Annotated[ChannelEntryService, Depends(get_channel_entry_service)],
 ) -> ChannelEntryPreviewRead:
     return await service.preview(payload)
+
+
+@router.post(
+    "/photos",
+    response_model=ChannelEntryPhotoUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_photo(
+    service: Annotated[UploadsService, Depends(get_uploads_service)],
+    _: Annotated[User, Depends(require_roles(UserRole.SELLER, UserRole.ADMIN))],
+    file: Annotated[UploadFile, File()],
+    alt_text: Annotated[str | None, Form(max_length=255)] = None,
+) -> ChannelEntryPhotoUploadRead:
+    return await service.upload_channel_entry_photo(file=file, alt_text=alt_text)
 
 
 @router.post("/publish", response_model=ChannelEntryPublishRead)

@@ -66,6 +66,13 @@ class TelegramDownloadedFile:
     extension: str
 
 
+@dataclass(frozen=True)
+class TelegramPhotoUpload:
+    content: bytes
+    filename: str
+    mime_type: str
+
+
 class TelegramDeliveryError(Exception):
     """Raised when Telegram Bot API delivery fails."""
 
@@ -81,6 +88,36 @@ class TelegramDeliveryError(Exception):
         self.error_code = error_code
         self.status_code = status_code
         self.retry_after_seconds = retry_after_seconds
+
+
+TELEGRAM_INLINE_BUTTON_STYLES = {"primary", "danger", "success"}
+
+
+def _telegram_button_style(button_style: str | None) -> str | None:
+    if button_style in TELEGRAM_INLINE_BUTTON_STYLES:
+        return button_style
+    return None
+
+
+def _channel_entry_reply_markup(
+    button_text: str,
+    button_url: str,
+    *,
+    button_style: str | None = None,
+) -> dict[str, object]:
+    button: dict[str, object] = {
+        "text": button_text,
+        "url": button_url,
+    }
+    normalized_style = _telegram_button_style(button_style)
+    if normalized_style:
+        button["style"] = normalized_style
+    return {"inline_keyboard": [[button]]}
+
+
+def _is_button_style_delivery_error(error: TelegramDeliveryError) -> bool:
+    message = str(error).lower()
+    return (error.status_code == 400 or error.error_code == 400) and "style" in message
 
 
 class TelegramService:
@@ -188,6 +225,7 @@ class TelegramService:
         caption: str | None = None,
         reply_markup: dict[str, object] | None = None,
         reply_to_message_id: int | None = None,
+        disable_notification: bool = False,
     ) -> int | None:
         data: dict[str, str] = {"chat_id": chat_id}
         if caption:
@@ -196,6 +234,8 @@ class TelegramService:
             data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         if reply_to_message_id is not None:
             data["reply_to_message_id"] = str(reply_to_message_id)
+        if disable_notification:
+            data["disable_notification"] = "true"
         body = await self._post_multipart(
             "sendPhoto",
             data=data,
@@ -326,23 +366,76 @@ class TelegramService:
         button_text: str,
         button_url: str,
         *,
+        button_style: str | None = None,
+        photos: list[TelegramPhotoUpload] | None = None,
         disable_notification: bool = False,
     ) -> int | None:
+        normalized_style = _telegram_button_style(button_style)
+        try:
+            return await self._send_channel_entry_message(
+                chat_id,
+                text,
+                button_text,
+                button_url,
+                button_style=normalized_style,
+                photos=photos,
+                disable_notification=disable_notification,
+            )
+        except TelegramDeliveryError as exc:
+            if normalized_style and _is_button_style_delivery_error(exc):
+                return await self._send_channel_entry_message(
+                    chat_id,
+                    text,
+                    button_text,
+                    button_url,
+                    button_style=None,
+                    photos=photos,
+                    disable_notification=disable_notification,
+                )
+            raise
+
+    async def _send_channel_entry_message(
+        self,
+        chat_id: str,
+        text: str,
+        button_text: str,
+        button_url: str,
+        *,
+        button_style: str | None,
+        photos: list[TelegramPhotoUpload] | None,
+        disable_notification: bool,
+    ) -> int | None:
+        reply_markup = _channel_entry_reply_markup(
+            button_text,
+            button_url,
+            button_style=button_style,
+        )
+        if photos:
+            message_id = await self.send_photo_bytes(
+                chat_id,
+                photos[0].content,
+                filename=photos[0].filename,
+                mime_type=photos[0].mime_type,
+                caption=text or None,
+                reply_markup=reply_markup,
+                disable_notification=disable_notification,
+            )
+            for photo in photos[1:]:
+                await self.send_photo_bytes(
+                    chat_id,
+                    photo.content,
+                    filename=photo.filename,
+                    mime_type=photo.mime_type,
+                    disable_notification=disable_notification,
+                )
+            return message_id
+
         payload: dict[str, object] = {
             "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": True,
             "disable_notification": disable_notification,
-            "reply_markup": {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": button_text,
-                            "url": button_url,
-                        }
-                    ]
-                ]
-            },
+            "reply_markup": reply_markup,
         }
         body = await self._post("sendMessage", payload)
         if not body.get("ok", False):

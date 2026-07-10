@@ -42,6 +42,7 @@ export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
 export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
 export type BannerImageKind = 'native_banner' | 'vertical_banner' | 'popup_banner' | 'aggressive_banner';
+export type ChannelEntryButtonStyle = 'default' | 'primary' | 'secondary' | 'danger' | 'success';
 
 export type ApiDecimal = string | number;
 
@@ -322,6 +323,8 @@ export interface UploadedBannerImage {
 export interface UploadedTagImage extends UploadedBannerImage {}
 
 export interface UploadedCategoryImage extends UploadedBannerImage {}
+
+export interface UploadedChannelEntryPhoto extends UploadedBannerImage {}
 
 export interface OrderItem {
   id: number;
@@ -1008,12 +1011,17 @@ export interface ChannelEntryPreviewPayload {
   chat_id?: string | null;
   text: string;
   button_text?: string;
+  button_style?: ChannelEntryButtonStyle;
+  photo_paths?: string[];
 }
 
 export interface ChannelEntryPreview {
   text: string;
   button_text: string;
+  button_style: ChannelEntryButtonStyle;
   button_url: string;
+  photo_paths: string[];
+  photo_urls: string[];
   selected_chat_id: string;
   warnings: string[];
 }

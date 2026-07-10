@@ -1,12 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ApiError, api } from '../../shared/api';
+import { ApiError, api, resolveMediaUrl } from '../../shared/api';
 import type {
+  ChannelEntryButtonStyle,
   ChannelEntryConfig,
   ChannelEntryPreview,
   PageMeta,
   TelegramChannel,
   TelegramChannelCheckResponse,
   TelegramChannelEntryMessage,
+  UploadedChannelEntryPhoto,
 } from '../../shared/api';
 import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
@@ -17,6 +19,14 @@ interface PageProps {
 }
 
 const HISTORY_LIMIT = 20;
+const MAX_CHANNEL_ENTRY_PHOTOS = 4;
+const BUTTON_STYLE_OPTIONS: Array<{ value: ChannelEntryButtonStyle; label: string }> = [
+  { value: 'default', label: 'По умолчанию' },
+  { value: 'primary', label: 'Основная' },
+  { value: 'secondary', label: 'Вторичная' },
+  { value: 'danger', label: 'Важная' },
+  { value: 'success', label: 'Успешная' },
+];
 const DEFAULT_MESSAGE_TEXT = 'Откройте магазин прямо в Telegram.';
 const DEFAULT_BUTTON_TEXT = 'Открыть';
 
@@ -29,6 +39,7 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
   const [historyOffset, setHistoryOffset] = useState(0);
   const [preview, setPreview] = useState<ChannelEntryPreview | null>(null);
   const [checkResult, setCheckResult] = useState<TelegramChannelCheckResponse | null>(null);
+  const [selectedPhotos, setSelectedPhotos] = useState<UploadedChannelEntryPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -44,6 +55,7 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
     manualChatId: '',
     text: DEFAULT_MESSAGE_TEXT,
     buttonText: DEFAULT_BUTTON_TEXT,
+    buttonStyle: 'default' as ChannelEntryButtonStyle,
     pin: true,
     disableNotification: false,
   });
@@ -56,7 +68,10 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
   const currentPreview = preview ?? {
     text: publishForm.text,
     button_text: publishForm.buttonText,
+    button_style: publishForm.buttonStyle,
     button_url: config?.mini_app_direct_url ?? '',
+    photo_paths: selectedPhotos.map((photo) => photo.file_path),
+    photo_urls: selectedPhotos.map((photo) => photo.url),
     selected_chat_id: selectedChatId,
     warnings: [],
   };
@@ -235,7 +250,41 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
       chat_id: channelId ? null : publishForm.manualChatId.trim(),
       text: publishForm.text.trim(),
       button_text: publishForm.buttonText.trim(),
+      button_style: publishForm.buttonStyle,
+      photo_paths: selectedPhotos.map((photo) => photo.file_path),
     };
+  }
+
+  function handlePhotoUpload(files: FileList | null) {
+    const incomingFiles = Array.from(files ?? []);
+    if (incomingFiles.length === 0) {
+      return;
+    }
+    if (selectedPhotos.length + incomingFiles.length > MAX_CHANNEL_ENTRY_PHOTOS) {
+      setActionError(`Можно прикрепить не больше ${MAX_CHANNEL_ENTRY_PHOTOS} фото.`);
+      return;
+    }
+    const invalidFile = incomingFiles.find((file) => !file.type.startsWith('image/'));
+    if (invalidFile) {
+      setActionError('Загрузите файл изображения.');
+      return;
+    }
+    runAction(async () => {
+      const uploadedPhotos = await Promise.all(
+        incomingFiles.map((file) => api.channelEntry.uploadPhoto(file, file.name)),
+      );
+      setSelectedPhotos((current) => [
+        ...current,
+        ...uploadedPhotos,
+      ].slice(0, MAX_CHANNEL_ENTRY_PHOTOS));
+      setPreview(null);
+      setActionMessage('Фото добавлены.');
+    });
+  }
+
+  function removePhoto(filePath: string) {
+    setSelectedPhotos((current) => current.filter((photo) => photo.file_path !== filePath));
+    setPreview(null);
   }
 
   function validatePublishForm(): string | null {
@@ -243,8 +292,17 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
       return 'Выберите сохраненный канал или укажите канал вручную.';
     }
     const text = publishForm.text.trim();
-    if (!text || text.length > 4096) {
+    if (!text && selectedPhotos.length === 0) {
+      return 'Добавьте текст сообщения или хотя бы одно фото.';
+    }
+    if (selectedPhotos.length > 0 && text.length > 1024) {
+      return 'Подпись к фото должна быть не длиннее 1024 символов.';
+    }
+    if (text.length > 4096) {
       return 'Текст сообщения обязателен и должен быть не длиннее 4096 символов.';
+    }
+    if (selectedPhotos.length > MAX_CHANNEL_ENTRY_PHOTOS) {
+      return `Можно прикрепить не больше ${MAX_CHANNEL_ENTRY_PHOTOS} фото.`;
     }
     const buttonText = publishForm.buttonText.trim();
     if (!buttonText || buttonText.length > 64) {
@@ -506,7 +564,6 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
             <span>Текст сообщения</span>
             <textarea
               maxLength={4096}
-              required
               value={publishForm.text}
               onChange={(event) => setPublishForm({ ...publishForm, text: event.target.value })}
             />

@@ -73,6 +73,7 @@ import type {
   TokenResponse,
   UploadedBannerImage,
   UploadedCategoryImage,
+  UploadedChannelEntryPhoto,
   UploadedLookImage,
   UploadedProductImage,
   UploadedTagImage,
@@ -655,6 +656,17 @@ export const api = {
         method: 'POST',
         body,
       }),
+    uploadPhoto: (file: File, altText?: string) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (altText) {
+        formData.append('alt_text', altText);
+      }
+      return apiRequest<UploadedChannelEntryPhoto>('/channel-entry/photos', {
+        method: 'POST',
+        formData,
+      });
+    },
     history: (query: QueryParams = {}) =>
       apiRequest<PageList<TelegramChannelEntryMessage>>('/channel-entry/history', { query }),
     pinMessage: (messageId: number) =>

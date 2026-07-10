@@ -84,6 +84,7 @@ class Settings(BaseSettings):
         "categories",
         "tags",
         "customer_campaigns",
+        "channel_entry",
         "payment_receipts",
         "returns",
         "looks",

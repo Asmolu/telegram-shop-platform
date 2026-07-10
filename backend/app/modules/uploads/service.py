@@ -28,6 +28,7 @@ from app.modules.uploads.repository import UploadsRepository
 from app.modules.uploads.schemas import (
     BannerImageUploadRead,
     CategoryImageUploadRead,
+    ChannelEntryPhotoUploadRead,
     TagImageUploadRead,
 )
 from app.modules.uploads.storage import LocalStorageService
@@ -183,6 +184,27 @@ class UploadsService:
             suffix=upload.extension,
         )
         return CategoryImageUploadRead(
+            file_path=file_path,
+            url=f"/uploads/{file_path}",
+            original_filename=upload.original_filename,
+            mime_type=upload.mime_type,
+            size_bytes=upload.size_bytes,
+            alt_text=alt_text,
+        )
+
+    async def upload_channel_entry_photo(
+        self,
+        *,
+        file: UploadFile,
+        alt_text: str | None = None,
+    ) -> ChannelEntryPhotoUploadRead:
+        upload = await self.validate_and_read_image(file, profile=None)
+        file_path = self.storage.save_bytes(
+            upload.content,
+            folder="channel_entry",
+            suffix=upload.extension,
+        )
+        return ChannelEntryPhotoUploadRead(
             file_path=file_path,
             url=f"/uploads/{file_path}",
             original_filename=upload.original_filename,

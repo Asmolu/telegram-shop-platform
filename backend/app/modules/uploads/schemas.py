@@ -75,3 +75,12 @@ class CategoryImageUploadRead(BaseModel):
     mime_type: str
     size_bytes: int
     alt_text: str | None
+
+
+class ChannelEntryPhotoUploadRead(BaseModel):
+    file_path: str
+    url: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    alt_text: str | None

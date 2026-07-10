@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import mimetypes
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -29,12 +31,14 @@ from app.modules.channel_entry.schemas import (
     TelegramChannelRead,
     TelegramChannelUpdate,
 )
-from app.modules.telegram.service import TelegramDeliveryError, TelegramService
+from app.modules.telegram.service import TelegramDeliveryError, TelegramPhotoUpload, TelegramService
+from app.modules.uploads.storage import LocalStorageService
 
 USERNAME_CHAT_ID_RE = re.compile(r"^@[A-Za-z0-9_]{5,64}$")
 NUMERIC_CHANNEL_CHAT_ID_RE = re.compile(r"^-100[0-9]{5,20}$")
 BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
 TELEGRAM_ERROR_MESSAGE_MAX_LENGTH = 500
+CHANNEL_ENTRY_PHOTO_FOLDER = "channel_entry/"
 
 ACTION_CHANNEL_CREATED = "channel_entry.channel_created"
 ACTION_CHANNEL_UPDATED = "channel_entry.channel_updated"
@@ -75,6 +79,7 @@ class ChannelEntryService:
         repository: ChannelEntryRepository | None = None,
         telegram_service: TelegramService | None = None,
         audit_service: AuditService | NoopAuditService | None = None,
+        storage: LocalStorageService | None = None,
         now_factory: Any | None = None,
     ) -> None:
         self.session = session
@@ -83,6 +88,7 @@ class ChannelEntryService:
             bot_token=settings.telegram_customer_bot_token,
         )
         self.audit_service = audit_service or AuditService(session)
+        self.storage = storage or LocalStorageService()
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
 
     def get_config(self) -> ChannelEntryConfigRead:
@@ -261,7 +267,10 @@ class ChannelEntryService:
         return ChannelEntryPreviewRead(
             text=payload.text.strip(),
             button_text=payload.button_text.strip(),
+            button_style=payload.button_style,
             button_url=button_url,
+            photo_paths=payload.photo_paths,
+            photo_urls=[settings.public_upload_url_for(path) for path in payload.photo_paths],
             selected_chat_id=resolved.chat_id,
             warnings=warnings,
         )
@@ -274,6 +283,7 @@ class ChannelEntryService:
     ) -> ChannelEntryPublishRead:
         resolved = await self._resolve_target(payload.channel_id, payload.chat_id)
         button_url = self._button_url()
+        photos = self._load_channel_entry_photos(payload.photo_paths)
         message = TelegramChannelEntryMessage(
             channel_id=resolved.channel_id,
             chat_id=resolved.chat_id,
@@ -293,6 +303,8 @@ class ChannelEntryService:
                 message.text,
                 message.button_text,
                 message.button_url,
+                button_style=payload.button_style,
+                photos=photos,
                 disable_notification=payload.disable_notification,
             )
         except TelegramDeliveryError as exc:
@@ -435,6 +447,32 @@ class ChannelEntryService:
     def _button_url(self) -> str:
         config = self.get_config()
         return config.mini_app_direct_url
+
+    def _load_channel_entry_photos(self, photo_paths: list[str]) -> list[TelegramPhotoUpload]:
+        photos: list[TelegramPhotoUpload] = []
+        for raw_path in photo_paths:
+            path = raw_path.strip()
+            if not path.startswith(CHANNEL_ENTRY_PHOTO_FOLDER):
+                raise AppError(
+                    "РќРµРІРµСЂРЅС‹Р№ РїСѓС‚СЊ С„РѕС‚Рѕ РґР»СЏ РїСѓР±Р»РёРєР°С†РёРё.",
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                )
+            try:
+                content = self.storage.read_bytes(path)
+            except FileNotFoundError as exc:
+                raise AppError(
+                    "Р¤РѕС‚Рѕ РґР»СЏ РїСѓР±Р»РёРєР°С†РёРё РЅРµ РЅР°Р№РґРµРЅРѕ.",
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                ) from exc
+            mime_type = mimetypes.guess_type(path)[0] or "image/jpeg"
+            photos.append(
+                TelegramPhotoUpload(
+                    content=content,
+                    filename=Path(path).name or "channel-entry-photo.jpg",
+                    mime_type=mime_type,
+                )
+            )
+        return photos
 
     async def _audit_message(
         self,
