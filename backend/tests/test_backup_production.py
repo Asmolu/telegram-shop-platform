@@ -16,14 +16,18 @@ from scripts.backup_production import (
     BackupError,
     BackupObject,
     BackupRunResult,
+    BackupState,
     YandexDiskClient,
     YandexDiskError,
     backup_run_lock,
+    backup_state_path,
     build_notification_message,
     build_yandex_remote_path,
     create_backup_metadata,
     generate_backup_id,
+    load_backup_state,
     sanitize_text,
+    save_backup_state,
     select_retention_deletes,
     upload_backup_archive,
 )
@@ -158,8 +162,9 @@ def test_config_validation_requires_restore_verification_and_policy_values() -> 
         {
             "BACKUP_RESTORE_VERIFY_ENABLED": "false",
             "BACKUP_INTERVAL_HOURS": "12",
-            "BACKUP_RETENTION_MAX_COUNT": "30",
-            "BACKUP_RETENTION_DAYS": "10",
+            "BACKUP_LOCAL_RETENTION_DAYS": "10",
+            "BACKUP_REMOTE_RETENTION_DAYS": "21",
+            "BACKUP_REMOTE_UPLOAD_CADENCE": "14",
             "TELEGRAM_BOT_TOKEN": "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
             "TELEGRAM_SELLER_CHAT_ID": "-1001234567890",
             "YANDEX_CLIENT_ID": "client-id",
@@ -172,8 +177,9 @@ def test_config_validation_requires_restore_verification_and_policy_values() -> 
 
     assert any("BACKUP_RESTORE_VERIFY_ENABLED" in error for error in errors)
     assert any("BACKUP_INTERVAL_HOURS" in error for error in errors)
-    assert any("BACKUP_RETENTION_MAX_COUNT" in error for error in errors)
-    assert any("BACKUP_RETENTION_DAYS" in error for error in errors)
+    assert any("BACKUP_LOCAL_RETENTION_DAYS" in error for error in errors)
+    assert any("BACKUP_REMOTE_RETENTION_DAYS" in error for error in errors)
+    assert any("BACKUP_REMOTE_UPLOAD_CADENCE" in error for error in errors)
 
 
 def test_config_validation_reports_missing_yandex_credentials() -> None:
@@ -391,6 +397,10 @@ def test_yandex_timeout_uses_bounded_timeout_and_skips_retention(
     )
     yandex_client._access_token = "access-token"
     results: list[BackupRunResult] = []
+    save_backup_state(
+        backup_state_path(config),
+        BackupState(successful_local_backup_count_since_last_remote=6),
+    )
 
     prepare_successful_local_backup(monkeypatch)
     monkeypatch.setattr(backup_module.time, "sleep", lambda _: None)
@@ -404,7 +414,7 @@ def test_yandex_timeout_uses_bounded_timeout_and_skips_retention(
     monkeypatch.setattr(
         backup_module,
         "cleanup_local_retention",
-        lambda *args: pytest.fail("local retention ran after failed upload"),
+        lambda *args: "deleted 0 local archive(s)",
     )
 
     exit_code = backup_module._run_backup_locked(
@@ -414,12 +424,16 @@ def test_yandex_timeout_uses_bounded_timeout_and_skips_retention(
     )
 
     captured = capsys.readouterr()
-    assert exit_code == 1
-    assert results[-1].failed_step == "yandex_upload"
-    assert results[-1].local_retention_result == "not_run"
-    assert results[-1].remote_retention_result == "not_run"
-    assert "timed out" in captured.err
-    assert "Этап ошибки: yandex_upload" in captured.err
+    state = load_backup_state(backup_state_path(config))
+    assert exit_code == 0
+    assert results[-1].status == "success"
+    assert results[-1].local_backup_status == "success"
+    assert results[-1].remote_upload_status == "failed"
+    assert results[-1].remote_retention_result == "skipped"
+    assert state.pending_remote_upload is True
+    assert state.successful_local_backup_count_since_last_remote == 7
+    assert "timed out" in captured.out
+    assert "Remote upload status: failed" in captured.out
     assert http_client.upload_attempts == 3
     assert all(timeout.connect == 20.0 for timeout in http_client.timeouts)
     assert all(timeout.read == 120.0 for timeout in http_client.timeouts)
@@ -544,6 +558,202 @@ def test_upload_backup_archive_reports_precise_sanitized_step(
     assert "unexpected" not in str(error.value)
     assert secret not in str(error.value)
     assert "<redacted>" in str(error.value)
+
+
+@pytest.mark.parametrize("starting_count", [0, 5])
+def test_remote_upload_cadence_skips_backups_one_through_six(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    starting_count: int,
+) -> None:
+    config, exit_code, upload_calls, results = run_successful_backup_for_cadence(
+        tmp_path,
+        monkeypatch,
+        starting_count=starting_count,
+    )
+
+    state = load_backup_state(backup_state_path(config))
+    assert exit_code == 0
+    assert len(results) == 1
+    assert upload_calls == []
+    assert state.successful_local_backup_count_since_last_remote == starting_count + 1
+    assert state.pending_remote_upload is False
+    assert results[-1].remote_upload_status == "skipped"
+
+
+def test_remote_upload_cadence_uploads_seventh_and_resets_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, exit_code, upload_calls, results = run_successful_backup_for_cadence(
+        tmp_path,
+        monkeypatch,
+        starting_count=6,
+    )
+
+    state = load_backup_state(backup_state_path(config))
+    assert exit_code == 0
+    assert len(results) == 1
+    assert len(upload_calls) == 1
+    assert state.successful_local_backup_count_since_last_remote == 0
+    assert state.pending_remote_upload is False
+    assert state.last_remote_upload_at is not None
+    assert results[-1].remote_upload_status == "sent"
+    assert results[-1].remote_path == upload_calls[0]
+
+
+def test_failed_seventh_remote_upload_sets_pending_without_failing_local_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, exit_code, upload_calls, results = run_successful_backup_for_cadence(
+        tmp_path,
+        monkeypatch,
+        starting_count=6,
+        upload_error=BackupError("yandex_upload", "remote unavailable"),
+    )
+
+    state = load_backup_state(backup_state_path(config))
+    assert exit_code == 0
+    assert len(results) == 1
+    assert len(upload_calls) == 1
+    assert state.successful_local_backup_count_since_last_remote == 7
+    assert state.pending_remote_upload is True
+    assert results[-1].status == "success"
+    assert results[-1].local_backup_status == "success"
+    assert results[-1].remote_upload_status == "failed"
+    assert "remote unavailable" in (results[-1].remote_upload_error or "")
+
+
+def test_pending_remote_upload_retries_next_backup_and_clears_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, exit_code, upload_calls, results = run_successful_backup_for_cadence(
+        tmp_path,
+        monkeypatch,
+        starting_count=2,
+        pending_remote=True,
+    )
+
+    state = load_backup_state(backup_state_path(config))
+    assert exit_code == 0
+    assert len(results) == 1
+    assert len(upload_calls) == 1
+    assert state.successful_local_backup_count_since_last_remote == 0
+    assert state.pending_remote_upload is False
+    assert results[-1].remote_upload_status == "sent"
+
+
+def test_local_retention_uses_three_days_without_deleting_current(tmp_path: Path) -> None:
+    config = make_backup_config(tmp_path)
+    config.local_dir.mkdir(parents=True)
+    now = datetime.now(UTC).replace(microsecond=0)
+    current_name = f"{generate_backup_id(now, config.environment)}.tar.gz"
+    old_name = f"{generate_backup_id(now - timedelta(days=4), config.environment)}.tar.gz"
+    recent_name = f"{generate_backup_id(now - timedelta(days=2), config.environment)}.tar.gz"
+    for name in (current_name, old_name, recent_name):
+        (config.local_dir / name).write_bytes(b"backup")
+
+    result = backup_module.cleanup_local_retention(config, current_name)
+
+    assert result == "deleted 1 local archive(s)"
+    assert (config.local_dir / current_name).exists()
+    assert not (config.local_dir / old_name).exists()
+    assert (config.local_dir / recent_name).exists()
+
+
+def test_remote_retention_uses_fourteen_days_without_deleting_current(tmp_path: Path) -> None:
+    config = make_backup_config(tmp_path)
+    now = datetime.now(UTC).replace(microsecond=0)
+    current_name = f"{generate_backup_id(now, config.environment)}.tar.gz"
+    old_name = f"{generate_backup_id(now - timedelta(days=15), config.environment)}.tar.gz"
+    recent_name = f"{generate_backup_id(now - timedelta(days=7), config.environment)}.tar.gz"
+
+    class FakeRetentionClient:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def list_backups(self, remote_dir: str) -> list[BackupObject]:
+            assert remote_dir == config.remote_dir
+            return [
+                BackupObject(current_name, f"/remote/{current_name}", now, 100),
+                BackupObject(old_name, f"/remote/{old_name}", now - timedelta(days=15), 100),
+                BackupObject(
+                    recent_name,
+                    f"/remote/{recent_name}",
+                    now - timedelta(days=7),
+                    100,
+                ),
+            ]
+
+        def delete(self, remote_path: str) -> None:
+            self.deleted.append(remote_path)
+
+    client = FakeRetentionClient()
+
+    result = backup_module.cleanup_remote_retention(client, config, current_name)
+
+    assert result == "deleted 1 remote archive(s)"
+    assert client.deleted == [f"/remote/{old_name}"]
+
+
+def test_systemd_timer_runs_daily_at_0400_moscow() -> None:
+    timer_path = Path(__file__).resolve().parents[2] / "scripts/systemd/telegram-shop-backup.timer"
+    timer_text = timer_path.read_text(encoding="utf-8")
+
+    assert "OnCalendar=*-*-* 04:00:00 Europe/Moscow" in timer_text
+    assert "OnUnitActiveSec=6h" not in timer_text
+
+
+def run_successful_backup_for_cadence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    starting_count: int,
+    pending_remote: bool = False,
+    upload_error: BackupError | None = None,
+) -> tuple[BackupConfig, int, list[str], list[BackupRunResult]]:
+    config = make_backup_config(tmp_path)
+    save_backup_state(
+        backup_state_path(config),
+        BackupState(
+            successful_local_backup_count_since_last_remote=starting_count,
+            pending_remote_upload=pending_remote,
+        ),
+    )
+    upload_calls: list[str] = []
+    results: list[BackupRunResult] = []
+
+    prepare_successful_local_backup(monkeypatch)
+    monkeypatch.setattr(backup_module, "YandexDiskClient", lambda **kwargs: object())
+
+    def fake_upload(client: object, archive_path: Path, remote_path: str) -> dict[str, Any]:
+        del client, archive_path
+        upload_calls.append(remote_path)
+        if upload_error is not None:
+            raise upload_error
+        return {"size": 1}
+
+    monkeypatch.setattr(backup_module, "upload_backup_archive", fake_upload)
+    monkeypatch.setattr(
+        backup_module,
+        "cleanup_remote_retention",
+        lambda *args: "deleted 0 remote archive(s)",
+    )
+    monkeypatch.setattr(
+        backup_module,
+        "cleanup_local_retention",
+        lambda *args: "deleted 0 local archive(s)",
+    )
+    monkeypatch.setattr(backup_module, "notify", lambda config, result: results.append(result))
+
+    exit_code = backup_module._run_backup_locked(
+        argparse.Namespace(skip_remote_upload=False),
+        {},
+        config,
+    )
+    return config, exit_code, upload_calls, results
 
 
 class RecordingUploadClient:
@@ -677,9 +887,12 @@ def make_backup_config(tmp_path: Path) -> BackupConfig:
         environment="production",
         local_dir=tmp_path / "backups",
         remote_dir="/TelegramShopPlatform/storage",
-        interval_hours=6,
-        retention_max_count=20,
-        retention_days=5,
+        interval_hours=24,
+        local_retention_max_count=20,
+        local_retention_days=3,
+        remote_retention_max_count=2,
+        remote_retention_days=14,
+        remote_upload_cadence=7,
         restore_verify_enabled=True,
         telegram_notifications_enabled=False,
         telegram_bot_token=None,

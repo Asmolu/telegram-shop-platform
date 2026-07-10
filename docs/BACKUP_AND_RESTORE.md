@@ -18,6 +18,8 @@ This document describes production backup and restore procedures for StyleXac.
 
 Run a backup before every Alembic migration and before any operation that could affect database or upload integrity.
 
+The scheduled production backup runs daily at 04:00 Moscow time through `telegram-shop-backup.timer`. Every run creates a local backup. Only every seventh successful local backup is uploaded to Yandex Disk.
+
 On production, use the systemd service:
 
 ```bash
@@ -45,6 +47,8 @@ When `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true`, the standalone backup script 
 
 Backups do not use `TELEGRAM_ORDERS_CHAT_ID` or `TELEGRAM_RETURNS_CHAT_ID`.
 
+Every scheduled backup sends a Telegram notification. It includes the backup id, local backup status, remote upload status (`skipped`, `sent`, or `failed`), restore verification status, archive size, local cleanup count, and remote cleanup count.
+
 ## Pre-Migration Backup
 
 ```bash
@@ -63,7 +67,7 @@ Expected current production migration after the latest deploy:
 20260703_0047
 ```
 
-The service can run for several minutes. Yandex Disk upload may timeout and retry; use journal logs to confirm final success before deploying migrations.
+The service can run for several minutes. Yandex Disk upload may timeout and retry. A remote upload failure does not by itself make a verified local backup unusable; check the notification and journal for `Remote upload status: failed`. The next daily run retries the pending seventh remote upload instead of waiting for a new seven-backup cycle.
 
 ## Restore Principles
 

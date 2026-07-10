@@ -58,6 +58,13 @@ SECRET_KEY_HINTS = (
 TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 CHECKSUM_FILENAMES = ("postgres.dump", "uploads.tar.gz", "backup_metadata.json")
 BACKUP_LOCK_FILENAME = ".backup_production.lock"
+BACKUP_STATE_FILENAME = "backup_state.json"
+DEFAULT_BACKUP_INTERVAL_HOURS = 24
+DEFAULT_LOCAL_RETENTION_DAYS = 3
+DEFAULT_REMOTE_RETENTION_DAYS = 14
+DEFAULT_LOCAL_RETENTION_MAX_COUNT = 20
+DEFAULT_REMOTE_RETENTION_MAX_COUNT = 2
+DEFAULT_REMOTE_UPLOAD_CADENCE = 7
 DEFAULT_YANDEX_TIMEOUT = httpx.Timeout(connect=20.0, read=120.0, write=300.0, pool=20.0)
 KEY_TABLES = (
     "alembic_version",
@@ -140,8 +147,11 @@ class BackupConfig:
     local_dir: Path
     remote_dir: str
     interval_hours: int
-    retention_max_count: int
-    retention_days: int
+    local_retention_max_count: int
+    local_retention_days: int
+    remote_retention_max_count: int
+    remote_retention_days: int
+    remote_upload_cadence: int
     restore_verify_enabled: bool
     telegram_notifications_enabled: bool
     telegram_bot_token: str | None
@@ -168,14 +178,38 @@ class BackupConfig:
         if not local_dir.is_absolute():
             local_dir = ROOT_DIR / local_dir
 
+        legacy_retention_days = values.get("BACKUP_RETENTION_DAYS")
+        legacy_retention_max_count = values.get("BACKUP_RETENTION_MAX_COUNT")
+
         return cls(
             backup_enabled=parse_bool(values.get("BACKUP_ENABLED", "true")),
             environment=values.get("BACKUP_ENVIRONMENT", values.get("APP_ENV", "production")),
             local_dir=local_dir,
             remote_dir=values.get("BACKUP_REMOTE_DIR", "/TelegramShopPlatform/storage"),
-            interval_hours=parse_int(values.get("BACKUP_INTERVAL_HOURS"), 6),
-            retention_max_count=parse_int(values.get("BACKUP_RETENTION_MAX_COUNT"), 20),
-            retention_days=parse_int(values.get("BACKUP_RETENTION_DAYS"), 5),
+            interval_hours=parse_int(
+                values.get("BACKUP_INTERVAL_HOURS"),
+                DEFAULT_BACKUP_INTERVAL_HOURS,
+            ),
+            local_retention_max_count=parse_int(
+                values.get("BACKUP_LOCAL_RETENTION_MAX_COUNT", legacy_retention_max_count),
+                DEFAULT_LOCAL_RETENTION_MAX_COUNT,
+            ),
+            local_retention_days=parse_int(
+                values.get("BACKUP_LOCAL_RETENTION_DAYS", legacy_retention_days),
+                DEFAULT_LOCAL_RETENTION_DAYS,
+            ),
+            remote_retention_max_count=parse_int(
+                values.get("BACKUP_REMOTE_RETENTION_MAX_COUNT"),
+                DEFAULT_REMOTE_RETENTION_MAX_COUNT,
+            ),
+            remote_retention_days=parse_int(
+                values.get("BACKUP_REMOTE_RETENTION_DAYS", legacy_retention_days),
+                DEFAULT_REMOTE_RETENTION_DAYS,
+            ),
+            remote_upload_cadence=parse_int(
+                values.get("BACKUP_REMOTE_UPLOAD_CADENCE"),
+                DEFAULT_REMOTE_UPLOAD_CADENCE,
+            ),
             restore_verify_enabled=parse_bool(
                 values.get("BACKUP_RESTORE_VERIFY_ENABLED", "true")
             ),
@@ -204,12 +238,14 @@ class BackupConfig:
 
         if not self.environment.strip():
             errors.append("BACKUP_ENVIRONMENT must not be empty.")
-        if self.interval_hours != 6:
-            errors.append("BACKUP_INTERVAL_HOURS must be 6 for the MVP production policy.")
-        if self.retention_max_count != 20:
-            errors.append("BACKUP_RETENTION_MAX_COUNT must be 20 for the MVP policy.")
-        if self.retention_days != 5:
-            errors.append("BACKUP_RETENTION_DAYS must be 5 for the MVP policy.")
+        if self.interval_hours != DEFAULT_BACKUP_INTERVAL_HOURS:
+            errors.append("BACKUP_INTERVAL_HOURS must be 24 for the daily production policy.")
+        if self.local_retention_days != DEFAULT_LOCAL_RETENTION_DAYS:
+            errors.append("BACKUP_LOCAL_RETENTION_DAYS must be 3 for production backups.")
+        if self.remote_retention_days != DEFAULT_REMOTE_RETENTION_DAYS:
+            errors.append("BACKUP_REMOTE_RETENTION_DAYS must be 14 for production backups.")
+        if self.remote_upload_cadence != DEFAULT_REMOTE_UPLOAD_CADENCE:
+            errors.append("BACKUP_REMOTE_UPLOAD_CADENCE must be 7 for production backups.")
         if not self.restore_verify_enabled:
             errors.append("BACKUP_RESTORE_VERIFY_ENABLED must stay true for production backups.")
         if not self.postgres_db.strip():
@@ -267,11 +303,21 @@ class BackupRunResult:
     failed_step: str | None = None
     error: str | None = None
     restore_verification_status: str = "pending"
+    local_backup_status: str = "pending"
+    remote_upload_status: str = "pending"
     remote_path: str | None = None
     archive_size: int = 0
     local_archive_verified: bool = False
     local_retention_result: str = "not_run"
     remote_retention_result: str = "not_run"
+    remote_upload_error: str | None = None
+
+
+@dataclass
+class BackupState:
+    successful_local_backup_count_since_last_remote: int = 0
+    pending_remote_upload: bool = False
+    last_remote_upload_at: str | None = None
 
 
 class YandexDiskClient:
@@ -1073,6 +1119,51 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def backup_state_path(config: BackupConfig) -> Path:
+    return config.local_dir / BACKUP_STATE_FILENAME
+
+
+def load_backup_state(path: Path) -> BackupState:
+    if not path.exists():
+        return BackupState()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BackupError("backup_state", f"Backup state file is unreadable: {path}") from exc
+    if not isinstance(payload, dict):
+        raise BackupError("backup_state", f"Backup state file is invalid: {path}")
+    count = parse_int(
+        str(payload.get("successful_local_backup_count_since_last_remote", 0)),
+        0,
+    )
+    return BackupState(
+        successful_local_backup_count_since_last_remote=max(count, 0),
+        pending_remote_upload=bool(payload.get("pending_remote_upload", False)),
+        last_remote_upload_at=blank_to_none(str(payload.get("last_remote_upload_at") or "")),
+    )
+
+
+def save_backup_state(path: Path, state: BackupState) -> None:
+    payload = {
+        "last_remote_upload_at": state.last_remote_upload_at,
+        "pending_remote_upload": state.pending_remote_upload,
+        "successful_local_backup_count_since_last_remote": (
+            state.successful_local_backup_count_since_last_remote
+        ),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    write_json(tmp_path, payload)
+    tmp_path.replace(path)
+
+
+def should_upload_remote(state: BackupState, config: BackupConfig) -> bool:
+    return (
+        state.pending_remote_upload
+        or state.successful_local_backup_count_since_last_remote >= config.remote_upload_cadence
+    )
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file_obj:
@@ -1183,8 +1274,8 @@ def cleanup_local_retention(config: BackupConfig, current_archive_name: str) -> 
         backups,
         current_name=current_archive_name,
         now=datetime.now(UTC),
-        max_count=config.retention_max_count,
-        retention_days=config.retention_days,
+        max_count=config.local_retention_max_count,
+        retention_days=config.local_retention_days,
     )
     for backup in to_delete:
         Path(backup.path).unlink(missing_ok=True)
@@ -1210,8 +1301,8 @@ def cleanup_remote_retention(
         backups,
         current_name=current_archive_name,
         now=datetime.now(UTC),
-        max_count=config.retention_max_count,
-        retention_days=config.retention_days,
+        max_count=config.remote_retention_max_count,
+        retention_days=config.remote_retention_days,
     )
     for backup in to_delete:
         client.delete(backup.path)
@@ -1254,10 +1345,17 @@ def build_notification_message(result: BackupRunResult) -> str:
         f"Локальная очистка: {backup_retention_label(result.local_retention_result)}",
         f"Удалённая очистка: {backup_retention_label(result.remote_retention_result)}",
     ]
+    lines.insert(5, f"Local backup status: {result.local_backup_status}")
+    lines.insert(6, f"Remote upload status: {result.remote_upload_status}")
     if result.failed_step:
         lines.append(f"Этап ошибки: {result.failed_step}")
     if result.error:
         lines.append(f"Ошибка: {sanitize_text(result.error, configured_secret_values())}")
+    if result.remote_upload_error:
+        lines.append(
+            "Remote upload error: "
+            f"{sanitize_text(result.remote_upload_error, configured_secret_values())}"
+        )
     return sanitize_text("\n".join(lines), configured_secret_values())
 
 
@@ -1291,7 +1389,7 @@ def run_backup(args: argparse.Namespace) -> int:
         print("Backup is disabled by BACKUP_ENABLED=false.")
         return 0
 
-    errors, warnings = config.validate(require_yandex=not args.skip_remote_upload)
+    errors, warnings = config.validate(require_yandex=False)
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if errors:
@@ -1305,6 +1403,8 @@ def run_backup(args: argparse.Namespace) -> int:
             failed_step="config_validation",
             error="; ".join(errors),
             restore_verification_status="not_run",
+            local_backup_status="failed",
+            remote_upload_status="skipped",
         )
         notify(config, result)
         return 1
@@ -1334,7 +1434,6 @@ def _run_backup_locked(
     result = BackupRunResult(
         backup_id=backup_id,
         environment=config.environment,
-        remote_path=remote_path,
     )
 
     try:
@@ -1370,23 +1469,67 @@ def _run_backup_locked(
         create_final_archive(work_dir, archive_path)
         result.archive_size = archive_path.stat().st_size
         result.local_archive_verified = True
+        result.local_backup_status = "success"
+
+        state_path = backup_state_path(config)
+        state = load_backup_state(state_path)
+        state.successful_local_backup_count_since_last_remote += 1
+        remote_upload_due = should_upload_remote(state, config)
 
         if args.skip_remote_upload:
-            result.status = "warning_local_verified_only"
+            result.remote_upload_status = "skipped"
             result.remote_retention_result = "skipped"
+            save_backup_state(state_path, state)
+        elif not remote_upload_due:
+            result.remote_upload_status = "skipped"
+            result.remote_retention_result = "skipped"
+            save_backup_state(state_path, state)
         else:
-            client = YandexDiskClient(
-                client_id=config.yandex_client_id or "",
-                client_secret=config.yandex_client_secret or "",
-                refresh_token=config.yandex_refresh_token or "",
-            )
-            upload_backup_archive(client, archive_path, remote_path)
-            result.remote_retention_result = cleanup_remote_retention(
-                client,
-                config,
-                archive_path.name,
-            )
-            result.status = "success"
+            try:
+                missing_yandex = [
+                    name
+                    for name, value in (
+                        ("YANDEX_CLIENT_ID", config.yandex_client_id),
+                        ("YANDEX_CLIENT_SECRET", config.yandex_client_secret),
+                        ("YANDEX_REFRESH_TOKEN", config.yandex_refresh_token),
+                    )
+                    if not value
+                ]
+                if missing_yandex:
+                    raise BackupError(
+                        "yandex_upload",
+                        "Yandex Disk upload requires these variables: "
+                        + ", ".join(missing_yandex),
+                    )
+                client = YandexDiskClient(
+                    client_id=config.yandex_client_id,
+                    client_secret=config.yandex_client_secret,
+                    refresh_token=config.yandex_refresh_token,
+                )
+                upload_backup_archive(client, archive_path, remote_path)
+            except BackupError as exc:
+                state.pending_remote_upload = True
+                save_backup_state(state_path, state)
+                result.remote_upload_status = "failed"
+                result.remote_upload_error = sanitize_text(
+                    str(exc),
+                    configured_secret_values(env),
+                )
+                result.remote_retention_result = "skipped"
+            else:
+                state.successful_local_backup_count_since_last_remote = 0
+                state.pending_remote_upload = False
+                state.last_remote_upload_at = format_utc(datetime.now(UTC))
+                save_backup_state(state_path, state)
+                result.remote_upload_status = "sent"
+                result.remote_path = remote_path
+                result.remote_retention_result = cleanup_remote_retention(
+                    client,
+                    config,
+                    archive_path.name,
+                )
+
+        result.status = "success"
 
         result.local_retention_result = cleanup_local_retention(config, archive_path.name)
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -1395,6 +1538,9 @@ def _run_backup_locked(
         return 0
     except BackupError as exc:
         result.status = "failed"
+        result.local_backup_status = "failed"
+        if result.remote_upload_status == "pending":
+            result.remote_upload_status = "skipped"
         result.failed_step = exc.step
         result.error = sanitize_text(str(exc), configured_secret_values(env))
         package_failed_backup(work_dir, archive_path, result, config, created_at, remote_path)
@@ -1403,6 +1549,9 @@ def _run_backup_locked(
         return 1
     except Exception as exc:
         result.status = "failed"
+        result.local_backup_status = "failed"
+        if result.remote_upload_status == "pending":
+            result.remote_upload_status = "skipped"
         result.failed_step = "unexpected"
         result.error = sanitize_text(str(exc), configured_secret_values(env))
         package_failed_backup(work_dir, archive_path, result, config, created_at, remote_path)
@@ -1471,7 +1620,15 @@ def run_validate_config(args: argparse.Namespace) -> int:
     print(f"environment: {config.environment}")
     print(f"local_dir: {config.local_dir}")
     print(f"remote_dir: {normalize_remote_dir(config.remote_dir)}")
-    print(f"retention: {config.retention_days} day(s), max {config.retention_max_count}")
+    print(
+        "local_retention: "
+        f"{config.local_retention_days} day(s), max {config.local_retention_max_count}"
+    )
+    print(
+        "remote_retention: "
+        f"{config.remote_retention_days} day(s), max {config.remote_retention_max_count}"
+    )
+    print(f"remote_upload_cadence: every {config.remote_upload_cadence} local backup(s)")
     print(f"restore_verification_enabled: {config.restore_verify_enabled}")
     return 0
 

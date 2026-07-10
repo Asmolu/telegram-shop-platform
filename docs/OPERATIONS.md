@@ -45,14 +45,19 @@ Do not paste logs publicly if they contain customer data, Telegram identifiers, 
 Use the systemd backup service on production. Do not run a bare Python backup command on the production host unless the service itself is broken and the fallback is explicitly approved.
 
 ```bash
+sudo systemctl status telegram-shop-backup.timer --no-pager
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
 sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
+The scheduled timer runs daily at 04:00 Moscow time. The template uses `OnCalendar=*-*-* 04:00:00 Europe/Moscow`; if timezone-aware calendar expressions are unavailable on the host, use `01:00 UTC` as the exact equivalent.
+
 Always run a backup before Alembic migrations.
 
 Backup Telegram notifications use `TELEGRAM_BACKUP_CHAT_ID`. `TELEGRAM_SELLER_CHAT_ID` is only a legacy fallback while production env files are migrated.
+
+Every run creates a local backup. Yandex Disk upload is sent only every seventh successful local backup. The Telegram notification must be checked daily for `Remote upload status: skipped`, `sent`, or `failed`. If the seventh remote upload fails after retries, the next daily backup retries that pending remote upload.
 
 ## Deployment
 

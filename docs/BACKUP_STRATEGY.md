@@ -36,7 +36,14 @@ Normal production operations must use the service, not a bare Python command.
 
 ## Backup Schedule
 
-Recommended operational policy:
+Production scheduled policy:
+
+- `telegram-shop-backup.timer` runs once per day at `04:00 Europe/Moscow`.
+- The systemd template uses `OnCalendar=*-*-* 04:00:00 Europe/Moscow`.
+- If a host systemd version cannot use timezone-aware `OnCalendar`, Moscow time is UTC+03:00 year-round, so the UTC fallback is `OnCalendar=*-*-* 01:00:00 UTC`.
+- Manual backups before migrations still use `sudo systemctl start telegram-shop-backup.service`.
+
+Operational triggers:
 
 | Trigger | Action |
 | --- | --- |
@@ -48,13 +55,25 @@ Recommended operational policy:
 
 ## Retention
 
-Use retention that covers:
+Current retention policy:
 
-- recent deploy rollback window
-- weekly recovery window
-- monthly compliance or business recovery window if required
+- Local archives are kept for 3 days.
+- Yandex Disk archives are kept for 14 days with a count guard of 2 archives.
+- Cleanup excludes the archive created by the current run.
+- Remote cleanup runs only after a remote upload is sent successfully.
 
-The exact retention policy can be adjusted by storage cost and business requirements, but old backups must not be deleted until at least one newer backup has been restore-tested.
+## Remote Upload Cadence
+
+Every backup is created and restore-verified locally. Yandex Disk upload is intentionally sparse:
+
+- Backups 1-6: local only.
+- Backup 7: local plus Yandex Disk.
+- Backups 8-13: local only.
+- Backup 14: local plus Yandex Disk.
+
+The script stores cadence state in `backup_state.json` under `BACKUP_LOCAL_DIR`. The state includes `successful_local_backup_count_since_last_remote`, `pending_remote_upload`, and `last_remote_upload_at`.
+
+If the seventh remote upload fails after retries, the local backup still counts as created. The state keeps `pending_remote_upload=true`, and the next daily backup retries the remote upload as the pending seventh remote backup instead of waiting for backup 14.
 
 ## Verification
 
@@ -73,11 +92,13 @@ sudo systemctl status telegram-shop-backup.service --no-pager
 sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
 ```
 
-Yandex Disk upload may occasionally timeout and retry. Treat the backup as successful only after the service exits successfully and the final journal lines confirm completion.
+Yandex Disk upload may occasionally timeout and retry. Treat the daily backup as locally successful when the local status is successful and restore verification passed; inspect the remote upload status separately as `skipped`, `sent`, or `failed`.
 
 ## Telegram Notifications
 
-Backup success/failure notifications are routed only to `TELEGRAM_BACKUP_CHAT_ID` with `TELEGRAM_BOT_TOKEN`. `TELEGRAM_SELLER_CHAT_ID` remains a legacy fallback when the backup chat id is absent. Backup notifications must not be routed to the orders or returns chats.
+Backup notifications are sent every run and routed only to `TELEGRAM_BACKUP_CHAT_ID` with `TELEGRAM_BOT_TOKEN`. `TELEGRAM_SELLER_CHAT_ID` remains a legacy fallback when the backup chat id is absent. Backup notifications must not be routed to the orders or returns chats.
+
+Each notification includes the backup id, local backup status, remote upload status (`skipped`, `sent`, or `failed`), restore verification status, archive size, local cleanup count, and remote cleanup count.
 
 ## Restore Testing
 

@@ -196,9 +196,12 @@ Backup settings:
 | `BACKUP_ENVIRONMENT` | Backup environment label | `production` |
 | `BACKUP_LOCAL_DIR` | Local backup staging directory | `backups` |
 | `BACKUP_REMOTE_DIR` | Yandex Disk remote directory | `/TelegramShopPlatform/storage` |
-| `BACKUP_INTERVAL_HOURS` | Expected backup interval | `6` |
-| `BACKUP_RETENTION_DAYS` | Retention by age | `5` |
-| `BACKUP_RETENTION_MAX_COUNT` | Retention by count | `20` |
+| `BACKUP_INTERVAL_HOURS` | Expected backup interval for validation | `24` |
+| `BACKUP_LOCAL_RETENTION_DAYS` | Local archive retention by age | `3` |
+| `BACKUP_LOCAL_RETENTION_MAX_COUNT` | Local archive retention by count guard | `20` |
+| `BACKUP_REMOTE_RETENTION_DAYS` | Yandex Disk archive retention by age | `14` |
+| `BACKUP_REMOTE_RETENTION_MAX_COUNT` | Yandex Disk archive retention by count guard | `2` |
+| `BACKUP_REMOTE_UPLOAD_CADENCE` | Upload every Nth successful local backup | `7` |
 | `BACKUP_RESTORE_VERIFY_ENABLED` | Enables restore verification inside backup flow | `true` |
 | `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED` | Enables Telegram backup notifications | `true` |
 | `YANDEX_CLIENT_ID` | Yandex Disk OAuth client id | `<SECRET>` |
@@ -303,13 +306,14 @@ Production backup entry points:
 - backup script: `backend/scripts/backup_production.py`
 - env file: `backend/.env.production`
 
-Backups include PostgreSQL data, upload files, backup metadata, commit/migration metadata, and local/remote retention handling. The script uploads to Yandex Disk when Yandex credentials are configured.
+Backups include PostgreSQL data, upload files, backup metadata, commit/migration metadata, and local/remote retention handling. The scheduled timer runs daily at 04:00 Moscow time. Every run creates a local backup; only every seventh successful local backup uploads to Yandex Disk.
 
 Backup notifications:
 
 - Route to `TELEGRAM_BACKUP_CHAT_ID`.
 - Fall back to `TELEGRAM_SELLER_CHAT_ID` only as a legacy fallback.
 - Must not be routed to orders or returns groups.
+- Sent every run with local backup status and remote upload status (`skipped`, `sent`, or `failed`).
 
 Restore verification:
 
@@ -330,7 +334,7 @@ Operational details:
 - Run a backup before every migration deploy.
 - Do not deploy migrations if the backup service fails.
 - The service can run for several minutes.
-- Yandex Disk upload may occasionally timeout and retry.
+- Yandex Disk upload may occasionally timeout and retry. If the seventh remote upload fails after retries, the next daily backup retries the pending remote upload.
 - Use journal logs to confirm final success, not only the first status line.
 
 ## 7. Telegram Groups and Diagnostics

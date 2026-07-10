@@ -147,16 +147,19 @@ The diagnostic helper checks Bot 2 `getMe` and `getChat` for the configured orde
 | `BACKUP_ENVIRONMENT` | Backup environment label | `production` |
 | `BACKUP_LOCAL_DIR` | Local backup staging directory | `backups` |
 | `BACKUP_REMOTE_DIR` | Yandex Disk remote directory | `/TelegramShopPlatform/storage` |
-| `BACKUP_INTERVAL_HOURS` | Expected backup interval | `6` |
-| `BACKUP_RETENTION_DAYS` | Retention by age | `5` |
-| `BACKUP_RETENTION_MAX_COUNT` | Retention by count | `20` |
+| `BACKUP_INTERVAL_HOURS` | Expected backup interval for validation | `24` |
+| `BACKUP_LOCAL_RETENTION_DAYS` | Local archive retention by age | `3` |
+| `BACKUP_LOCAL_RETENTION_MAX_COUNT` | Local archive retention by count guard | `20` |
+| `BACKUP_REMOTE_RETENTION_DAYS` | Yandex Disk archive retention by age | `14` |
+| `BACKUP_REMOTE_RETENTION_MAX_COUNT` | Yandex Disk archive retention by count guard | `2` |
+| `BACKUP_REMOTE_UPLOAD_CADENCE` | Upload every Nth successful local backup | `7` |
 | `BACKUP_RESTORE_VERIFY_ENABLED` | Enables restore verification in backup flow | `true` |
 | `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED` | Enables Telegram backup notifications | `true` |
 | `YANDEX_CLIENT_ID` | Yandex Disk OAuth client id | `<SECRET>` |
 | `YANDEX_CLIENT_SECRET` | Yandex Disk OAuth client secret | `<SECRET>` |
 | `YANDEX_REFRESH_TOKEN` | Yandex Disk OAuth refresh token | `<SECRET>` |
 
-Backup notifications use `TELEGRAM_BACKUP_CHAT_ID` and fall back to `TELEGRAM_SELLER_CHAT_ID` only for legacy env compatibility. Yandex Disk uploads can timeout and retry; operators must confirm final success through systemd journal logs.
+Backup notifications use `TELEGRAM_BACKUP_CHAT_ID` and fall back to `TELEGRAM_SELLER_CHAT_ID` only for legacy env compatibility. Yandex Disk uploads can timeout and retry; operators must confirm the daily local backup status and the remote upload status in systemd journal logs.
 
 ## Frontend Build Variables
 
