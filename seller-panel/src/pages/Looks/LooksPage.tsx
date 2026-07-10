@@ -1089,6 +1089,9 @@ function formatLookRequestError(
     if (error.status === 409 && isSlugConflictMessage(error.message)) {
       return t('looks.slugTaken');
     }
+    if (error.status === 409 && error.message === 'Product is already included in this Look') {
+      return t('looks.duplicateProduct');
+    }
     return error.message;
   }
   return error instanceof Error ? error.message : 'Request failed';

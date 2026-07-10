@@ -55,6 +55,10 @@ NUMERIC_LOOK_SLUG_MAX = 99999
 NUMERIC_LOOK_SLUG_EXHAUSTED_MESSAGE = "Numeric Look slug range 00001-99999 is exhausted."
 LOOK_SLUG_CONFLICT_MESSAGE = "Look slug already exists"
 LOOK_ALIAS_CONFLICT_MESSAGE = "Look slug conflicts with an active route alias"
+LOOK_PRODUCT_CONFLICT_MESSAGE = "Product is already included in this Look"
+LOOK_SLUG_CONSTRAINT = "ix_looks_slug"
+LOOK_ALIAS_CONSTRAINT = "uq_route_aliases_active_entity_type_alias_slug"
+LOOK_PRODUCT_CONSTRAINT = "uq_look_items_look_product"
 
 logger = logging.getLogger(__name__)
 
@@ -295,16 +299,14 @@ class LooksService:
             raise AppError(
                 self._look_integrity_error_message(
                     exc,
-                    duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
-                    alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+                    fallback_message="Could not create Look",
                 ),
                 status.HTTP_409_CONFLICT,
             ) from exc
 
         return await self._commit_and_return_admin(
             look,
-            duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
-            alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+            persistence_message="Could not create Look",
         )
 
     async def update_admin_look(
@@ -340,16 +342,11 @@ class LooksService:
                     payload.items,
                     target_status=look.status,
                 )
-                look.items = [
-                    LookItem(
-                        product_id=item.product_id,
-                        product=products_by_id[item.product_id],
-                        position=item.position,
-                        quantity=item.quantity,
-                        is_default_selected=item.is_default_selected,
-                    )
-                    for item in payload.items
-                ]
+                await self._synchronize_items(
+                    look,
+                    payload.items,
+                    products_by_id=products_by_id,
+                )
 
             await self._validate_look_publishable(look)
             if next_slug is not None:
@@ -370,16 +367,14 @@ class LooksService:
             raise AppError(
                 self._look_integrity_error_message(
                     exc,
-                    duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
-                    alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+                    fallback_message="Could not update Look",
                 ),
                 status.HTTP_409_CONFLICT,
             ) from exc
 
         return await self._commit_and_return_admin(
             look,
-            duplicate_message=LOOK_SLUG_CONFLICT_MESSAGE,
-            alias_message=LOOK_ALIAS_CONFLICT_MESSAGE,
+            persistence_message="Could not update Look",
         )
 
     async def archive_admin_look(self, look_id: int) -> LookAdminRead:
@@ -387,7 +382,10 @@ class LooksService:
         if look is None:
             raise AppError("Look not found", status.HTTP_404_NOT_FOUND)
         look.status = LookStatus.ARCHIVED
-        return await self._commit_and_return_admin(look, duplicate_message="Could not archive Look")
+        return await self._commit_and_return_admin(
+            look,
+            persistence_message="Could not archive Look",
+        )
 
     async def upload_image(
         self,
@@ -489,6 +487,34 @@ class LooksService:
                 raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
             self._validate_component_product(product, target_status=LookStatus.ACTIVE)
 
+    async def _synchronize_items(
+        self,
+        look: Look,
+        items: list[LookItemInput],
+        *,
+        products_by_id: dict[int, Product],
+    ) -> None:
+        existing_items_by_product_id = {item.product_id: item for item in look.items}
+        synchronized_items: list[LookItem] = []
+
+        for item_input in sorted(items, key=lambda item: item.position):
+            look_item = existing_items_by_product_id.pop(item_input.product_id, None)
+            if look_item is None:
+                look_item = LookItem(
+                    look_id=look.id,
+                    product_id=item_input.product_id,
+                    product=products_by_id[item_input.product_id],
+                )
+            look_item.position = item_input.position
+            look_item.quantity = item_input.quantity
+            look_item.is_default_selected = item_input.is_default_selected
+            synchronized_items.append(look_item)
+
+        for removed_item in existing_items_by_product_id.values():
+            await self.repository.delete(removed_item)
+
+        look.items = synchronized_items
+
     async def _get_public_look_by_slug_or_alias(self, slug: str) -> Look | None:
         look = await self.repository.get_public_by_slug(slug)
         if look is not None:
@@ -536,8 +562,7 @@ class LooksService:
         self,
         look: Look,
         *,
-        duplicate_message: str,
-        alias_message: str | None = None,
+        persistence_message: str,
     ) -> LookAdminRead:
         try:
             await self.session.commit()
@@ -546,8 +571,7 @@ class LooksService:
             raise AppError(
                 self._look_integrity_error_message(
                     exc,
-                    duplicate_message=duplicate_message,
-                    alias_message=alias_message,
+                    fallback_message=persistence_message,
                 ),
                 status.HTTP_409_CONFLICT,
             ) from exc
@@ -572,15 +596,53 @@ class LooksService:
     def _look_integrity_error_message(
         exc: IntegrityError,
         *,
-        duplicate_message: str,
-        alias_message: str | None = None,
+        fallback_message: str,
     ) -> str:
-        if alias_message is None:
-            return duplicate_message
-        text = " ".join(str(part) for part in (exc.orig, exc.statement, exc.params, exc)).lower()
-        if "route_alias" in text:
-            return alias_message
-        return duplicate_message
+        constraint_name = LooksService._integrity_constraint_name(exc)
+        if constraint_name == LOOK_SLUG_CONSTRAINT:
+            return LOOK_SLUG_CONFLICT_MESSAGE
+        if constraint_name == LOOK_ALIAS_CONSTRAINT:
+            return LOOK_ALIAS_CONFLICT_MESSAGE
+        if constraint_name == LOOK_PRODUCT_CONSTRAINT:
+            return LOOK_PRODUCT_CONFLICT_MESSAGE
+
+        # SQLite and some wrapped async drivers do not expose structured constraint metadata.
+        # Inspect only the sanitized driver message; never include it in the API response.
+        driver_text = str(exc.orig).lower()
+        if (
+            LOOK_SLUG_CONSTRAINT in driver_text
+            or "unique constraint failed: looks.slug" in driver_text
+        ):
+            return LOOK_SLUG_CONFLICT_MESSAGE
+        if LOOK_ALIAS_CONSTRAINT in driver_text or (
+            "unique constraint failed:" in driver_text
+            and "route_aliases.entity_type" in driver_text
+            and "route_aliases.alias_slug" in driver_text
+        ):
+            return LOOK_ALIAS_CONFLICT_MESSAGE
+        if LOOK_PRODUCT_CONSTRAINT in driver_text or (
+            "unique constraint failed:" in driver_text
+            and "look_items.look_id" in driver_text
+            and "look_items.product_id" in driver_text
+        ):
+            return LOOK_PRODUCT_CONFLICT_MESSAGE
+        return fallback_message
+
+    @staticmethod
+    def _integrity_constraint_name(exc: IntegrityError) -> str | None:
+        current: BaseException | None = exc.orig
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            constraint_name = getattr(current, "constraint_name", None)
+            if isinstance(constraint_name, str):
+                return constraint_name
+            diagnostic = getattr(current, "diag", None)
+            diagnostic_name = getattr(diagnostic, "constraint_name", None)
+            if isinstance(diagnostic_name, str):
+                return diagnostic_name
+            current = current.__cause__ or current.__context__
+        return None
 
     async def _get_or_create_cart_for_mutation(self, user_id: int) -> Cart:
         cart = await self.cart_repository.get_by_user_id(user_id)

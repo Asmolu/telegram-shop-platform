@@ -1,16 +1,22 @@
+import os
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient, Response
 from PIL import Image
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.datastructures import Headers
 
-from app.common.deps import get_current_user
+from app.common.deps import get_current_user, get_db_session
 from app.core.errors import AppError
 from app.db.models import (
     Cart,
@@ -190,6 +196,9 @@ class FakeLooksRepository:
         if isinstance(instance, LookImage):
             look = self.looks[instance.look_id]
             look.images = [image for image in look.images if image.id != instance.id]
+        elif isinstance(instance, LookItem):
+            look = self.looks[instance.look_id]
+            look.items = [item for item in look.items if item.id != instance.id]
 
     def _persist_look(self, look: Look) -> None:
         if getattr(look, "id", None) is None:
@@ -513,6 +522,348 @@ async def test_look_route_alias_integrity_error_returns_conflict() -> None:
     assert exc_info.value.message == "Look slug conflicts with an active route alias"
     assert exc_info.value.message != "Database service unavailable"
     assert session.rollback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_real_database_full_unchanged_patch_preserves_item_ids_and_rows(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    payload = _full_update_payload(look)
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(look.id, payload)
+
+    assert updated.slug == look.slug
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+    assert [item.position for item in updated.items] == [0, 1, 2]
+    assert await _look_item_row_count(postgres_looks_session, look.id) == 3
+    assert await _active_look_alias_count(postgres_looks_session, look.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_real_database_title_description_update_preserves_items(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(title="Updated title", description="Updated description"),
+    )
+
+    assert updated.title == "Updated title"
+    assert updated.description == "Updated description"
+    assert updated.slug == look.slug
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+
+
+@pytest.mark.asyncio
+async def test_real_database_draft_to_active_preserves_items(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(
+        postgres_looks_session,
+        status_value=LookStatus.DRAFT,
+    )
+    original_ids = _look_item_ids_by_product(look)
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(status=LookStatus.ACTIVE),
+    )
+
+    assert updated.status == LookStatus.ACTIVE
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+
+
+@pytest.mark.asyncio
+async def test_real_database_slug_change_creates_resolving_alias_and_preserves_items(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(
+        postgres_looks_session,
+        status_value=LookStatus.ACTIVE,
+    )
+    old_slug = look.slug
+    new_slug = f"look-{uuid4().hex}"
+    original_ids = _look_item_ids_by_product(look)
+    service = LooksService(postgres_looks_session)
+
+    updated = await service.update_admin_look(
+        look.id,
+        LookUpdate(slug=new_slug, items=_item_inputs(look)),
+    )
+
+    assert updated.slug == new_slug
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+    alias = await service.route_aliases.repository.get_active_by_slug(
+        RouteAliasEntityType.LOOK,
+        old_slug,
+    )
+    assert alias is not None
+    assert alias.entity_id == look.id
+    assert (await service.get_public_look(new_slug)).slug == new_slug
+    assert (await service.get_public_look(old_slug)).slug == new_slug
+
+
+@pytest.mark.asyncio
+async def test_real_database_reorder_preserves_item_ids(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    expected_product_ids = [item.product_id for item in reversed(look.items)]
+    reversed_items = [
+        LookItemInput(
+            product_id=item.product_id,
+            position=position,
+            quantity=item.quantity,
+            is_default_selected=item.is_default_selected,
+        )
+        for position, item in enumerate(reversed(look.items))
+    ]
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(items=reversed_items),
+    )
+
+    assert [item.product_id for item in updated.items] == expected_product_ids
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+
+
+@pytest.mark.asyncio
+async def test_real_database_quantity_and_default_updates_preserve_item_ids(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    inputs = _item_inputs(look)
+    inputs[0].quantity = 3
+    inputs[0].is_default_selected = False
+    inputs[1].is_default_selected = True
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(items=inputs),
+    )
+
+    assert updated.items[0].quantity == 3
+    assert updated.items[0].is_default_selected is False
+    assert updated.items[1].is_default_selected is True
+    assert {item.product_id: item.id for item in updated.items} == original_ids
+
+
+@pytest.mark.asyncio
+async def test_real_database_add_product_creates_only_one_item(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    inputs = _item_inputs(look)
+    inputs.append(
+        LookItemInput(
+            product_id=products[3].id,
+            position=3,
+            quantity=2,
+            is_default_selected=False,
+        )
+    )
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(items=inputs),
+    )
+
+    assert {item.product_id: item.id for item in updated.items[:3]} == original_ids
+    assert len(updated.items) == 4
+    assert updated.items[3].product_id == products[3].id
+    assert updated.items[3].id not in original_ids.values()
+    assert updated.items[3].quantity == 2
+
+
+@pytest.mark.asyncio
+async def test_real_database_remove_product_deletes_only_omitted_item(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    removed_product_id = look.items[1].product_id
+    inputs = [item for item in _item_inputs(look) if item.product_id != removed_product_id]
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(items=inputs),
+    )
+
+    assert removed_product_id not in {item.product_id for item in updated.items}
+    assert {item.product_id: item.id for item in updated.items} == {
+        product_id: item_id
+        for product_id, item_id in original_ids.items()
+        if product_id != removed_product_id
+    }
+    assert await _look_item_row_count(postgres_looks_session, look.id) == 2
+
+
+@pytest.mark.asyncio
+async def test_real_database_replace_product_preserves_unchanged_rows(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    removed_product_id = look.items[1].product_id
+    inputs = _item_inputs(look)
+    inputs[1] = LookItemInput(
+        product_id=products[3].id,
+        position=1,
+        quantity=2,
+        is_default_selected=False,
+    )
+
+    updated = await LooksService(postgres_looks_session).update_admin_look(
+        look.id,
+        LookUpdate(items=inputs),
+    )
+
+    updated_ids = {item.product_id: item.id for item in updated.items}
+    assert removed_product_id not in updated_ids
+    assert updated_ids[products[0].id] == original_ids[products[0].id]
+    assert updated_ids[products[2].id] == original_ids[products[2].id]
+    assert updated_ids[products[3].id] not in original_ids.values()
+    assert await _look_item_row_count(postgres_looks_session, look.id) == 3
+
+
+@pytest.mark.asyncio
+async def test_real_database_duplicate_product_constraint_is_truthfully_mapped_and_rolled_back(
+    postgres_looks_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    look_id = look.id
+    original_slug = look.slug
+    next_slug = f"look-{uuid4().hex}"
+    original_title = look.title
+    original_ids = _look_item_ids_by_product(look)
+    service = LooksService(postgres_looks_session)
+
+    async def add_duplicate_item(
+        target: Look,
+        _inputs: list[LookItemInput],
+        *,
+        products_by_id: dict[int, Product],
+    ) -> None:
+        product_id = target.items[0].product_id
+        postgres_looks_session.add(
+            LookItem(
+                look_id=target.id,
+                product_id=product_id,
+                product=products_by_id[product_id],
+                position=9,
+                quantity=1,
+                is_default_selected=False,
+            )
+        )
+
+    monkeypatch.setattr(service, "_synchronize_items", add_duplicate_item)
+
+    with pytest.raises(AppError) as exc_info:
+        await service.update_admin_look(
+            look.id,
+            LookUpdate(
+                title="Must roll back",
+                slug=next_slug,
+                items=_item_inputs(look),
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.message == "Product is already included in this Look"
+    persisted = await service.repository.get_admin_by_id(look_id)
+    assert persisted is not None
+    assert persisted.title == original_title
+    assert persisted.slug == original_slug
+    assert _look_item_ids_by_product(persisted) == original_ids
+    assert await _look_item_row_count(postgres_looks_session, look_id) == 3
+    assert await _active_look_alias_count(postgres_looks_session, look_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_real_database_duplicate_current_slug_and_alias_conflicts_are_distinct(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    first, _products = await _seed_postgres_look(postgres_looks_session)
+    second, _products = await _seed_postgres_look(postgres_looks_session)
+    first_id = first.id
+    second_id = second.id
+    second_slug = second.slug
+    service = LooksService(postgres_looks_session)
+
+    with pytest.raises(AppError) as slug_error:
+        await service.update_admin_look(first_id, LookUpdate(slug=second_slug))
+    assert slug_error.value.status_code == 409
+    assert slug_error.value.message == "Look slug already exists"
+
+    alias_slug = f"alias-{uuid4().hex}"
+    postgres_looks_session.add(
+        RouteAlias(
+            entity_type=RouteAliasEntityType.LOOK,
+            entity_id=second_id,
+            alias_slug=alias_slug,
+            is_active=True,
+        )
+    )
+    await postgres_looks_session.commit()
+
+    with pytest.raises(AppError) as alias_error:
+        await service.update_admin_look(first_id, LookUpdate(slug=alias_slug))
+    assert alias_error.value.status_code == 409
+    assert alias_error.value.message == "Look slug conflicts with an active route alias"
+
+
+@pytest.mark.asyncio
+async def test_patch_endpoint_with_unchanged_persisted_items_returns_200(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    response = await _patch_look(postgres_looks_session, look, _full_update_payload(look))
+
+    assert response.status_code == 200
+    assert {item["product_id"]: item["id"] for item in response.json()["items"]} == original_ids
+
+
+@pytest.mark.asyncio
+async def test_patch_endpoint_duplicate_product_payload_is_validation_error_without_changes(
+    postgres_looks_session: AsyncSession,
+) -> None:
+    look, _products = await _seed_postgres_look(postgres_looks_session)
+    original_ids = _look_item_ids_by_product(look)
+    duplicate = _item_inputs(look)[0]
+    payload = _full_update_payload(look).model_dump(mode="json")
+    payload["items"] = [duplicate.model_dump(), duplicate.model_dump()]
+
+    response = await _patch_look(postgres_looks_session, look, payload)
+
+    assert response.status_code == 422
+    assert "Product can be added to a Look only once" in str(response.json()["detail"])
+    persisted = await LooksService(postgres_looks_session).repository.get_admin_by_id(look.id)
+    assert persisted is not None
+    assert _look_item_ids_by_product(persisted) == original_ids
+
+
+def test_unrelated_look_integrity_error_uses_sanitized_persistence_message() -> None:
+    error = IntegrityError("unsafe sql", {"secret": "value"}, Exception("foreign key failed"))
+
+    message = LooksService._look_integrity_error_message(
+        error,
+        fallback_message="Could not update Look",
+    )
+
+    assert message == "Could not update Look"
+    assert "unsafe" not in message
+    assert "secret" not in message
 
 
 @pytest.mark.asyncio
@@ -1386,6 +1737,153 @@ def test_look_slug_generation_requires_seller_or_admin() -> None:
 
     assert unauthenticated.status_code == 401
     assert regular_user.status_code == 403
+
+
+@pytest.fixture
+async def postgres_looks_session() -> AsyncGenerator[AsyncSession, None]:
+    database_url = os.getenv("LOOKS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("set LOOKS_TEST_DATABASE_URL to run PostgreSQL Look regression tests")
+
+    engine = create_async_engine(database_url)
+    connection = await engine.connect()
+    transaction = await connection.begin()
+    session_factory = async_sessionmaker(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        async with session_factory() as session:
+            yield session
+    finally:
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
+        await engine.dispose()
+
+
+async def _seed_postgres_look(
+    session: AsyncSession,
+    *,
+    status_value: LookStatus = LookStatus.DRAFT,
+) -> tuple[Look, list[Product]]:
+    prefix = uuid4().hex
+    id_base = int(prefix[:7], 16)
+    products = [
+        _product(
+            product_id=id_base + index,
+            variants=[
+                _variant(
+                    variant_id=id_base + index,
+                    product_id=id_base + index,
+                    size="M",
+                )
+            ],
+        )
+        for index in range(1, 5)
+    ]
+    look = Look(
+        slug=f"look-{prefix}",
+        title="Persisted Look",
+        description="Persisted description",
+        status=status_value,
+        is_listed=True,
+        search_priority=1,
+        items=[
+            LookItem(
+                product=product,
+                position=position,
+                quantity=position + 1,
+                is_default_selected=position != 1,
+            )
+            for position, product in enumerate(products[:3])
+        ],
+    )
+    session.add_all([*products, look])
+    await session.commit()
+
+    persisted = await LooksService(session).repository.get_admin_by_id(look.id)
+    assert persisted is not None
+    return persisted, products
+
+
+def _item_inputs(look: Look) -> list[LookItemInput]:
+    return [
+        LookItemInput(
+            product_id=item.product_id,
+            position=item.position,
+            quantity=item.quantity,
+            is_default_selected=item.is_default_selected,
+        )
+        for item in look.items
+    ]
+
+
+def _full_update_payload(look: Look) -> LookUpdate:
+    return LookUpdate(
+        title=look.title,
+        slug=look.slug,
+        description=look.description,
+        status=look.status,
+        is_listed=look.is_listed,
+        search_priority=look.search_priority,
+        items=_item_inputs(look),
+    )
+
+
+def _look_item_ids_by_product(look: Look) -> dict[int, int]:
+    return {item.product_id: item.id for item in look.items}
+
+
+async def _look_item_row_count(session: AsyncSession, look_id: int) -> int:
+    result = await session.execute(
+        select(func.count()).select_from(LookItem).where(LookItem.look_id == look_id)
+    )
+    return int(result.scalar_one())
+
+
+async def _active_look_alias_count(session: AsyncSession, look_id: int) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(RouteAlias)
+        .where(
+            RouteAlias.entity_type == RouteAliasEntityType.LOOK,
+            RouteAlias.entity_id == look_id,
+            RouteAlias.is_active.is_(True),
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def _patch_look(
+    session: AsyncSession,
+    look: Look,
+    payload: LookUpdate | dict[str, object],
+) -> Response:
+    app = create_app()
+
+    async def current_user() -> User:
+        return _user(UserRole.SELLER)
+
+    async def database_session() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    app.dependency_overrides[get_current_user] = current_user
+    app.dependency_overrides[get_db_session] = database_session
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            return await client.patch(
+                f"/api/v1/looks/admin/{look.id}",
+                json=payload.model_dump(mode="json")
+                if isinstance(payload, LookUpdate)
+                else payload,
+            )
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _looks_service_with_aliases(

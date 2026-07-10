@@ -155,6 +155,11 @@ test('look editor maps backend slug conflicts to a clear localized error', () =>
   assert.match(i18nSource, /'looks\.slugTaken': 'Slug is already taken\.'/);
 });
 
+test('look editor maps duplicate-product persistence conflicts separately from slug errors', () => {
+  assert.match(pageSource, /Product is already included in this Look/);
+  assert.match(pageSource, /return t\('looks\.duplicateProduct'\)/);
+});
+
 test('look edit slug updates use the same clean conflict handling as creates', () => {
   assert.match(pageSource, /mode === 'edit' && lookId/);
   assert.match(pageSource, /api\.looks\.update\(lookId, payload\)/);
