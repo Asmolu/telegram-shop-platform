@@ -36,13 +36,13 @@
   --shadow-elevated: 0 10px 28px rgba(17, 24, 39, 0.06);
   --marketplace-gradient: linear-gradient(135deg, #ed3cca 0%, #7c1af8 100%);
   --keyboard-inset: 0px;
-  --control-secondary-bg: #24242c;
-  --control-secondary-bg-hover: #30303a;
-  --control-secondary-border: rgba(255, 255, 255, 0.12);
-  --control-secondary-text: #f7f7fa;
-  --control-secondary-muted: #d4d4dc;
+  --control-secondary-bg: #ffffff;
+  --control-secondary-bg-hover: #f8fafc;
+  --control-secondary-border: #e5e7eb;
+  --control-secondary-text: #111827;
+  --control-secondary-muted: #374151;
   --control-active-bg: var(--marketplace-gradient);
-  --control-active-border: rgba(255, 255, 255, 0.2);
+  --control-active-border: transparent;
   --control-active-text: #ffffff;
   --tg-safe-area-top: 0px;
   --tg-content-safe-area-top: 0px;
@@ -2502,7 +2502,7 @@ label {
 .variant-chip--selected,
 .variant-button.is-selected,
 .color-button.is-selected {
-  border-color: color-mix(in srgb, #ffffff 18%, #ed3cca);
+  border-color: transparent;
   background: var(--marketplace-gradient);
   color: #ffffff;
   box-shadow: none;
@@ -3988,27 +3988,53 @@ label {
   gap: 8px;
 }
 
+.delivery-method-trigger,
 .delivery-method-option {
   display: flex;
   min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-secondary-border);
   border-radius: 14px;
-  background: #fff;
-  color: var(--text);
+  background: var(--control-secondary-bg);
+  color: var(--control-secondary-text);
   cursor: pointer;
   font: inherit;
   padding: 12px 14px;
   text-align: left;
+  box-shadow: none;
+}
+
+.delivery-method-trigger {
+  border-radius: 16px;
+}
+
+.delivery-method-trigger[aria-expanded='true'] .delivery-method-chevron {
+  transform: rotate(180deg);
 }
 
 .delivery-method-option[aria-checked='true'] {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(218, 34, 78, 0.12);
+  background: color-mix(in srgb, var(--primary-soft) 55%, var(--control-secondary-bg));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
 }
 
+.delivery-method-option__meta {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.delivery-method-chevron {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.delivery-method-trigger strong,
 .delivery-method-option strong {
   flex: 0 0 auto;
   color: var(--primary);

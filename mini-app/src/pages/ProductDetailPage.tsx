@@ -680,7 +680,7 @@ export function ProductDetailPage() {
       <section className="detail-card">
         <h2>Отзывы</h2>
         {reviews.length === 0 ? (
-          <EmptyState title="Отзывов пока нет" message="Первый отзыв появится после модерации." />
+          <EmptyState title="Отзывов пока нет" message="Оставьте первый отзыв после покупки!" />
         ) : (
           <div className="review-list">
             {reviews.map((review) => (

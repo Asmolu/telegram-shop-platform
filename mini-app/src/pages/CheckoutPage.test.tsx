@@ -272,6 +272,7 @@ describe('CheckoutPage item details', () => {
   it('allows pickup checkout without address', async () => {
     render(<CheckoutPage />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /СДЭК/ }));
     fireEvent.click(await screen.findByRole('radio', { name: /Самовывоз/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
 
@@ -287,9 +288,11 @@ describe('CheckoutPage item details', () => {
   it('shows paid delivery price rows and includes delivery in checkout total', async () => {
     render(<CheckoutPage />);
 
-    expect(await screen.findByRole('radio', { name: /Маршруткой\+200/ })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: /ВБ доставка\+0/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\+200/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /СДЭК/ }));
+    expect(await screen.findByRole('radio', { name: /Маршруткой\s*\+200/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /ВБ доставка\s*Нужно уточнить/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Самовывоз\s*Бесплатно/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\s*\+200/ }));
 
     const summary = screen.getByText('Доставка').closest('div');
     expect(summary?.textContent).toContain('200');
@@ -311,7 +314,8 @@ describe('CheckoutPage item details', () => {
     fireEvent.change(await screen.findByPlaceholderText('Введите промокод'), { target: { value: 'save50' } });
     fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
     await screen.findByText(/SAVE50/);
-    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\+200/ }));
+    fireEvent.click(screen.getByRole('button', { name: /СДЭК/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Маршруткой\s*\+200/ }));
 
     expect(screen.getByText('Скидка').closest('div')?.textContent).toContain('50');
     expect(screen.getByText('Доставка').closest('div')?.textContent).toContain('200');

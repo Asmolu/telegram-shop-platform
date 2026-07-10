@@ -83,8 +83,14 @@ function deliveryPriceFor(method: OrderDeliveryMethod) {
   return DELIVERY_METHODS.find((item) => item.value === method)?.price ?? 0;
 }
 
-function formatDeliveryPrice(price: number) {
-  return `+${formatPrice(price)}`;
+function formatDeliveryPriceLabel(method: { value: OrderDeliveryMethod; price: number }) {
+  if (method.value === 'PICKUP') {
+    return 'Бесплатно';
+  }
+  if (method.value === 'WB' || method.value === 'CDEK') {
+    return 'Нужно уточнить';
+  }
+  return `+${formatPrice(method.price)}`;
 }
 
 export function CheckoutPage() {
@@ -111,6 +117,7 @@ export function CheckoutPage() {
   const [promoCode, setPromoCode] = React.useState(initialPromoCode.current);
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
   const [deliveryMethod, setDeliveryMethod] = React.useState<OrderDeliveryMethod>('CDEK');
+  const [deliverySelectorOpen, setDeliverySelectorOpen] = React.useState(false);
   const [deliveryMethodError, setDeliveryMethodError] = React.useState<string | null>(null);
   const [form, setForm] = React.useState({
     contactName: getUserDisplayName(user ?? telegramUser),
@@ -250,6 +257,14 @@ export function CheckoutPage() {
     checkoutKeyRef.current = null;
     setPromoCode('');
     setPromoValidation(null);
+    setNotice(null);
+  }
+
+  function selectDeliveryMethod(method: OrderDeliveryMethod) {
+    checkoutKeyRef.current = null;
+    setDeliveryMethod(method);
+    setDeliveryMethodError(null);
+    setDeliverySelectorOpen(false);
     setNotice(null);
   }
 
@@ -413,6 +428,7 @@ export function CheckoutPage() {
 
   const selectedItems = cart?.items.filter((item) => item.is_selected) ?? [];
   const selectedTotal = cart?.selected_total ?? cart?.total ?? '0';
+  const selectedDeliveryMethod = DELIVERY_METHODS.find((method) => method.value === deliveryMethod) ?? DELIVERY_METHODS[0];
   const deliveryPrice = deliveryPriceFor(deliveryMethod);
   const goodsTotalAfterDiscount = Number(promoValidation?.total_amount ?? selectedTotal);
   const finalTotal = goodsTotalAfterDiscount + deliveryPrice;
@@ -558,26 +574,36 @@ export function CheckoutPage() {
               aria-describedby={deliveryMethodError ? 'delivery-method-error' : undefined}
             >
               <span>Способ доставки</span>
-              <span className="delivery-method-options" role="radiogroup">
-                {DELIVERY_METHODS.map((method) => (
-                  <button
-                    aria-checked={deliveryMethod === method.value}
-                    className="delivery-method-option"
-                    key={method.value}
-                    role="radio"
-                    type="button"
-                    onClick={() => {
-                      checkoutKeyRef.current = null;
-                      setDeliveryMethod(method.value);
-                      setDeliveryMethodError(null);
-                      setNotice(null);
-                    }}
-                  >
-                    <span>{method.label}</span>
-                    <strong>{formatDeliveryPrice(method.price)}</strong>
-                  </button>
-                ))}
-              </span>
+              <button
+                aria-controls="delivery-method-options"
+                aria-expanded={deliverySelectorOpen}
+                className="delivery-method-trigger"
+                type="button"
+                onClick={() => setDeliverySelectorOpen((current) => !current)}
+              >
+                <span>{selectedDeliveryMethod.label}</span>
+                <span className="delivery-method-option__meta">
+                  <strong>{formatDeliveryPriceLabel(selectedDeliveryMethod)}</strong>
+                  <span className="delivery-method-chevron" aria-hidden="true">⌄</span>
+                </span>
+              </button>
+              {deliverySelectorOpen ? (
+                <span className="delivery-method-options" id="delivery-method-options" role="radiogroup">
+                  {DELIVERY_METHODS.map((method) => (
+                    <button
+                      aria-checked={deliveryMethod === method.value}
+                      className="delivery-method-option"
+                      key={method.value}
+                      role="radio"
+                      type="button"
+                      onClick={() => selectDeliveryMethod(method.value)}
+                    >
+                      <span>{method.label}</span>
+                      <strong>{formatDeliveryPriceLabel(method)}</strong>
+                    </button>
+                  ))}
+                </span>
+              ) : null}
               {deliveryMethodError ? (
                 <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
               ) : null}
