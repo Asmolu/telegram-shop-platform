@@ -109,6 +109,15 @@ class FakeReturnNotifier:
         self.requests.append(return_request)
 
 
+class FakeUserBlocksService:
+    def __init__(self, *, blocked_user_ids: set[int] | None = None) -> None:
+        self.blocked_user_ids = blocked_user_ids or set()
+
+    async def assert_user_not_blocked(self, user_id: int) -> None:
+        if user_id in self.blocked_user_ids:
+            raise AppError("Ваш аккаунт ограничен. Свяжитесь с продавцом.", 403)
+
+
 class FakeTelegramService:
     bot_token = "token"
     seller_chat_id = "seller-chat"
@@ -1634,6 +1643,7 @@ def _returns_service(
         storage=storage,
         seller_notifier=seller_notifier or FakeReturnNotifier(),
         now_factory=lambda: NOW,
+        users_service=FakeUserBlocksService(),
     )
     repository = FakeReturnsRepository()
     service.repository = repository  # type: ignore[assignment]

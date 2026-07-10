@@ -21,6 +21,7 @@ import { SellerBotPage } from './pages/SellerBot/SellerBotPage';
 import { CustomerNotificationsPage } from './pages/CustomerNotifications/CustomerNotificationsPage';
 import { ChannelEntryPage } from './pages/ChannelEntry/ChannelEntryPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
+import { UserBlocksPage } from './pages/UserBlocks/UserBlocksPage';
 
 const navItems: NavItem[] = [
   { path: '/dashboard', labelKey: 'nav.dashboard' },
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
   { path: '/promo-codes', labelKey: 'nav.promoCodes' },
   { path: '/reviews', labelKey: 'nav.reviews' },
   { path: '/returns', labelKey: 'nav.returns' },
+  { path: '/blocks', labelKey: 'nav.userBlocks' },
   { path: '/looks', labelKey: 'nav.looks' },
   { path: '/statistics', labelKey: 'nav.statistics' },
   { path: '/customer-notifications', labelKey: 'nav.customerNotifications' },
@@ -58,6 +60,7 @@ function getPageTitleKey(path: string): string {
   if (path.startsWith('/promo-codes')) return 'nav.promoCodes';
   if (path.startsWith('/reviews')) return 'nav.reviews';
   if (path.startsWith('/returns')) return 'nav.returns';
+  if (path.startsWith('/blocks') || path.startsWith('/user-blocks')) return 'nav.userBlocks';
   if (path === '/looks/new') return 'nav.addLook';
   if (path.startsWith('/looks/') && path.endsWith('/edit')) return 'nav.editLook';
   if (path.startsWith('/looks')) return 'nav.looks';
@@ -198,6 +201,9 @@ function renderPage(
   if (path === '/banners') return <BannersPage {...sharedPageProps} />;
   if (path === '/promo-codes') return <PromoCodesPage {...sharedPageProps} />;
   if (path === '/reviews') return <ReviewsPage {...sharedPageProps} />;
+  if (path === '/blocks' || path === '/user-blocks') {
+    return <UserBlocksPage onAuthExpired={sharedPageProps.onAuthExpired} />;
+  }
   if (path === '/returns' || /^\/returns\/\d+$/.test(path)) {
     const match = path.match(/^\/returns\/(\d+)$/);
     return (

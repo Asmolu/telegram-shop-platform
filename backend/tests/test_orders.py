@@ -260,6 +260,15 @@ class FakeIdempotencyService:
         claim.record["lock"].release()
 
 
+class FakeUserBlocksService:
+    def __init__(self, *, blocked_user_ids: set[int] | None = None) -> None:
+        self.blocked_user_ids = blocked_user_ids or set()
+
+    async def assert_user_not_blocked(self, user_id: int) -> None:
+        if user_id in self.blocked_user_ids:
+            raise AppError("Ваш аккаунт ограничен. Свяжитесь с продавцом.", 403)
+
+
 class FakeOrdersRepository:
     def __init__(self) -> None:
         self.carts: dict[int, Cart] = {}
@@ -1655,6 +1664,7 @@ def _orders_service(
         audit_service=audit_service,
         manual_payments_service=FakeManualPaymentsService(enabled=manual_payments_enabled),
         idempotency_service=idempotency_service,
+        users_service=FakeUserBlocksService(),
     )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(

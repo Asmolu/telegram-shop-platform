@@ -355,6 +355,70 @@ class User(Base):
         foreign_keys="ReturnRequestItem.restocked_by_user_id",
         order_by="ReturnRequestItem.id",
     )
+    active_blocks: Mapped[list["UserBlock"]] = relationship(
+        back_populates="user",
+        foreign_keys="UserBlock.user_id",
+        order_by="UserBlock.id",
+    )
+    created_user_blocks: Mapped[list["UserBlock"]] = relationship(
+        back_populates="blocked_by",
+        foreign_keys="UserBlock.blocked_by_user_id",
+        order_by="UserBlock.id",
+    )
+    removed_user_blocks: Mapped[list["UserBlock"]] = relationship(
+        back_populates="unblocked_by",
+        foreign_keys="UserBlock.unblocked_by_user_id",
+        order_by="UserBlock.id",
+    )
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (
+        Index("ix_user_blocks_active_user", "user_id", "unblocked_at"),
+        Index("ix_user_blocks_active_telegram_id", "telegram_id", "unblocked_at"),
+        Index("ix_user_blocks_active_username", "telegram_username", "unblocked_at"),
+        Index("ix_user_blocks_blocked_at", "blocked_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blocked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    blocked_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    unblocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    unblocked_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    user: Mapped[User | None] = relationship(
+        back_populates="active_blocks",
+        foreign_keys=[user_id],
+    )
+    blocked_by: Mapped[User | None] = relationship(
+        back_populates="created_user_blocks",
+        foreign_keys=[blocked_by_user_id],
+    )
+    unblocked_by: Mapped[User | None] = relationship(
+        back_populates="removed_user_blocks",
+        foreign_keys=[unblocked_by_user_id],
+    )
 
 
 class IdempotencyRecord(Base):

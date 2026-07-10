@@ -1938,6 +1938,23 @@ textarea:focus {
   background: #f9fafb;
 }
 
+.user-blocks-form-panel {
+  max-width: 920px;
+}
+
+.user-blocks-form textarea {
+  min-height: 84px;
+}
+
+.user-blocks-table {
+  min-width: 820px;
+}
+
+.user-blocks-reason {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
 .order-status-summary {
   display: flex;
   flex-wrap: wrap;

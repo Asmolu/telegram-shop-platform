@@ -14,6 +14,7 @@ from app.modules.auth.schemas import TokenResponse
 from app.modules.auth.telegram import TelegramInitDataError, validate_telegram_init_data
 from app.modules.customer_notifications.repository import CustomerNotificationsRepository
 from app.modules.users.repository import UsersRepository
+from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,7 @@ class AuthService:
         user.first_name = _optional_str(telegram_user.get("first_name"))
         user.last_name = _optional_str(telegram_user.get("last_name"))
         user.phone = _optional_str(telegram_user.get("phone") or telegram_user.get("phone_number"))
+        await UsersService(self.session).attach_pending_blocks_for_user(user)
 
         try:
             await self.session.commit()

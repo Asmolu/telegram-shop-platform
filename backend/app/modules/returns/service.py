@@ -45,6 +45,7 @@ from app.modules.returns.telegram_notifications import (
 )
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.uploads.storage import LocalStorageService
+from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
 
@@ -221,12 +222,14 @@ class ReturnsService:
         storage: LocalStorageService | None = None,
         seller_notifier: ReturnSellerNotifier | None = None,
         now_factory=None,
+        users_service: UsersService | None = None,
     ) -> None:
         self.session = session
         self.repository = ReturnsRepository(session)
         self.storage = storage or LocalStorageService()
         self.seller_notifier = seller_notifier or TelegramReturnSellerNotifier()
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
+        self.users_service = users_service or UsersService(session)
 
     async def get_return_eligibility(
         self,
@@ -248,6 +251,7 @@ class ReturnsService:
         payload: ReturnRequestCreate,
         files: Iterable[UploadFile] | None = None,
     ) -> ReturnRequestRead:
+        await self.users_service.assert_user_not_blocked(user_id)
         order = await self.repository.get_order_for_user(
             order_id=order_id,
             user_id=user_id,

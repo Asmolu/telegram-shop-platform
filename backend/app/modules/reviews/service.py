@@ -13,6 +13,7 @@ from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
 from app.modules.reviews.repository import ReviewsRepository
 from app.modules.reviews.schemas import ReviewCreate, ReviewList, ReviewModerationUpdate, ReviewRead
+from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
 REVIEW_AUDIT_FIELDS = ("status", "moderated_at", "moderated_by_id")
@@ -27,12 +28,14 @@ class ReviewsService:
         analytics_tracker: AnalyticsTracker | None = None,
         audit_service: AuditService | None = None,
         cache: CacheService | None = None,
+        users_service: UsersService | None = None,
     ) -> None:
         self.session = session
         self.repository = ReviewsRepository(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
         self.cache = cache
+        self.users_service = users_service or UsersService(session)
 
     async def create_product_review(
         self,
@@ -41,6 +44,7 @@ class ReviewsService:
         product_id: int,
         payload: ReviewCreate,
     ) -> ReviewRead:
+        await self.users_service.assert_user_not_blocked(user_id)
         if not await self.repository.product_exists(product_id):
             raise AppError("Product not found", status.HTTP_404_NOT_FOUND)
 

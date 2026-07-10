@@ -77,6 +77,8 @@ import type {
   UploadedProductImage,
   UploadedTagImage,
   User,
+  UserBlock,
+  UserBlockPayload,
 } from './types';
 
 export const API_BASE_URL = (
@@ -231,6 +233,13 @@ export const api = {
   },
   users: {
     me: () => apiRequest<User>('/users/me'),
+  },
+  userBlocks: {
+    list: () => apiRequest<PageList<UserBlock> | { items: UserBlock[] }>('/users/admin/blocks'),
+    create: (body: UserBlockPayload) =>
+      apiRequest<UserBlock>('/users/admin/blocks', { method: 'POST', body }),
+    unblock: (blockId: number) =>
+      apiRequest<UserBlock>(`/users/admin/blocks/${blockId}/unblock`, { method: 'POST' }),
   },
   categories: {
     list: () => apiRequest<Category[]>('/categories'),

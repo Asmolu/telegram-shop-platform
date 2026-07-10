@@ -69,6 +69,33 @@ export interface User {
   updated_at: string;
 }
 
+export interface UserBlockUser {
+  id: number;
+  telegram_id: number;
+  username: string | null;
+  telegram_username: string | null;
+}
+
+export interface UserBlock {
+  id: number;
+  user_id: number | null;
+  telegram_id: number | null;
+  telegram_username: string | null;
+  reason: string | null;
+  blocked_at: string;
+  blocked_by_user_id: number | null;
+  unblocked_at: string | null;
+  unblocked_by_user_id: number | null;
+  user: UserBlockUser | null;
+  blocked_by: UserBlockUser | null;
+}
+
+export interface UserBlockPayload {
+  telegram_id?: number | null;
+  telegram_username?: string | null;
+  reason?: string | null;
+}
+
 export interface TokenResponse {
   access_token: string;
   token_type: string;

@@ -49,6 +49,15 @@ class FakeAuditService:
         return {field: getattr(instance, field) for field in fields}
 
 
+class FakeUserBlocksService:
+    def __init__(self, *, blocked_user_ids: set[int] | None = None) -> None:
+        self.blocked_user_ids = blocked_user_ids or set()
+
+    async def assert_user_not_blocked(self, user_id: int) -> None:
+        if user_id in self.blocked_user_ids:
+            raise AppError("Ваш аккаунт ограничен. Свяжитесь с продавцом.", 403)
+
+
 class FakeReviewsRepository:
     def __init__(self) -> None:
         self.product_ids = {1}
@@ -486,6 +495,7 @@ def _reviews_service(
         session,
         analytics_tracker=analytics_tracker,
         audit_service=audit_service,
+        users_service=FakeUserBlocksService(),
     )
     repository = FakeReviewsRepository()
     service.repository = repository

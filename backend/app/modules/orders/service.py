@@ -44,6 +44,7 @@ from app.modules.orders.schemas import (
     PaymentSuccessBannerSeenRead,
 )
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
+from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class OrdersService:
         audit_service: AuditService | None = None,
         manual_payments_service: ManualPaymentsService | None = None,
         idempotency_service: IdempotencyService | None = None,
+        users_service: UsersService | None = None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
@@ -119,6 +121,7 @@ class OrdersService:
         self.audit_service = audit_service or NoopAuditService()
         self.manual_payments_service = manual_payments_service or ManualPaymentsService(session)
         self.idempotency_service = idempotency_service or IdempotencyService(session)
+        self.users_service = users_service or UsersService(session)
 
     async def checkout_current_user_cart(
         self,
@@ -131,6 +134,7 @@ class OrdersService:
         post_commit_analytics: list[tuple[str, dict[str, object]]] = []
         idempotency_claim: IdempotencyClaim | None = None
         try:
+            await self.users_service.assert_user_not_blocked(user_id)
             if idempotency_key:
                 idempotency_claim = await self.idempotency_service.begin(
                     user_id=user_id,

@@ -1740,6 +1740,50 @@ Object.assign(dictionaries.en, {
     'Could not generate a slug automatically. You can enter one manually.',
 });
 
+Object.assign(dictionaries.ru, {
+  'nav.userBlocks': '\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438',
+  'blocks.formTitle': '\u041d\u043e\u0432\u0430\u044f \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430',
+  'blocks.formHint':
+    '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 Telegram ID \u0438\u043b\u0438 username. \u0415\u0441\u043b\u0438 username \u0435\u0449\u0435 \u043d\u0435\u0442 \u0432 \u0431\u0430\u0437\u0435, \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u0441\u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u043f\u0440\u0438 \u0431\u0443\u0434\u0443\u0449\u0435\u043c \u0432\u0445\u043e\u0434\u0435.',
+  'blocks.telegramId': 'Telegram ID',
+  'blocks.telegramUsername': 'Telegram username',
+  'blocks.reason': '\u041f\u0440\u0438\u0447\u0438\u043d\u0430',
+  'blocks.block': '\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c',
+  'blocks.unblock': '\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c',
+  'blocks.activeTitle': '\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438',
+  'blocks.blockedBy': '\u041a\u0435\u043c',
+  'blocks.blockedAt': '\u041a\u043e\u0433\u0434\u0430',
+  'blocks.loading': '\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u043c \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438',
+  'blocks.empty': '\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043e\u043a \u043d\u0435\u0442.',
+  'blocks.created': '\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430.',
+  'blocks.unblocked': '\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u0441\u043d\u044f\u0442\u0430.',
+  'blocks.validation.identifierRequired':
+    '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 Telegram ID \u0438\u043b\u0438 username.',
+  'blocks.validation.telegramId':
+    'Telegram ID \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u043f\u043e\u043b\u043e\u0436\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u043c \u0447\u0438\u0441\u043b\u043e\u043c.',
+});
+
+Object.assign(dictionaries.en, {
+  'nav.userBlocks': 'Blocks',
+  'blocks.formTitle': 'New block',
+  'blocks.formHint':
+    'Enter a Telegram ID or username. If the username is not in the database yet, the block will apply on a future login.',
+  'blocks.telegramId': 'Telegram ID',
+  'blocks.telegramUsername': 'Telegram username',
+  'blocks.reason': 'Reason',
+  'blocks.block': 'Block',
+  'blocks.unblock': 'Unblock',
+  'blocks.activeTitle': 'Active blocks',
+  'blocks.blockedBy': 'By',
+  'blocks.blockedAt': 'When',
+  'blocks.loading': 'Loading blocks',
+  'blocks.empty': 'There are no active blocks.',
+  'blocks.created': 'Block saved.',
+  'blocks.unblocked': 'Block removed.',
+  'blocks.validation.identifierRequired': 'Enter Telegram ID or username.',
+  'blocks.validation.telegramId': 'Telegram ID must be a positive number.',
+});
+
 interface I18nContextValue {
   language: Language;
   setLanguage: (language: Language) => void;
