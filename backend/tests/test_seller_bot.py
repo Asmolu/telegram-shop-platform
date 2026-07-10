@@ -134,6 +134,7 @@ class FakeSellerBotRepository:
                 quantity=1,
                 unit_price=Decimal("700.00"),
                 subtotal=Decimal("700.00"),
+                source_look_title=None,
             ),
             SimpleNamespace(
                 product_name="Футболка Hermes",
@@ -144,6 +145,7 @@ class FakeSellerBotRepository:
                 quantity=2,
                 unit_price=Decimal("700.00"),
                 subtotal=Decimal("1400.00"),
+                source_look_title=None,
             ),
         ]
         buyer = SimpleNamespace(
@@ -505,19 +507,20 @@ async def test_chetam_command_lists_paid_unshipped_orders(
     assert len(messages) == 1
     message = messages[0]
     assert "Оплачены, но ещё не отправлены: 1" in message
-    assert "ID заказа: 16" in message
-    assert "<b><i>ID заказа: 16</i></b>\nОплата: подтверждено" in message
-    assert "<b><i>Оплата" not in message
+    assert "📌📌📌 Заказ ORD-000016" in message
+    assert "ID заказа: 16" not in message
+    assert "————————————————————\n📌📌📌 Заказ ORD-000016\nОплата: подтверждено" in message
+    assert "<b><i>" not in message
     assert "Оплата: подтверждено" in message
     assert "Адрес: г. Москва, ул. Тверская, 1" in message
-    assert "1) Название: Футболка Hermes" in message
-    assert "2) Название: Футболка Hermes" in message
-    assert "Цвет: Белый" in message
-    assert "Цвет: Черный" in message
+    assert "Товары:" not in message
+    assert "Футболка Hermes | Белый | M | 1" in message
+    assert "Футболка Hermes | Черный | L | 2" in message
     assert "Рост: 180 см" in message
     assert "Вес: 75.5 кг" in message
     assert "Контактный номер: +79990000000" in message
     assert "Телеграм тег: @buyer_profile" in message
+    assert message.rstrip().endswith("————————————————————")
     assert all(len(part) <= 4096 for part in messages)
     ElementTree.fromstring(f"<root>{message}</root>")
 
@@ -541,13 +544,45 @@ async def test_chetam_command_escapes_html_fields(
     )
 
     message = messages[0]
-    assert "<b><i>ID заказа: 16</i></b>" in message
+    assert "📌📌📌 Заказ ORD-000016" in message
     assert "Адрес: Склад &lt;A&gt; &amp; подъезд 1" in message
-    assert "Название: Футболка &lt;Hermes&gt; &amp; Co" in message
-    assert "Цвет: Белый &amp; красный" in message
+    assert "Футболка &lt;Hermes&gt; &amp; Co | Белый &amp; красный | M | 1" in message
     assert "Контактный номер: +7 &lt;900&gt; &amp; 00" in message
     assert "Телеграм тег: @buyer&amp;profile" in message
     assert "Футболка <Hermes> & Co" not in message
+    ElementTree.fromstring(f"<root>{message}</root>")
+
+
+@pytest.mark.asyncio
+async def test_chetam_command_formats_missing_fields_and_look_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _ = _seller_bot_command_service()
+    order = repository._paid_order()
+    order.contact_phone = None
+    order.user.height_cm = None
+    order.user.weight_kg = None
+    order.user.telegram_username = None
+    order.user.username = None
+    order.items[0].variant_color = "белый"
+    order.items[0].source_look_title = "Летний образ <2026>"
+    order.items[1].source_look_title = "Летний образ <2026>"
+    repository.paid_orders = [order]
+
+    messages = await service.format_chetam_command(
+        chat_id=-100,
+        actor_telegram_user_id=42,
+    )
+
+    message = messages[0]
+    assert "Добавлено из образа: Летний образ &lt;2026&gt;" in message
+    assert message.count("Добавлено из образа:") == 1
+    assert "Футболка Hermes | белый | M | 1" in message
+    assert "Рост: Не указан" in message
+    assert "Вес: Не указан" in message
+    assert "Контактный номер: Не указан" in message
+    assert "Телеграм тег: Не указан" in message
     ElementTree.fromstring(f"<root>{message}</root>")
 
 
@@ -568,7 +603,7 @@ async def test_chetam_command_splits_long_output(
 
     assert len(messages) > 1
     assert all(len(message) <= 4096 for message in messages)
-    assert any("<b><i>ID заказа: 1</i></b>" in message for message in messages)
+    assert any("📌📌📌 Заказ ORD-000001" in message for message in messages)
     for message in messages:
         ElementTree.fromstring(f"<root>{message}</root>")
 

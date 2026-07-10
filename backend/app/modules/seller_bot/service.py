@@ -72,6 +72,8 @@ ACTIVE_ORDERS_COMMAND_LIMIT = 10
 CHETAM_COMMAND_LIMIT = 20
 TELEGRAM_MESSAGE_LIMIT = 4096
 SELLER_GROUP_ONLY_MESSAGE = "Command is available only in the seller group."
+CHETAM_ORDER_SEPARATOR = "————————————————————"
+CHETAM_MISSING_VALUE = "Не указан"
 POSTGRES_INT32_MAX = 2_147_483_647
 QUICK_PRODUCT_ALLOWED_FIELDS = {
     "название": "title",
@@ -449,9 +451,7 @@ class SellerBotService:
         if not orders:
             return ["Оплаченных заказов до отправки нет."]
 
-        header = f"Оплачены, но ещё не отправлены: {len(orders)}"
-        if total > len(orders):
-            header += f" из {total}"
+        header = f"Оплачены, но ещё не отправлены: {total}"
         blocks = [self._format_chetam_order(order) for order in orders]
         footer = (
             f"Показаны первые {len(orders)} из {total} заказов."
@@ -559,6 +559,7 @@ class SellerBotService:
 
     def _format_chetam_order(self, order) -> str:
         user = order.user
+        order_number = getattr(order, "order_number", None) or order.id
         address = self._telegram_html_text(order.delivery_address or MISSING_VALUE)
         height = self._telegram_html_text(
             self._height_label(getattr(user, "height_cm", None))
@@ -566,18 +567,21 @@ class SellerBotService:
         weight = self._telegram_html_text(
             self._weight_label(getattr(user, "weight_kg", None))
         )
-        contact_phone = self._telegram_html_text(order.contact_phone or MISSING_VALUE)
+        contact_phone = self._telegram_html_text(
+            order.contact_phone or CHETAM_MISSING_VALUE
+        )
         telegram_tag = self._telegram_html_text(self._telegram_tag(user))
         lines = [
-            f"<b><i>ID заказа: {self._telegram_html_text(order.id)}</i></b>",
+            CHETAM_ORDER_SEPARATOR,
+            f"📌📌📌 Заказ {self._telegram_html_text(order_number)}",
             "Оплата: подтверждено",
             f"Адрес: {address}",
-            "Товары:",
-            *self._order_item_summary_lines(order.items, html_safe=True),
+            *self._chetam_order_item_lines(order.items),
             f"Рост: {height}",
             f"Вес: {weight}",
             f"Контактный номер: {contact_phone}",
             f"Телеграм тег: {telegram_tag}",
+            CHETAM_ORDER_SEPARATOR,
         ]
         return "\n".join(lines)
 
@@ -701,6 +705,36 @@ class SellerBotService:
             lines.append(f"   Количество: {quantity}")
         return lines
 
+    def _chetam_order_item_lines(self, items: object) -> list[str]:
+        try:
+            item_list = list(items or [])
+        except TypeError:
+            item_list = []
+        if not item_list:
+            return [self._telegram_html_text(MISSING_VALUE)]
+        lines: list[str] = []
+        current_look_title: object = None
+        for item in item_list:
+            look_title = getattr(item, "source_look_title", None)
+            if look_title and look_title != current_look_title:
+                lines.append(
+                    "Добавлено из образа: "
+                    f"{self._telegram_html_text(look_title)}"
+                )
+            current_look_title = look_title
+            product_name = self._telegram_html_text(
+                getattr(item, "product_name", None) or MISSING_VALUE
+            )
+            color = self._telegram_html_text(
+                getattr(item, "variant_color", None) or MISSING_VALUE
+            )
+            size = self._telegram_html_text(self._display_item_size(item))
+            quantity = self._telegram_html_text(
+                getattr(item, "quantity", None) or MISSING_VALUE
+            )
+            lines.append(f"{product_name} | {color} | {size} | {quantity}")
+        return lines
+
     def _message_text_value(self, value: object, *, html_safe: bool = False) -> str:
         text = str(value)
         return self._telegram_html_text(text) if html_safe else text
@@ -723,11 +757,11 @@ class SellerBotService:
             return str(size)
 
     def _height_label(self, value: object) -> str:
-        return f"{value} см" if value else MISSING_VALUE
+        return f"{value} см" if value else CHETAM_MISSING_VALUE
 
     def _weight_label(self, value: object) -> str:
         if not value:
-            return MISSING_VALUE
+            return CHETAM_MISSING_VALUE
         return f"{str(value).rstrip('0').rstrip('.')} кг"
 
     def _telegram_tag(self, user: object | None) -> str:
@@ -737,7 +771,7 @@ class SellerBotService:
             value = getattr(user, field, None)
             if value:
                 return f"@{str(value).lstrip('@')}"
-        return MISSING_VALUE
+        return CHETAM_MISSING_VALUE
 
     def _chunk_command_message(
         self,
