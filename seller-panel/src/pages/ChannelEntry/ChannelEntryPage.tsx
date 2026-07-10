@@ -23,9 +23,8 @@ const MAX_CHANNEL_ENTRY_PHOTOS = 4;
 const BUTTON_STYLE_OPTIONS: Array<{ value: ChannelEntryButtonStyle; label: string }> = [
   { value: 'default', label: 'По умолчанию' },
   { value: 'primary', label: 'Основная' },
-  { value: 'secondary', label: 'Вторичная' },
-  { value: 'danger', label: 'Важная' },
   { value: 'success', label: 'Успешная' },
+  { value: 'danger', label: 'Важная' },
 ];
 const DEFAULT_MESSAGE_TEXT = 'Откройте магазин прямо в Telegram.';
 const DEFAULT_BUTTON_TEXT = 'Открыть';
@@ -231,6 +230,7 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
       });
       setPreview(null);
       setActionMessage(response.message);
+      setSelectedPhotos([]);
       loadHistory();
     });
   }
@@ -295,7 +295,7 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
     if (!text && selectedPhotos.length === 0) {
       return 'Добавьте текст сообщения или хотя бы одно фото.';
     }
-    if (selectedPhotos.length > 0 && text.length > 1024) {
+    if (selectedPhotos.length === 1 && text.length > 1024) {
       return 'Подпись к фото должна быть не длиннее 1024 символов.';
     }
     if (text.length > 4096) {
@@ -322,6 +322,10 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
   const totalHistory = historyMeta?.total ?? 0;
   const canHistoryBack = historyOffset > 0;
   const canHistoryNext = totalHistory > historyOffset + HISTORY_LIMIT;
+  const previewPhotoUrls = currentPreview.photo_urls.map(resolveMediaUrl);
+  const selectedStyleLabel =
+    BUTTON_STYLE_OPTIONS.find((option) => option.value === currentPreview.button_style)?.label ??
+    BUTTON_STYLE_OPTIONS[0].label;
 
   return (
     <div className="page-stack channel-entry-console">
@@ -567,7 +571,9 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
               value={publishForm.text}
               onChange={(event) => setPublishForm({ ...publishForm, text: event.target.value })}
             />
-            <small className="field-hint">{publishForm.text.trim().length} / 4096</small>
+            <small className="field-hint">
+              {publishForm.text.trim().length} / {selectedPhotos.length === 1 ? 1024 : 4096}
+            </small>
           </label>
           <label className="field">
             <span>Текст кнопки</span>
@@ -580,6 +586,63 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
               }
             />
           </label>
+          <label className="field">
+            <span>Стиль кнопки</span>
+            <select
+              value={publishForm.buttonStyle}
+              onChange={(event) =>
+                setPublishForm({
+                  ...publishForm,
+                  buttonStyle: event.target.value as ChannelEntryButtonStyle,
+                })
+              }
+            >
+              {BUTTON_STYLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field field-wide channel-entry-photo-field">
+            <span>Фото</span>
+            <label className="channel-entry-photo-upload">
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                disabled={actionBusy || selectedPhotos.length >= MAX_CHANNEL_ENTRY_PHOTOS}
+                multiple
+                type="file"
+                onChange={(event) => {
+                  handlePhotoUpload(event.target.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+              <span className="button button-secondary">Добавить фото</span>
+            </label>
+            <small className="field-hint">
+              JPG, PNG или WebP, до 5 МБ. Выбрано: {selectedPhotos.length} из{' '}
+              {MAX_CHANNEL_ENTRY_PHOTOS}.
+            </small>
+            {selectedPhotos.length > 0 ? (
+              <div className="channel-entry-photo-list">
+                {selectedPhotos.map((photo) => (
+                  <figure className="channel-entry-photo-item" key={photo.file_path}>
+                    <img alt={photo.alt_text || photo.original_filename} src={resolveMediaUrl(photo.url)} />
+                    <button
+                      aria-label={`Удалить ${photo.original_filename}`}
+                      className="channel-entry-photo-remove"
+                      disabled={actionBusy}
+                      title="Удалить фото"
+                      type="button"
+                      onClick={() => removePhoto(photo.file_path)}
+                    >
+                      ×
+                    </button>
+                  </figure>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <div className="field channel-entry-checkboxes">
             <span>Параметры</span>
             <label className="toggle-label">
@@ -607,8 +670,20 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
               <h3>Предпросмотр</h3>
               <span className="status-badge status-neutral">{currentPreview.selected_chat_id || 'канал не выбран'}</span>
             </div>
+            {previewPhotoUrls.length > 0 ? (
+              <div className={`channel-entry-preview-photos count-${previewPhotoUrls.length}`}>
+                {previewPhotoUrls.map((photoUrl, index) => (
+                  <img alt={`Фото публикации ${index + 1}`} key={photoUrl} src={photoUrl} />
+                ))}
+              </div>
+            ) : null}
             <p>{currentPreview.text || 'Текст сообщения появится здесь.'}</p>
-            <div className="telegram-button-preview">{currentPreview.button_text || DEFAULT_BUTTON_TEXT}</div>
+            <div
+              className={`telegram-button-preview telegram-button-preview-${currentPreview.button_style}`}
+            >
+              {currentPreview.button_text || DEFAULT_BUTTON_TEXT}
+            </div>
+            <small>Стиль: {selectedStyleLabel}</small>
             <code>{currentPreview.button_url || config?.mini_app_direct_url}</code>
             {currentPreview.warnings.length > 0 ? (
               <small>{currentPreview.warnings.join(' ')}</small>
@@ -625,7 +700,7 @@ export function ChannelEntryPage({ onAuthExpired }: PageProps) {
               type="button"
               onClick={handlePublish}
             >
-              Опубликовать и закрепить
+              {publishForm.pin ? 'Опубликовать и закрепить' : 'Опубликовать'}
             </button>
           </div>
         </form>

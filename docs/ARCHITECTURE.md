@@ -179,6 +179,8 @@ https://t.me/CheckYouStyleBot?startapp=channel_pin
 
 If `TELEGRAM_MINI_APP_SHORT_NAME` is configured, the link builder can produce the short-name Mini App path. For Telegram channels, the platform uses URL buttons instead of `web_app` buttons.
 
+Channel entries support zero to four uploaded photos. A single photo carries the caption and inline button. Multiple photos are sent as a Telegram media group, followed by a separate text/button entry message; the separate entry message is pinned, while all album message ids are stored in history. Supported button styles are `default`, `primary`, `success`, and `danger`, with automatic unstyled fallback when Telegram rejects the style field.
+
 Channel-entry auth through `initData` creates or updates a `User`, but it does not create a real private Bot 1 chat. Users from this path need either a real Bot 1 private chat or Mini App write access for service notifications.
 
 ## Uploads
@@ -193,6 +195,7 @@ Upload categories:
 - tag images
 - review images
 - customer campaign images
+- channel-entry photos
 - manual payment receipts
 - temporary files
 

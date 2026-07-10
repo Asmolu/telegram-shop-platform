@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.common.pagination import PageMeta
 
 MAX_CHANNEL_ENTRY_PHOTOS = 4
-ButtonStyle = Literal["default", "primary", "secondary", "danger", "success"]
+ButtonStyle = Literal["default", "primary", "success", "danger"]
 
 DEFAULT_BUTTON_TEXT = "Открыть"
 
@@ -102,10 +102,10 @@ class ChannelEntryPreviewRequest(BaseModel):
         return [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
-    def validate_text_and_photos(self) -> "ChannelEntryPreviewRequest":
+    def validate_text_and_photos(self) -> ChannelEntryPreviewRequest:
         if not self.text and not self.photo_paths:
             raise ValueError("Text is required when no photo is attached")
-        if self.photo_paths and len(self.text) > 1024:
+        if len(self.photo_paths) == 1 and len(self.text) > 1024:
             raise ValueError("Caption must be 1024 characters or shorter when photos are attached")
         return self
 
@@ -135,8 +135,11 @@ class TelegramChannelEntryMessageRead(BaseModel):
     chat_id: str
     text: str
     button_text: str
+    button_style: ButtonStyle = "default"
     button_url: str
+    photo_paths: list[str] = Field(default_factory=list)
     telegram_message_id: int | None
+    telegram_media_message_ids: list[int] = Field(default_factory=list)
     is_pinned: bool
     published_at: datetime | None
     pinned_at: datetime | None

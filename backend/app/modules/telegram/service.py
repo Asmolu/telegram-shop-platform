@@ -73,6 +73,12 @@ class TelegramPhotoUpload:
     mime_type: str
 
 
+@dataclass(frozen=True)
+class TelegramChannelEntryResult:
+    message_id: int | None
+    media_message_ids: list[int]
+
+
 class TelegramDeliveryError(Exception):
     """Raised when Telegram Bot API delivery fails."""
 
@@ -369,32 +375,54 @@ class TelegramService:
         button_style: str | None = None,
         photos: list[TelegramPhotoUpload] | None = None,
         disable_notification: bool = False,
-    ) -> int | None:
+    ) -> TelegramChannelEntryResult:
         normalized_style = _telegram_button_style(button_style)
-        try:
-            return await self._send_channel_entry_message(
+        photo_items = photos or []
+        if len(photo_items) > 1:
+            media_message_ids = await self.send_photo_media_group(
+                chat_id,
+                photo_items,
+                disable_notification=disable_notification,
+            )
+            message_id = await self._send_channel_entry_text_with_fallback(
+                chat_id,
+                text or button_text,
+                button_text,
+                button_url,
+                button_style=normalized_style,
+                disable_notification=disable_notification,
+            )
+            return TelegramChannelEntryResult(
+                message_id=message_id,
+                media_message_ids=media_message_ids,
+            )
+
+        if photo_items:
+            message_id = await self._send_channel_entry_photo_with_fallback(
                 chat_id,
                 text,
                 button_text,
                 button_url,
+                photo=photo_items[0],
                 button_style=normalized_style,
-                photos=photos,
                 disable_notification=disable_notification,
             )
-        except TelegramDeliveryError as exc:
-            if normalized_style and _is_button_style_delivery_error(exc):
-                return await self._send_channel_entry_message(
-                    chat_id,
-                    text,
-                    button_text,
-                    button_url,
-                    button_style=None,
-                    photos=photos,
-                    disable_notification=disable_notification,
-                )
-            raise
+            return TelegramChannelEntryResult(
+                message_id=message_id,
+                media_message_ids=[message_id] if message_id is not None else [],
+            )
 
-    async def _send_channel_entry_message(
+        message_id = await self._send_channel_entry_text_with_fallback(
+            chat_id,
+            text,
+            button_text,
+            button_url,
+            button_style=normalized_style,
+            disable_notification=disable_notification,
+        )
+        return TelegramChannelEntryResult(message_id=message_id, media_message_ids=[])
+
+    async def _send_channel_entry_text_with_fallback(
         self,
         chat_id: str,
         text: str,
@@ -402,42 +430,28 @@ class TelegramService:
         button_url: str,
         *,
         button_style: str | None,
-        photos: list[TelegramPhotoUpload] | None,
         disable_notification: bool,
     ) -> int | None:
-        reply_markup = _channel_entry_reply_markup(
-            button_text,
-            button_url,
-            button_style=button_style,
-        )
-        if photos:
-            message_id = await self.send_photo_bytes(
-                chat_id,
-                photos[0].content,
-                filename=photos[0].filename,
-                mime_type=photos[0].mime_type,
-                caption=text or None,
-                reply_markup=reply_markup,
-                disable_notification=disable_notification,
-            )
-            for photo in photos[1:]:
-                await self.send_photo_bytes(
-                    chat_id,
-                    photo.content,
-                    filename=photo.filename,
-                    mime_type=photo.mime_type,
-                    disable_notification=disable_notification,
-                )
-            return message_id
-
         payload: dict[str, object] = {
             "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": True,
             "disable_notification": disable_notification,
-            "reply_markup": reply_markup,
+            "reply_markup": _channel_entry_reply_markup(
+                button_text,
+                button_url,
+                button_style=button_style,
+            ),
         }
-        body = await self._post("sendMessage", payload)
+        try:
+            body = await self._post("sendMessage", payload)
+            if not body.get("ok", False):
+                raise self._delivery_error_from_body(body)
+        except TelegramDeliveryError as exc:
+            if not button_style or not _is_button_style_delivery_error(exc):
+                raise
+            payload["reply_markup"] = _channel_entry_reply_markup(button_text, button_url)
+            body = await self._post("sendMessage", payload)
         if not body.get("ok", False):
             raise self._delivery_error_from_body(body)
         result = body.get("result")
@@ -445,6 +459,75 @@ class TelegramService:
             return None
         message_id = result.get("message_id")
         return int(message_id) if isinstance(message_id, int) else None
+
+    async def _send_channel_entry_photo_with_fallback(
+        self,
+        chat_id: str,
+        text: str,
+        button_text: str,
+        button_url: str,
+        *,
+        photo: TelegramPhotoUpload,
+        button_style: str | None,
+        disable_notification: bool,
+    ) -> int | None:
+        try:
+            return await self.send_photo_bytes(
+                chat_id,
+                photo.content,
+                filename=photo.filename,
+                mime_type=photo.mime_type,
+                caption=text or None,
+                reply_markup=_channel_entry_reply_markup(
+                    button_text,
+                    button_url,
+                    button_style=button_style,
+                ),
+                disable_notification=disable_notification,
+            )
+        except TelegramDeliveryError as exc:
+            if not button_style or not _is_button_style_delivery_error(exc):
+                raise
+            return await self.send_photo_bytes(
+                chat_id,
+                photo.content,
+                filename=photo.filename,
+                mime_type=photo.mime_type,
+                caption=text or None,
+                reply_markup=_channel_entry_reply_markup(button_text, button_url),
+                disable_notification=disable_notification,
+            )
+
+    async def send_photo_media_group(
+        self,
+        chat_id: str,
+        photos: list[TelegramPhotoUpload],
+        *,
+        disable_notification: bool = False,
+    ) -> list[int]:
+        media: list[dict[str, str]] = []
+        files: dict[str, tuple[str, bytes, str]] = {}
+        for index, photo in enumerate(photos):
+            attachment_name = f"photo{index}"
+            media.append({"type": "photo", "media": f"attach://{attachment_name}"})
+            files[attachment_name] = (photo.filename, photo.content, photo.mime_type)
+        data = {
+            "chat_id": chat_id,
+            "media": json.dumps(media, ensure_ascii=False),
+        }
+        if disable_notification:
+            data["disable_notification"] = "true"
+        body = await self._post_multipart("sendMediaGroup", data=data, files=files)
+        if not body.get("ok", False):
+            raise self._delivery_error_from_body(body)
+        result = body.get("result")
+        if not isinstance(result, list):
+            return []
+        return [
+            int(item["message_id"])
+            for item in result
+            if isinstance(item, dict) and isinstance(item.get("message_id"), int)
+        ]
 
     async def pin_chat_message(
         self,

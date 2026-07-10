@@ -2608,6 +2608,81 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.channel-entry-photo-field {
+  align-items: flex-start;
+}
+
+.channel-entry-photo-upload input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.channel-entry-photo-upload input:focus-visible + .button {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.channel-entry-photo-upload input:disabled + .button {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.channel-entry-photo-list,
+.channel-entry-preview-photos {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+}
+
+.channel-entry-photo-item {
+  margin: 0;
+  position: relative;
+}
+
+.channel-entry-photo-item img,
+.channel-entry-preview-photos img {
+  aspect-ratio: 1;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.channel-entry-photo-remove {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 50%;
+  color: #b91c1c;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 20px;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 30px;
+}
+
+.telegram-button-preview-default,
+.telegram-button-preview-primary {
+  background: #2481cc;
+}
+
+.telegram-button-preview-success {
+  background: #22a559;
+}
+
+.telegram-button-preview-danger {
+  background: #d84a4a;
+}
+
 @media (max-width: 1180px) {
   .kpi-grid {
     grid-template-columns: repeat(3, minmax(150px, 1fr));

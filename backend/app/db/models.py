@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
+import sqlalchemy as sa
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -20,7 +21,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -652,8 +652,26 @@ class TelegramChannelEntryMessage(Base):
         default="Открыть",
         server_default="Открыть",
     )
+    button_style: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="default",
+        server_default="default",
+    )
     button_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    photo_paths: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default=sa.text("'[]'::json"),
+    )
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_media_message_ids: Mapped[list[int]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default=sa.text("'[]'::json"),
+    )
     is_pinned: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -812,8 +830,8 @@ class RouteAlias(Base):
             "entity_type",
             "alias_slug",
             unique=True,
-            postgresql_where=text("is_active = true"),
-            sqlite_where=text("is_active = 1"),
+            postgresql_where=sa.text("is_active = true"),
+            sqlite_where=sa.text("is_active = 1"),
         ),
     )
 
@@ -1283,8 +1301,8 @@ class CartItem(Base):
             "cart_id",
             "product_variant_id",
             unique=True,
-            postgresql_where=text("source_type IS NULL AND source_group_id IS NULL"),
-            sqlite_where=text("source_type IS NULL AND source_group_id IS NULL"),
+            postgresql_where=sa.text("source_type IS NULL AND source_group_id IS NULL"),
+            sqlite_where=sa.text("source_type IS NULL AND source_group_id IS NULL"),
         ),
     )
 

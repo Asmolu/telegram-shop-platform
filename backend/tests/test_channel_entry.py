@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.common.deps import get_current_user
 from app.core.config import settings
 from app.core.errors import AppError
 from app.db.models import TelegramChannel, TelegramChannelEntryMessage, User, UserRole
 from app.main import create_app
-from app.modules.channel_entry.router import get_channel_entry_service
+from app.modules.channel_entry.router import get_channel_entry_service, get_uploads_service
 from app.modules.channel_entry.schemas import (
+    ChannelEntryPreviewRequest,
     ChannelEntryPublishRequest,
     TelegramChannelCreate,
     TelegramChannelRead,
@@ -24,7 +27,14 @@ from app.modules.channel_entry.service import (
     sanitize_telegram_error,
     validate_channel_chat_id,
 )
-from app.modules.telegram.service import TelegramDeliveryError, TelegramService
+from app.modules.telegram.service import (
+    TelegramChannelEntryResult,
+    TelegramDeliveryError,
+    TelegramPhotoUpload,
+    TelegramService,
+)
+from app.modules.uploads.service import UploadsService
+from app.modules.uploads.storage import LocalStorageService
 
 
 class DummySession:
@@ -123,8 +133,10 @@ class FakeTelegramService:
         button_text: str,
         button_url: str,
         *,
+        button_style: str | None = None,
+        photos: list[TelegramPhotoUpload] | None = None,
         disable_notification: bool = False,
-    ) -> int:
+    ) -> TelegramChannelEntryResult:
         if self.raise_send is not None:
             raise self.raise_send
         self.sent.append(
@@ -133,10 +145,13 @@ class FakeTelegramService:
                 "text": text,
                 "button_text": button_text,
                 "button_url": button_url,
+                "button_style": button_style,
+                "photos": photos or [],
                 "disable_notification": disable_notification,
             }
         )
-        return 321
+        media_message_ids = [400 + index for index, _ in enumerate(photos or [])]
+        return TelegramChannelEntryResult(message_id=321, media_message_ids=media_message_ids)
 
     async def pin_chat_message(
         self,
@@ -160,12 +175,45 @@ class RecordingTelegramService(TelegramService):
     def __init__(self) -> None:
         super().__init__(bot_token="secret-token")
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.multipart_calls: list[
+            tuple[str, dict[str, str], dict[str, tuple[str, bytes, str]]]
+        ] = []
+        self.reject_style_once = False
 
     async def _post(self, method: str, payload: dict[str, object]) -> dict[str, object]:
         self.calls.append((method, payload))
+        reply_markup = payload.get("reply_markup")
+        if (
+            self.reject_style_once
+            and isinstance(reply_markup, dict)
+            and "style" in reply_markup["inline_keyboard"][0][0]
+        ):
+            self.reject_style_once = False
+            return {"ok": False, "error_code": 400, "description": "unsupported style field"}
         if method == "sendMessage":
             return {"ok": True, "result": {"message_id": 55}}
         return {"ok": True, "result": True}
+
+    async def _post_multipart(
+        self,
+        method: str,
+        *,
+        data: dict[str, str],
+        files: dict[str, tuple[str, bytes, str]],
+    ) -> dict[str, object]:
+        self.multipart_calls.append((method, data, files))
+        if method == "sendMediaGroup":
+            media = json.loads(data["media"])
+            return {
+                "ok": True,
+                "result": [{"message_id": 70 + index} for index, _ in enumerate(media)],
+            }
+        reply_markup = json.loads(data.get("reply_markup", "{}"))
+        has_style = reply_markup.get("inline_keyboard", [[{}]])[0][0].get("style")
+        if self.reject_style_once and has_style:
+            self.reject_style_once = False
+            return {"ok": False, "error_code": 400, "description": "unsupported style field"}
+        return {"ok": True, "result": {"message_id": 66}}
 
 
 class FakeRouteService:
@@ -340,7 +388,7 @@ async def test_publish_rejects_missing_channel_or_chat_id(
 async def test_telegram_service_sends_url_inline_keyboard() -> None:
     telegram = RecordingTelegramService()
 
-    message_id = await telegram.send_channel_entry_message(
+    result = await telegram.send_channel_entry_message(
         "@checktsplatform",
         "Откройте магазин прямо в Telegram.",
         "Открыть",
@@ -348,7 +396,8 @@ async def test_telegram_service_sends_url_inline_keyboard() -> None:
         disable_notification=True,
     )
 
-    assert message_id == 55
+    assert result.message_id == 55
+    assert result.media_message_ids == []
     method, payload = telegram.calls[0]
     assert method == "sendMessage"
     assert payload["reply_markup"] == {
@@ -362,6 +411,103 @@ async def test_telegram_service_sends_url_inline_keyboard() -> None:
         ]
     }
     assert "web_app" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("button_style", ["primary", "success", "danger"])
+async def test_telegram_service_sends_supported_button_styles(button_style: str) -> None:
+    telegram = RecordingTelegramService()
+
+    await telegram.send_channel_entry_message(
+        "@checktsplatform",
+        "Откройте магазин.",
+        "Открыть",
+        "https://t.me/CheckYouStyleBot?startapp=channel_pin",
+        button_style=button_style,
+    )
+
+    button = telegram.calls[0][1]["reply_markup"]["inline_keyboard"][0][0]
+    assert button["style"] == button_style
+
+
+@pytest.mark.asyncio
+async def test_telegram_service_default_style_is_omitted() -> None:
+    telegram = RecordingTelegramService()
+
+    await telegram.send_channel_entry_message(
+        "@checktsplatform",
+        "Откройте магазин.",
+        "Открыть",
+        "https://t.me/CheckYouStyleBot?startapp=channel_pin",
+        button_style="default",
+    )
+
+    button = telegram.calls[0][1]["reply_markup"]["inline_keyboard"][0][0]
+    assert "style" not in button
+
+
+@pytest.mark.asyncio
+async def test_telegram_service_retries_styled_button_without_style() -> None:
+    telegram = RecordingTelegramService()
+    telegram.reject_style_once = True
+
+    result = await telegram.send_channel_entry_message(
+        "@checktsplatform",
+        "Откройте магазин.",
+        "Открыть",
+        "https://t.me/CheckYouStyleBot?startapp=channel_pin",
+        button_style="primary",
+    )
+
+    assert result.message_id == 55
+    assert len(telegram.calls) == 2
+    fallback_button = telegram.calls[1][1]["reply_markup"]["inline_keyboard"][0][0]
+    assert "style" not in fallback_button
+
+
+@pytest.mark.asyncio
+async def test_telegram_service_sends_one_photo_with_caption_and_keyboard() -> None:
+    telegram = RecordingTelegramService()
+
+    result = await telegram.send_channel_entry_message(
+        "@checktsplatform",
+        "Подпись",
+        "Открыть",
+        "https://t.me/CheckYouStyleBot?startapp=channel_pin",
+        button_style="success",
+        photos=[TelegramPhotoUpload(b"one", "one.jpg", "image/jpeg")],
+    )
+
+    assert result == TelegramChannelEntryResult(message_id=66, media_message_ids=[66])
+    method, data, files = telegram.multipart_calls[0]
+    assert method == "sendPhoto"
+    assert data["caption"] == "Подпись"
+    assert json.loads(data["reply_markup"])["inline_keyboard"][0][0]["style"] == "success"
+    assert files["photo"][1] == b"one"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("photo_count", [2, 3, 4])
+async def test_telegram_service_sends_album_then_entry_message(photo_count: int) -> None:
+    telegram = RecordingTelegramService()
+    photos = [
+        TelegramPhotoUpload(str(index).encode(), f"{index}.jpg", "image/jpeg")
+        for index in range(photo_count)
+    ]
+
+    result = await telegram.send_channel_entry_message(
+        "@checktsplatform",
+        "Текст публикации",
+        "Открыть",
+        "https://t.me/CheckYouStyleBot?startapp=channel_pin",
+        photos=photos,
+    )
+
+    assert result.message_id == 55
+    assert result.media_message_ids == list(range(70, 70 + photo_count))
+    assert telegram.multipart_calls[0][0] == "sendMediaGroup"
+    assert len(telegram.multipart_calls[0][2]) == photo_count
+    assert telegram.calls[0][0] == "sendMessage"
 
 
 @pytest.mark.asyncio
@@ -387,6 +533,7 @@ async def test_publish_persists_message_and_pins_when_requested(
         "https://t.me/CheckYouStyleBot?startapp=channel_pin"
     )
     assert telegram.sent[0]["button_url"] == "https://t.me/CheckYouStyleBot?startapp=channel_pin"
+    assert telegram.sent[0]["button_style"] == "default"
     assert telegram.pinned == [
         {"chat_id": "@checktsplatform", "message_id": 321, "disable_notification": True}
     ]
@@ -414,6 +561,67 @@ async def test_publish_without_pin_does_not_call_pin(
     assert response.ok is True
     assert telegram.sent
     assert telegram.pinned == []
+
+
+@pytest.mark.asyncio
+async def test_multiple_photo_publication_pins_entry_message_and_preserves_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _, telegram, _ = _service(monkeypatch)
+    photo_paths = ["channel_entry/one.jpg", "channel_entry/two.jpg"]
+
+    response = await service.publish(
+        ChannelEntryPublishRequest(
+            chat_id="@checktsplatform",
+            text="Альбом",
+            button_style="danger",
+            photo_paths=photo_paths,
+            pin=True,
+        ),
+        actor=_user(UserRole.SELLER),
+    )
+    history = await service.history(limit=20, offset=0)
+
+    assert telegram.pinned == [
+        {"chat_id": "@checktsplatform", "message_id": 321, "disable_notification": True}
+    ]
+    assert response.item.telegram_media_message_ids == [400, 401]
+    assert history.items[0].photo_paths == photo_paths
+    assert history.items[0].button_style == "danger"
+    assert history.items[0].telegram_media_message_ids == [400, 401]
+
+
+def test_channel_entry_request_rejects_more_than_four_photos() -> None:
+    with pytest.raises(ValidationError):
+        ChannelEntryPublishRequest(
+            chat_id="@checktsplatform",
+            text="Альбом",
+            photo_paths=[f"channel_entry/{index}.jpg" for index in range(5)],
+        )
+
+
+def test_existing_channel_entry_request_uses_compatible_defaults() -> None:
+    request = ChannelEntryPreviewRequest(chat_id="@checktsplatform", text="Старый клиент")
+
+    assert request.button_style == "default"
+    assert request.photo_paths == []
+
+
+def test_channel_entry_photo_upload_rejects_invalid_image(tmp_path: Path) -> None:
+    app = _app_with_user(_user(UserRole.SELLER))
+    upload_service = UploadsService(DummySession(), storage=LocalStorageService(tmp_path))  # type: ignore[arg-type]
+    app.dependency_overrides[get_uploads_service] = lambda: upload_service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/channel-entry/photos",
+                files={"file": ("bad.txt", BytesIO(b"not an image"), "text/plain")},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Invalid file extension" in response.text
 
 
 def test_telegram_errors_are_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -446,6 +654,14 @@ def test_channel_entry_migration_and_model_contract() -> None:
     assert TelegramChannel.__table__.c.chat_id.unique is True
     assert TelegramChannelEntryMessage.__table__.c.button_url.type.length == 1024
     assert TelegramChannelEntryMessage.__table__.c.telegram_message_id.nullable is True
+    media_migration = migration_path.with_name(
+        "20260710_0052_add_channel_entry_media_and_style.py"
+    ).read_text(encoding="utf-8")
+    assert "button_style" in media_migration
+    assert "photo_paths" in media_migration
+    assert "telegram_media_message_ids" in media_migration
+    assert TelegramChannelEntryMessage.__table__.c.button_style.default.arg == "default"
+    assert TelegramChannelEntryMessage.__table__.c.photo_paths.nullable is False
 
 
 def _service(
@@ -463,9 +679,15 @@ def _service(
         repository=repository,
         telegram_service=telegram,  # type: ignore[arg-type]
         audit_service=audit,  # type: ignore[arg-type]
+        storage=FakeStorage(),  # type: ignore[arg-type]
         now_factory=_now,
     )
     return service, repository, telegram, audit
+
+
+class FakeStorage:
+    def read_bytes(self, relative_path: str) -> bytes:
+        return relative_path.encode()
 
 
 def _app_with_user(user: User):

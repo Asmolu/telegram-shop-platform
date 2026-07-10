@@ -638,7 +638,7 @@ Current main pages and routes:
 - `/looks/:id/edit`: Look editing.
 - `/statistics`: statistics where implemented.
 - `/customer-notifications`: customer subscriptions/campaigns.
-- `/channel-entry`: channel entry publish/pin flow.
+- `/channel-entry`: Bot 1 channel-entry publish/pin flow with up to four photos, button styles, preview, and history.
 - `/seller-bot`: seller bot tools.
 - `/settings`: implemented settings.
 
@@ -727,7 +727,7 @@ High-level endpoint groups:
 - `/banners...`: public banners and seller/admin banner management.
 - `/uploads...`: product, banner, category, tag, campaign, return, and receipt upload support where routed.
 - `/customer-notifications...`: subscriptions, write access, start links, campaigns, templates, delivery reports.
-- `/channel-entry...`: channel configuration, preview, publish, pin, history.
+- `/channel-entry...`: channel configuration, safe photo upload, preview, publish, pin, and history. Albums use `sendMediaGroup` plus a separate pinnable entry message.
 - `/seller-auth...`, `/seller-bot...`, `/telegram...`: seller auth and Telegram webhook/tooling endpoints.
 
 This is an overview only. Use backend OpenAPI at `/api/v1/openapi.json` for exact request/response schemas.

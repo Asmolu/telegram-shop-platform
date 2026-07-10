@@ -24,9 +24,9 @@ Channel entry is a buyer-facing entry surface and therefore uses Bot 1. Bot 2 is
 2. Seller/admin selects or enters a channel target.
 3. Backend validates the channel chat id.
 4. Backend builds the Mini App URL with the configured start parameter.
-5. Backend asks Bot 1 to send the channel message.
-6. Backend optionally asks Bot 1 to pin the message.
-7. Backend stores history with Telegram `message_id`, pin state, publish state, and sanitized error fields.
+5. Backend asks Bot 1 to send the channel message and any selected photos.
+6. Backend optionally asks Bot 1 to pin the entry message.
+7. Backend stores history with the entry `message_id`, media message ids, photo paths, button style, pin state, publish state, and sanitized error fields.
 
 Supported channel chat id formats:
 
@@ -38,6 +38,20 @@ Supported channel chat id formats:
 Telegram channel posts must use an inline URL button.
 
 Do not use Telegram `web_app` buttons for channel posts. `web_app` buttons are not the channel-entry mechanism used by the current implementation.
+
+Seller Panel supports `default`, `primary`, `success`, and `danger`. The default style omits Telegram's `style` field. The other values are passed through on the inline URL button. If Telegram rejects the style field, the backend retries the entry message with an ordinary unstyled URL button.
+
+## Photos
+
+Seller/admin users can upload up to four JPEG, PNG, or WebP images through the channel-entry page. Uploads reuse the shared 5 MB image limit, decoded-image validation, generated filenames, and upload-root containment. PostgreSQL stores only relative paths.
+
+Publication behavior:
+
+- no photo: one text message with the inline URL button;
+- one photo: one `sendPhoto` message with the optional caption and inline URL button;
+- two to four photos: one `sendMediaGroup` album followed by a separate entry text/button message.
+
+For an album, the separate entry message is the publication's primary Telegram message and is the message that is pinned. Album message ids are retained separately in publication history. If the seller leaves album text empty, the button label is used as the short entry-message text because Telegram does not allow an empty text message.
 
 ## Auth and Customer State
 

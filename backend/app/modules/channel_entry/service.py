@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import mimetypes
 import re
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
@@ -39,6 +38,12 @@ NUMERIC_CHANNEL_CHAT_ID_RE = re.compile(r"^-100[0-9]{5,20}$")
 BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
 TELEGRAM_ERROR_MESSAGE_MAX_LENGTH = 500
 CHANNEL_ENTRY_PHOTO_FOLDER = "channel_entry/"
+CHANNEL_ENTRY_PHOTO_MIME_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 ACTION_CHANNEL_CREATED = "channel_entry.channel_created"
 ACTION_CHANNEL_UPDATED = "channel_entry.channel_updated"
@@ -60,8 +65,11 @@ MESSAGE_AUDIT_FIELDS = (
     "channel_id",
     "chat_id",
     "button_text",
+    "button_style",
     "button_url",
+    "photo_paths",
     "telegram_message_id",
+    "telegram_media_message_ids",
     "is_pinned",
     "published_at",
     "pinned_at",
@@ -269,8 +277,13 @@ class ChannelEntryService:
             button_text=payload.button_text.strip(),
             button_style=payload.button_style,
             button_url=button_url,
-            photo_paths=payload.photo_paths,
-            photo_urls=[settings.public_upload_url_for(path) for path in payload.photo_paths],
+            photo_paths=[
+                self._validate_channel_entry_photo_path(path) for path in payload.photo_paths
+            ],
+            photo_urls=[
+                settings.public_upload_url_for(self._validate_channel_entry_photo_path(path))
+                for path in payload.photo_paths
+            ],
             selected_chat_id=resolved.chat_id,
             warnings=warnings,
         )
@@ -289,7 +302,10 @@ class ChannelEntryService:
             chat_id=resolved.chat_id,
             text=payload.text.strip(),
             button_text=payload.button_text.strip(),
+            button_style=payload.button_style,
             button_url=button_url,
+            photo_paths=list(payload.photo_paths),
+            telegram_media_message_ids=[],
             is_pinned=False,
             created_by_user_id=actor.id,
         )
@@ -298,7 +314,7 @@ class ChannelEntryService:
         await self._refresh_if_supported(message)
 
         try:
-            telegram_message_id = await self.telegram_service.send_channel_entry_message(
+            telegram_result = await self.telegram_service.send_channel_entry_message(
                 resolved.chat_id,
                 message.text,
                 message.button_text,
@@ -317,7 +333,8 @@ class ChannelEntryService:
             await self._commit("Не удалось сохранить ошибку публикации.")
             raise AppError(message.last_error, status.HTTP_502_BAD_GATEWAY) from exc
 
-        message.telegram_message_id = telegram_message_id
+        message.telegram_message_id = telegram_result.message_id
+        message.telegram_media_message_ids = telegram_result.media_message_ids
         message.published_at = self._now()
         message.last_error = None
         await self._audit_message(
@@ -451,28 +468,39 @@ class ChannelEntryService:
     def _load_channel_entry_photos(self, photo_paths: list[str]) -> list[TelegramPhotoUpload]:
         photos: list[TelegramPhotoUpload] = []
         for raw_path in photo_paths:
-            path = raw_path.strip()
-            if not path.startswith(CHANNEL_ENTRY_PHOTO_FOLDER):
-                raise AppError(
-                    "РќРµРІРµСЂРЅС‹Р№ РїСѓС‚СЊ С„РѕС‚Рѕ РґР»СЏ РїСѓР±Р»РёРєР°С†РёРё.",
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                )
+            path = self._validate_channel_entry_photo_path(raw_path)
+            path_object = PurePosixPath(path)
             try:
                 content = self.storage.read_bytes(path)
             except FileNotFoundError as exc:
                 raise AppError(
-                    "Р¤РѕС‚Рѕ РґР»СЏ РїСѓР±Р»РёРєР°С†РёРё РЅРµ РЅР°Р№РґРµРЅРѕ.",
+                    "Фото для публикации не найдено.",
                     status.HTTP_422_UNPROCESSABLE_CONTENT,
                 ) from exc
-            mime_type = mimetypes.guess_type(path)[0] or "image/jpeg"
             photos.append(
                 TelegramPhotoUpload(
                     content=content,
-                    filename=Path(path).name or "channel-entry-photo.jpg",
-                    mime_type=mime_type,
+                    filename=path_object.name,
+                    mime_type=CHANNEL_ENTRY_PHOTO_MIME_TYPES[path_object.suffix.lower()],
                 )
             )
         return photos
+
+    def _validate_channel_entry_photo_path(self, raw_path: str) -> str:
+        path = raw_path.strip().replace("\\", "/")
+        path_object = PurePosixPath(path)
+        is_channel_entry_file = (
+            not path_object.is_absolute()
+            and len(path_object.parts) == 2
+            and path_object.parts[0] == CHANNEL_ENTRY_PHOTO_FOLDER.rstrip("/")
+            and path_object.suffix.lower() in CHANNEL_ENTRY_PHOTO_MIME_TYPES
+        )
+        if not is_channel_entry_file:
+            raise AppError(
+                "Некорректный путь фото для публикации.",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        return path_object.as_posix()
 
     async def _audit_message(
         self,

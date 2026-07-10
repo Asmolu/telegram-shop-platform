@@ -42,7 +42,7 @@ export type DiscountType = 'PERCENT' | 'FIXED';
 export type BannerTargetType = 'product' | 'category' | 'promo' | 'external_url';
 export type BannerDisplayType = 'horizontal' | 'vertical' | 'popup' | 'aggressive_popup';
 export type BannerImageKind = 'native_banner' | 'vertical_banner' | 'popup_banner' | 'aggressive_banner';
-export type ChannelEntryButtonStyle = 'default' | 'primary' | 'secondary' | 'danger' | 'success';
+export type ChannelEntryButtonStyle = 'default' | 'primary' | 'success' | 'danger';
 
 export type ApiDecimal = string | number;
 
@@ -1038,8 +1038,11 @@ export interface TelegramChannelEntryMessage {
   chat_id: string;
   text: string;
   button_text: string;
+  button_style: ChannelEntryButtonStyle;
   button_url: string;
+  photo_paths: string[];
   telegram_message_id: number | null;
+  telegram_media_message_ids: number[];
   is_pinned: boolean;
   published_at: string | null;
   pinned_at: string | null;
