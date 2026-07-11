@@ -65,6 +65,8 @@ describe('ReturnRequestPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Например: не подошёл размер, цвет отличается, обнаружен дефект'), {
       target: { value: 'Не подошёл размер' },
     });
+    const photo = new File(['image'], 'proof.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByLabelText(/Фото или видео/), { target: { files: [photo] } });
     fireEvent.click(screen.getByText('Отправить заявку'));
 
     await waitFor(() => expect(createReturnRequest).toHaveBeenCalledWith(
@@ -74,9 +76,11 @@ describe('ReturnRequestPage', () => {
         comment: null,
         items: [{ order_item_id: 1, quantity: 1 }],
       },
-      [],
+      [photo],
     ));
     expect(await screen.findByText('Заявка отправлена. Продавец свяжется с вами.')).toBeTruthy();
+    expect(screen.queryByText('✓')).toBeNull();
+    expect(document.querySelector('.return-success-card .success-icon')).toBeNull();
     expect(screen.getByText('Статус: Ожидает')).toBeTruthy();
   });
 
@@ -88,6 +92,9 @@ describe('ReturnRequestPage', () => {
     fireEvent.click(screen.getByLabelText('Выбрать товар'));
     fireEvent.change(screen.getByPlaceholderText('Например: не подошёл размер, цвет отличается, обнаружен дефект'), {
       target: { value: 'Не подошёл размер' },
+    });
+    fireEvent.change(screen.getByLabelText(/Фото или видео/), {
+      target: { files: [new File(['image'], 'proof.jpg', { type: 'image/jpeg' })] },
     });
     fireEvent.click(screen.getByText('Отправить заявку'));
 
@@ -110,6 +117,22 @@ describe('ReturnRequestPage', () => {
     fireEvent.click(screen.getByText('Отправить заявку'));
 
     expect(await screen.findByText('Выберите хотя бы один товар.')).toBeTruthy();
+    expect(createReturnRequest).not.toHaveBeenCalled();
+  });
+
+  it('marks media as required and blocks submit without a photo or video', async () => {
+    render(<ReturnRequestPage />);
+
+    expect(await screen.findByText('Line Break Hoodie')).toBeTruthy();
+    expect(screen.getByText('Фото или видео *')).toBeTruthy();
+    expect(screen.getByText('Приложите хотя бы один файл, чтобы продавец мог оценить состояние товара.')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Выбрать товар'));
+    fireEvent.change(screen.getByPlaceholderText('Например: не подошёл размер, цвет отличается, обнаружен дефект'), {
+      target: { value: 'Не подошёл размер' },
+    });
+    fireEvent.click(screen.getByText('Отправить заявку'));
+
+    expect(await screen.findByText('Приложите хотя бы одно фото или видео.')).toBeTruthy();
     expect(createReturnRequest).not.toHaveBeenCalled();
   });
 

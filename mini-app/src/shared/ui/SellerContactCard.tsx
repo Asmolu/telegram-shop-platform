@@ -1,5 +1,8 @@
 import React from 'react';
 import { getSellerContactSettings, type SellerContactSettings } from '../api';
+import instagramIcon from '../../assets/social/instagram.svg';
+import telegramIcon from '../../assets/social/telegram.svg';
+import whatsappIcon from '../../assets/social/whatsapp.svg';
 
 type SellerContactCardProps = {
   className?: string;
@@ -9,19 +12,19 @@ const contactRows = [
   {
     key: 'telegram_url',
     label: 'Связаться с продавцом в Telegram',
-    icon: 'TG',
+    icon: telegramIcon,
     className: 'seller-contact-row__icon--telegram',
   },
   {
     key: 'whatsapp_url',
     label: 'Связаться с продавцом в WhatsApp',
-    icon: 'WA',
+    icon: whatsappIcon,
     className: 'seller-contact-row__icon--whatsapp',
   },
   {
     key: 'instagram_url',
     label: 'Связаться с продавцом в Instagram',
-    icon: 'IG',
+    icon: instagramIcon,
     className: 'seller-contact-row__icon--instagram',
   },
 ] satisfies Array<{
@@ -70,8 +73,8 @@ export function SellerContactCard({ className = '' }: SellerContactCardProps) {
             rel="noopener noreferrer"
             target="_blank"
           >
-            <span className={`seller-contact-row__icon ${row.className}`} aria-hidden="true">
-              {row.icon}
+            <span className={`seller-contact-row__icon ${row.className}`}>
+              <img src={row.icon} alt="" />
             </span>
             <span>{row.label}</span>
           </a>

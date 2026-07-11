@@ -105,7 +105,6 @@ export function ReturnRequestPage() {
       <div className="page return-page">
         <TopBar title="Оформить возврат" backFallback={backPath} />
         <section className="success-card return-success-card">
-          <div className="success-icon">✓</div>
           <h1>{successMessage}</h1>
           {createdReturnRequest ? (
             <p>Статус: {formatReturnRequestStatus(createdReturnRequest.status)}</p>
@@ -195,7 +194,8 @@ export function ReturnRequestPage() {
 
           <section className="order-detail-section return-form__section">
             <label className="return-upload">
-              <span>Фото или видео</span>
+              <span>Фото или видео *</span>
+              <small>Приложите хотя бы один файл, чтобы продавец мог оценить состояние товара.</small>
               <input
                 accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
                 multiple
@@ -275,6 +275,10 @@ export function ReturnRequestPage() {
     }
     if (!reason.trim()) {
       setSubmitError('Укажите причину возврата.');
+      return;
+    }
+    if (files.length === 0) {
+      setSubmitError('Приложите хотя бы одно фото или видео.');
       return;
     }
 

@@ -422,6 +422,7 @@ async def test_customer_creates_return_request_for_one_item() -> None:
         order_id=1,
         user_id=1,
         payload=_payload([(1, 1)]),
+        files=[_upload_file("proof.jpg", b"image", "image/jpeg")],
     )
 
     assert created.status == ReturnRequestStatus.PENDING
@@ -442,6 +443,7 @@ async def test_return_creation_triggers_seller_notification_after_commit() -> No
         order_id=1,
         user_id=1,
         payload=_payload([(1, 1)]),
+        files=[_upload_file("proof.jpg", b"image", "image/jpeg")],
     )
 
     assert notifier.requests[0].id == created.id
@@ -458,6 +460,7 @@ async def test_return_notification_failure_does_not_fail_request() -> None:
         order_id=1,
         user_id=1,
         payload=_payload([(1, 1)]),
+        files=[_upload_file("proof.jpg", b"image", "image/jpeg")],
     )
 
     assert created.status == ReturnRequestStatus.PENDING
@@ -750,6 +753,7 @@ async def test_customer_creates_return_request_with_multiple_items() -> None:
         order_id=1,
         user_id=1,
         payload=_payload([(1, 2), (2, 1)]),
+        files=[_upload_file("proof.jpg", b"image", "image/jpeg")],
     )
 
     assert [item.order_item_id for item in created.items] == [1, 2]
@@ -841,6 +845,7 @@ async def test_created_return_item_snapshots_order_item_data() -> None:
         order_id=1,
         user_id=1,
         payload=_payload([(1, 1)]),
+        files=[_upload_file("proof.jpg", b"image", "image/jpeg")],
     )
     order_item.product.name = "Changed product"
     order_item.product.brand = "Changed brand"
@@ -852,6 +857,26 @@ async def test_created_return_item_snapshots_order_item_data() -> None:
     assert item.size == "M"
     assert item.color == "Black"
     assert item.unit_price == Decimal("99.90")
+
+
+@pytest.mark.asyncio
+async def test_rejects_return_request_without_attachments_before_persistence() -> None:
+    service, repository, session, storage = _returns_service()
+    repository.orders[1] = _order()
+
+    with pytest.raises(AppError, match="At least one return attachment is required") as exc_info:
+        await service.create_return_request(
+            order_id=1,
+            user_id=1,
+            payload=_payload([(1, 1)]),
+            files=[],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert repository.return_requests == {}
+    assert repository.next_attachment_id == 1
+    assert session.commit_count == 0
+    assert storage.saved == {}
 
 
 @pytest.mark.asyncio
@@ -916,6 +941,22 @@ async def test_rejects_more_than_five_attachments() -> None:
             payload=_payload([(1, 1)]),
             files=files,
         )
+
+
+@pytest.mark.asyncio
+async def test_accepts_five_return_attachments() -> None:
+    service, repository, _session, _storage = _returns_service()
+    repository.orders[1] = _order()
+    files = [_upload_file(f"proof-{index}.jpg", b"x", "image/jpeg") for index in range(5)]
+
+    created = await service.create_return_request(
+        order_id=1,
+        user_id=1,
+        payload=_payload([(1, 1)]),
+        files=files,
+    )
+
+    assert len(created.attachments) == 5
 
 
 @pytest.mark.asyncio

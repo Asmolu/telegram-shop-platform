@@ -805,6 +805,11 @@ class ReturnsService:
         self,
         files: list[UploadFile],
     ) -> list[ValidatedReturnAttachment]:
+        if not files:
+            raise AppError(
+                "At least one return attachment is required",
+                status.HTTP_400_BAD_REQUEST,
+            )
         if len(files) > MAX_RETURN_ATTACHMENTS:
             raise AppError("Too many return attachments", status.HTTP_400_BAD_REQUEST)
         attachments: list[ValidatedReturnAttachment] = []

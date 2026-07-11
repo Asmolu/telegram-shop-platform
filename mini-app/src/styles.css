@@ -1862,8 +1862,7 @@ label {
   line-height: 1.45;
 }
 
-.state-icon,
-.success-icon {
+.state-icon {
   display: grid;
   place-items: center;
   width: 52px;
@@ -4307,6 +4306,12 @@ label {
   font-size: 13px;
 }
 
+.return-upload small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .return-file-list {
   display: grid;
   gap: 7px;
@@ -4343,7 +4348,9 @@ label {
 }
 
 .return-success-card {
+  gap: 14px;
   margin-top: 12px;
+  padding-top: 24px;
 }
 
 .profile-card {
@@ -4569,13 +4576,32 @@ label {
   color: var(--primary);
 }
 
-.accordion-item p {
+.accordion-item__answer {
   margin: 0;
   border-top: 1px solid var(--border);
   padding: 12px 14px 14px;
   background: transparent;
   line-height: 1.45;
   animation: accordion-reveal 150ms ease;
+}
+
+.accordion-item__answer > p,
+.faq-answer p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.faq-answer {
+  display: grid;
+  gap: 10px;
+}
+
+.faq-answer__path {
+  border-left: 3px solid var(--primary);
+  padding-left: 10px;
+  color: var(--text) !important;
+  font-weight: 750;
 }
 
 .page--faq {
@@ -4623,21 +4649,14 @@ label {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 950;
+  overflow: hidden;
 }
 
-.seller-contact-row__icon--telegram {
-  background: #229ed9;
-}
-
-.seller-contact-row__icon--whatsapp {
-  background: #25d366;
-}
-
-.seller-contact-row__icon--instagram {
-  background: linear-gradient(135deg, #f58529, #dd2a7b 48%, #515bd4);
+.seller-contact-row__icon img {
+  display: block;
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
 }
 
 .seller-contact-card__empty {
@@ -4657,13 +4676,12 @@ label {
   align-items: center;
   max-width: min(172px, calc(100vw - 24px));
   gap: 5px;
-  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 999px;
   padding: 5px 9px 5px 5px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 96%, var(--primary) 4%), var(--surface));
-  color: var(--primary);
-  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.14);
+  background: var(--marketplace-gradient);
+  color: #ffffff;
+  box-shadow: 0 12px 26px rgba(88, 28, 135, 0.24);
   cursor: grab;
   opacity: 0;
   touch-action: none;
@@ -4689,7 +4707,8 @@ label {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--marketplace-gradient);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
   font-weight: 900;
 }
@@ -4720,14 +4739,24 @@ label {
   touch-action: none;
   transition: opacity 140ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms ease;
   user-select: none;
+  animation: floating-help-tab-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes floating-help-tab-enter {
+  from {
+    opacity: 0;
+    translate: var(--floating-help-tab-enter-x, 0) 0;
+  }
 }
 
 .floating-help-tab--left {
+  --floating-help-tab-enter-x: 14px;
   border-left: 0;
   border-radius: 0 13px 13px 0;
 }
 
 .floating-help-tab--right {
+  --floating-help-tab-enter-x: -14px;
   border-right: 0;
   border-radius: 13px 0 0 13px;
 }
@@ -5327,6 +5356,14 @@ label {
   }
 
   .accordion-item[open] .accordion-body {
+    animation: none;
+  }
+
+  .floating-help-widget,
+  .floating-help-tab,
+  .accordion-item__answer,
+  .seller-contact-card {
+    transition-duration: 1ms;
     animation: none;
   }
 }
