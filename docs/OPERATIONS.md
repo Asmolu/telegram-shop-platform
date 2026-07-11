@@ -15,7 +15,7 @@ This document covers routine production operations for StyleXac.
 | API health | `https://api.stylexac.ru/health` |
 | Mini App | `https://mini.stylexac.ru/` |
 | Seller Panel | `https://seller.stylexac.ru/` |
-| Current migration head | `20260703_0047` |
+| Current migration head | `20260711_0053` |
 
 ## Daily Status Check
 
@@ -142,3 +142,16 @@ During an incident, capture:
 - relevant backend log window with secrets removed
 - customer-visible symptom
 - rollback or fix applied
+
+## Transactional Outbox Operations
+
+Seller/admin diagnostics are available at `GET /api/v1/outbox/admin/diagnostics`; the response
+contains counts, oldest pending metadata, attempts, locks, and sanitized errors, but no event
+payload. Only an admin can requeue a terminal event with
+`POST /api/v1/outbox/admin/{event_id}/retry`. Requeueing preserves already processed consumer
+deliveries and resets only failed consumers.
+
+Investigate sustained `PENDING`, stale `PROCESSING`, or any `FAILED` count in backend logs and
+the diagnostics endpoint. Do not repair payloads or statuses directly without a backup and an
+incident record. A missing worker can be confirmed from backend startup/log state and
+`OUTBOX_ENABLED`; abandoned claims recover automatically after the configured lock timeout.

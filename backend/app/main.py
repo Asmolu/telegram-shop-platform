@@ -17,6 +17,7 @@ from app.core.request_logging import RequestLoggingMiddleware
 from app.db.session import dispose_database_engine
 from app.modules.customer_notifications.campaigns.worker import run_customer_campaign_worker
 from app.modules.manual_payments.worker import run_manual_payment_expiration_worker
+from app.modules.outbox.worker import run_outbox_worker
 from app.modules.uploads.storage import ensure_upload_directories
 
 
@@ -31,6 +32,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         worker_tasks.append(
             asyncio.create_task(run_manual_payment_expiration_worker(worker_stop))
         )
+    if settings.outbox_enabled:
+        worker_tasks.append(asyncio.create_task(run_outbox_worker(worker_stop)))
     try:
         yield
     finally:

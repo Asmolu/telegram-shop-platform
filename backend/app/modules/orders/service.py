@@ -43,6 +43,8 @@ from app.modules.orders.schemas import (
     PaymentSuccessBannerPendingRead,
     PaymentSuccessBannerSeenRead,
 )
+from app.modules.outbox.constants import CUSTOMER_CONSUMER, SELLER_CONSUMER
+from app.modules.outbox.service import OutboxService
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
 from app.modules.users.service import UsersService
 
@@ -115,7 +117,8 @@ class OrdersService:
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
-        self.event_publisher = event_publisher or InternalOrderEventPublisher(session)
+        self.event_publisher = event_publisher
+        self.outbox_service = None if event_publisher is not None else OutboxService(session)
         self.promo_codes_service = promo_codes_service or PromoCodesService(session)
         self.analytics_tracker = analytics_tracker
         self.audit_service = audit_service or NoopAuditService()
@@ -261,6 +264,9 @@ class OrdersService:
                         },
                     )
                 )
+            if self.outbox_service is not None:
+                for event_name, event_payload in post_commit_events:
+                    self._enqueue_event(event_name, event_payload)
             self.idempotency_service.complete(
                 idempotency_claim,
                 response_body=response.model_dump(mode="json"),
@@ -277,8 +283,9 @@ class OrdersService:
             await self.session.rollback()
             raise
 
-        for event_name, event_payload in post_commit_events:
-            await self._emit_post_commit_event(event_name, event_payload)
+        if self.outbox_service is None:
+            for event_name, event_payload in post_commit_events:
+                await self._emit_post_commit_event(event_name, event_payload)
         for event_name, event_payload in post_commit_analytics:
             await self._track_event(
                 event_name,
@@ -433,14 +440,18 @@ class OrdersService:
                 post_commit_events.append((ORDER_SHIPPED, order_shipped_payload(order)))
 
         response = OrderRead.model_validate(order)
+        if self.outbox_service is not None:
+            for event_name, event_payload in post_commit_events:
+                self._enqueue_event(event_name, event_payload)
         try:
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
             raise AppError("Order update failed", status.HTTP_409_CONFLICT) from exc
 
-        for event_name, event_payload in post_commit_events:
-            await self._emit_post_commit_event(event_name, event_payload)
+        if self.outbox_service is None:
+            for event_name, event_payload in post_commit_events:
+                await self._emit_post_commit_event(event_name, event_payload)
 
         return response
 
@@ -450,6 +461,7 @@ class OrdersService:
         event_payload: Mapping[str, object],
     ) -> None:
         try:
+            assert self.event_publisher is not None
             await self.event_publisher.emit(event_name, event_payload)
         except Exception:
             logger.warning(
@@ -465,6 +477,16 @@ class OrdersService:
                     event_name,
                     exc_info=True,
                 )
+
+    def _enqueue_event(self, event_name: str, event_payload: Mapping[str, object]) -> None:
+        assert self.outbox_service is not None
+        self.outbox_service.enqueue(
+            event_name=event_name,
+            aggregate_type="order",
+            aggregate_id=event_payload.get("order_id", "unknown"),
+            payload=event_payload,
+            consumers=(SELLER_CONSUMER, CUSTOMER_CONSUMER),
+        )
 
     async def _track_event(
         self,

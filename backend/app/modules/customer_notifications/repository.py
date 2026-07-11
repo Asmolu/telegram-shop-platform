@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,17 @@ class CustomerNotificationsRepository:
 
     def add_delivery(self, delivery: CustomerServiceNotificationDelivery) -> None:
         self.session.add(delivery)
+
+    async def get_delivery_by_source(
+        self, *, event_id: UUID, consumer: str
+    ) -> CustomerServiceNotificationDelivery | None:
+        result = await self.session.execute(
+            select(CustomerServiceNotificationDelivery).where(
+                CustomerServiceNotificationDelivery.source_event_id == event_id,
+                CustomerServiceNotificationDelivery.source_consumer == consumer,
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def get_by_id(self, subscription_id: int) -> CustomerTelegramSubscription | None:
         return await self.session.get(CustomerTelegramSubscription, subscription_id)

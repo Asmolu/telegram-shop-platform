@@ -1,6 +1,7 @@
 import html
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from uuid import UUID
 
 from fastapi import status
 from fastapi.encoders import jsonable_encoder
@@ -112,15 +113,30 @@ class NotificationsService:
         *,
         name: str,
         payload: Mapping[str, object],
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> NotificationRead | None:
+        if source_event_id is not None and source_consumer is not None:
+            existing = await self.repository.get_by_source(
+                event_id=source_event_id, consumer=source_consumer
+            )
+            if existing is not None:
+                if (
+                    existing.channel == NotificationChannel.TELEGRAM
+                    and existing.status != NotificationStatus.SENT
+                ):
+                    await self._deliver_telegram(existing)
+                return NotificationRead.model_validate(existing)
         if name == ORDER_CREATED:
-            return await self._create_order_created(payload)
+            return await self._create_order_created(payload, source_event_id, source_consumer)
         if name == ORDER_STATUS_CHANGED:
-            return await self._create_order_status_changed(payload)
+            return await self._create_order_status_changed(
+                payload, source_event_id, source_consumer
+            )
         if name == ORDER_SHIPPED:
-            return await self._create_order_shipped(payload)
+            return await self._create_order_shipped(payload, source_event_id, source_consumer)
         if name == PROMO_USED:
-            return await self._create_promo_used(payload)
+            return await self._create_promo_used(payload, source_event_id, source_consumer)
         return None
 
     async def create_notification(
@@ -132,10 +148,14 @@ class NotificationsService:
         payload: Mapping[str, object] | None,
         channel: NotificationChannel,
         user_id: int | None = None,
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> Notification:
         sent_at = self._now() if channel == NotificationChannel.INTERNAL else None
         notification = Notification(
             user_id=user_id,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
             type=type,
             title=title,
             message=message,
@@ -171,7 +191,12 @@ class NotificationsService:
         await self._deliver_telegram(notification)
         return NotificationRead.model_validate(notification)
 
-    async def _create_order_created(self, payload: Mapping[str, object]) -> NotificationRead:
+    async def _create_order_created(
+        self,
+        payload: Mapping[str, object],
+        source_event_id: UUID | None,
+        source_consumer: str | None,
+    ) -> NotificationRead:
         order_number = self._order_label(payload)
         title = f"🛍 Новый заказ #{order_number}"
         message = self._format_seller_order_created_message(payload)
@@ -181,6 +206,8 @@ class NotificationsService:
             message=message,
             payload=payload,
             channel=NotificationChannel.TELEGRAM,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
         await self._deliver_telegram(notification)
         return NotificationRead.model_validate(notification)
@@ -188,6 +215,8 @@ class NotificationsService:
     async def _create_order_status_changed(
         self,
         payload: Mapping[str, object],
+        source_event_id: UUID | None,
+        source_consumer: str | None,
     ) -> NotificationRead:
         order_number = self._order_label(payload)
         previous_status = self._payload_value(payload, "previous_status", fallback="")
@@ -204,11 +233,18 @@ class NotificationsService:
             message=message,
             payload=payload,
             channel=NotificationChannel.TELEGRAM,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
         await self._deliver_telegram(notification)
         return NotificationRead.model_validate(notification)
 
-    async def _create_order_shipped(self, payload: Mapping[str, object]) -> NotificationRead:
+    async def _create_order_shipped(
+        self,
+        payload: Mapping[str, object],
+        source_event_id: UUID | None,
+        source_consumer: str | None,
+    ) -> NotificationRead:
         order_number = self._order_label(payload)
         user_id = self._payload_int(payload, "user_id")
         notification = await self.create_notification(
@@ -218,10 +254,17 @@ class NotificationsService:
             message=f"Order {order_number} was shipped.",
             payload=payload,
             channel=NotificationChannel.INTERNAL,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
         return NotificationRead.model_validate(notification)
 
-    async def _create_promo_used(self, payload: Mapping[str, object]) -> NotificationRead:
+    async def _create_promo_used(
+        self,
+        payload: Mapping[str, object],
+        source_event_id: UUID | None,
+        source_consumer: str | None,
+    ) -> NotificationRead:
         promo_code = self._payload_value(payload, "promo_code", fallback="promo code")
         user_id = self._payload_int(payload, "user_id")
         order_number = self._order_label(payload)
@@ -232,6 +275,8 @@ class NotificationsService:
             message=f"Promo code {promo_code} was used on order {order_number}.",
             payload=payload,
             channel=NotificationChannel.INTERNAL,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
         return NotificationRead.model_validate(notification)
 
@@ -351,9 +396,7 @@ class NotificationsService:
             size_grid = item.get("variant_size_grid") or "clothing_alpha"
             try:
                 display_size = (
-                    format_size_for_display(str(size_grid), str(size))
-                    if size
-                    else MISSING_VALUE
+                    format_size_for_display(str(size_grid), str(size)) if size else MISSING_VALUE
                 )
             except ValueError:
                 display_size = str(size) if size else MISSING_VALUE

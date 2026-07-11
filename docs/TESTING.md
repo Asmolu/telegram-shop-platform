@@ -85,10 +85,10 @@ rg -n "tsplatform\.ru|mini\.tsplatform\.ru|api\.tsplatform\.ru|seller\.tsplatfor
 Search for stale migration references:
 
 ```bash
-rg -n "20260710_0052" .
+rg -n "20260711_0053" .
 ```
 
-`20260710_0052` is the current documented migration head. Older migration ids may appear only when clearly labeled as historical.
+`20260711_0053` is the current documented migration head. Older migration ids may appear only when clearly labeled as historical.
 
 Manual smoke scenarios for the current release:
 
@@ -117,3 +117,13 @@ markdownlint README.md docs/**/*.md
 ```
 
 Do not install a new markdown dependency solely for a documentation-only change.
+
+## Transactional Outbox Tests
+
+Run `pytest tests/test_outbox.py -W error` for enqueue, JSON safety, retry/backoff, stale-lock,
+fan-out isolation, manual retry, and worker behavior. Set `TEST_POSTGRES_URL` to a disposable
+PostgreSQL database to enable the real concurrent `FOR UPDATE SKIP LOCKED` test. The test creates
+and drops schema objects, so never point it at development or production data.
+
+Migration coverage is in `tests/test_migrations.py`. Order, notification, customer service
+notification, and manual payment suites remain required formatting and API compatibility gates.

@@ -35,7 +35,7 @@ flowchart LR
 | Mini App | `https://mini.stylexac.ru` |
 | API | `https://api.stylexac.ru` |
 | Seller Panel | `https://seller.stylexac.ru` |
-| Current migration head | `20260703_0047` |
+| Current migration head | `20260711_0053` |
 
 Production uses Docker Compose for application services and host Caddy for TLS and reverse proxying. HTTP/3/QUIC is intentionally disabled in Caddy. The host `tsplatform-mss-clamp.service` intentionally clamps TCP MSS for ports `80` and `443` to improve Telegram WebView, VPN, and MTU compatibility.
 
@@ -233,3 +233,21 @@ Workers run inside the backend process in the current deployment.
 ## Current Handover
 
 The comprehensive current-state handover is `docs/PROJECT_HANDOVER.md`.
+
+## Transactional Outbox
+
+Order and manual-payment state changes enqueue an immutable `OutboxEvent` in the same
+SQLAlchemy transaction as the business data. Each event owns independent `seller` and/or
+`customer` `OutboxDelivery` rows, so one destination can retry without losing the other.
+
+The lifespan outbox worker claims due or abandoned events with PostgreSQL
+`FOR UPDATE SKIP LOCKED`, commits the claim, and only then calls existing notification
+formatters/publishers. It records each consumer result separately and marks the parent event
+`PROCESSED`, retryable `PENDING`, or terminal `FAILED`. Delivery is at-least-once. Durable
+source-event keys prevent duplicate notification rows; Telegram itself has no exactly-once
+or idempotency-key API, so a crash after Telegram accepts a message but before the local
+acknowledgement can still cause a duplicate message.
+
+Analytics remains best-effort post-commit telemetry and is intentionally outside this outbox.
+Return-request seller notification is still a direct post-commit send and is a documented
+remaining reliability gap rather than an outbox consumer.

@@ -180,3 +180,16 @@ Do not hardcode production API URLs in frontend source. Use environment variable
 - Do not include raw Telegram tokens or raw production env content in docs.
 - Do not log raw Telegram `initData`.
 - Use sanitized diagnostics for auth and Telegram delivery failures.
+
+## Transactional Outbox Settings
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `OUTBOX_ENABLED` | `true` | Starts the lifespan processor; producers still enqueue durably when disabled. |
+| `OUTBOX_POLL_INTERVAL_SECONDS` | `2` | Idle delay between polls. |
+| `OUTBOX_BATCH_SIZE` | `20` | Maximum events claimed per transaction. |
+| `OUTBOX_MAX_ATTEMPTS` | `8` | Per-consumer attempts before terminal failure. |
+| `OUTBOX_LOCK_TIMEOUT_SECONDS` | `300` | Age after which an abandoned processing claim is recoverable. |
+| `OUTBOX_RETRY_BASE_SECONDS` | `5` | Initial exponential retry delay. |
+| `OUTBOX_RETRY_MAX_SECONDS` | `900` | Retry delay cap. |
+| `OUTBOX_WORKER_ID` | generated | Optional stable diagnostic worker name; never put secrets in it. |

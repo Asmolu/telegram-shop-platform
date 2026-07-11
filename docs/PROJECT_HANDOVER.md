@@ -824,3 +824,12 @@ Recent migrations:
 - `docs/BACKUP_STRATEGY.md`: backup strategy, retention, and verification.
 - `docs/TESTING.md`: required checks by area.
 - `UI_DESIGN_SPEC.README.md`: Mini App and Seller Panel design rules.
+
+## Transactional Outbox Handover
+
+The current migration head is `20260711_0053`. Order created/promo/status/shipped events and
+manual-payment submitted/approved/rejected/expired events are enqueued atomically and processed
+by the backend lifespan worker. Operational status is available through the authorized outbox
+diagnostics endpoint; payloads are deliberately excluded. Analytics remains best-effort, and
+return-request notification remains direct post-commit. Delivery is at-least-once, not exactly
+once at Telegram's external boundary.

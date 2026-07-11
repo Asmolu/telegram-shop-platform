@@ -149,6 +149,15 @@ class Settings(BaseSettings):
     manual_payment_expiration_worker_enabled: bool = True
     manual_payment_expiration_poll_seconds: int = 60
 
+    outbox_enabled: bool = True
+    outbox_poll_interval_seconds: float = 2.0
+    outbox_batch_size: int = 20
+    outbox_max_attempts: int = 8
+    outbox_lock_timeout_seconds: int = 300
+    outbox_retry_base_seconds: int = 5
+    outbox_retry_max_seconds: int = 900
+    outbox_worker_id: str | None = None
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]

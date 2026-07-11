@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,5 +48,14 @@ class NotificationsRepository:
     async def get_by_id(self, notification_id: int) -> Notification | None:
         result = await self.session.execute(
             select(Notification).where(Notification.id == notification_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_source(self, *, event_id: UUID, consumer: str) -> Notification | None:
+        result = await self.session.execute(
+            select(Notification).where(
+                Notification.source_event_id == event_id,
+                Notification.source_consumer == consumer,
+            )
         )
         return result.scalar_one_or_none()

@@ -20,6 +20,7 @@ from app.modules.manual_payments.router import customer_router as manual_payment
 from app.modules.manual_payments.router import seller_router as manual_payments_seller_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.orders.router import router as orders_router
+from app.modules.outbox.router import router as outbox_router
 from app.modules.products.router import router as products_router
 from app.modules.promo_codes.router import router as promo_codes_router
 from app.modules.returns.router import admin_router as returns_admin_router
@@ -48,6 +49,7 @@ api_router.include_router(users_router)
 api_router.include_router(banners_router)
 api_router.include_router(cart_router)
 api_router.include_router(orders_router)
+api_router.include_router(outbox_router)
 api_router.include_router(returns_customer_router)
 api_router.include_router(return_customer_router)
 api_router.include_router(returns_admin_router)

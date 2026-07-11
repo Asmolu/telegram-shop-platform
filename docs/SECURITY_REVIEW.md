@@ -12,7 +12,7 @@ This document summarizes current security posture and areas that require continu
 | API | `https://api.stylexac.ru` |
 | Seller Panel | `https://seller.stylexac.ru` |
 | Production env | `backend/.env.production` |
-| Current migration head | `20260703_0047` |
+| Current migration head | `20260711_0053` |
 
 ## Authentication
 
@@ -166,3 +166,16 @@ Review security impact when changing:
 - Local filesystem uploads require reliable volume backup and restore.
 - Seller/admin role assignment must be controlled operationally.
 - Any direct database repair can bypass service-level audit rules and must be backed up and documented.
+
+## Transactional Outbox Security Review
+
+- Outbox payloads are JSON snapshots and may contain order contact data needed by existing
+  notification formatting; they must be protected like order data and are not returned by the
+  diagnostics API.
+- Payload creation uses the existing domain builders and must never add bot tokens, credentials,
+  raw Telegram `initData`, or other secrets.
+- Persisted worker errors are whitespace-normalized, secret-redacted, and length-bounded.
+- Diagnostics require seller/admin authorization; terminal retry requires `ADMIN`.
+- `OUTBOX_WORKER_ID` is logged and persisted for operations and must not contain host secrets.
+- At-least-once external delivery leaves a residual duplicate Telegram message risk across the
+  send/ack crash window even though database notification rows are source-event-idempotent.

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import UploadFile, status
 from sqlalchemy.exc import IntegrityError
@@ -66,9 +67,7 @@ START_COMMAND_RE = re.compile(
     r"^/start(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<payload>\S+))?$",
     re.IGNORECASE,
 )
-COMMAND_RE = re.compile(
-    r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$"
-)
+COMMAND_RE = re.compile(r"^(?P<command>/[A-Za-z_]+)(?:@[A-Za-z0-9_]{5,32})?(?:\s+(?P<args>.*))?$")
 PRIVATE_CHAT_TYPE = "private"
 UNKNOWN_CHAT_TYPE = "unknown"
 START_LINK_PAYLOAD = "notifications"
@@ -409,22 +408,26 @@ class CustomerServiceNotificationDeliveryService:
         self,
         name: str,
         payload: Mapping[str, object],
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> CustomerServiceNotificationDelivery | None:
         if name == ORDER_CREATED:
-            return await self.notify_order_created(payload)
+            return await self.notify_order_created(payload, source_event_id, source_consumer)
         if name == ORDER_STATUS_CHANGED:
-            return await self.notify_order_status_changed(payload)
+            return await self.notify_order_status_changed(payload, source_event_id, source_consumer)
         if name in {
             MANUAL_PAYMENT_APPROVED,
             MANUAL_PAYMENT_REJECTED,
             MANUAL_PAYMENT_EXPIRED,
         }:
-            return await self.notify_manual_payment(name, payload)
+            return await self.notify_manual_payment(name, payload, source_event_id, source_consumer)
         return None
 
     async def notify_order_created(
         self,
         payload: Mapping[str, object],
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> CustomerServiceNotificationDelivery | None:
         user_id = self._payload_int(payload, "user_id")
         if user_id is None:
@@ -434,11 +437,15 @@ class CustomerServiceNotificationDeliveryService:
             order_id=self._payload_int(payload, "order_id"),
             event_name=ORDER_CREATED_CUSTOMER,
             message=self._order_created_message(payload),
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
 
     async def notify_order_status_changed(
         self,
         payload: Mapping[str, object],
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> CustomerServiceNotificationDelivery | None:
         user_id = self._payload_int(payload, "user_id")
         if user_id is None:
@@ -450,12 +457,16 @@ class CustomerServiceNotificationDeliveryService:
             order_id=self._payload_int(payload, "order_id"),
             event_name=event_name,
             message=message,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
 
     async def notify_manual_payment(
         self,
         name: str,
         payload: Mapping[str, object],
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> CustomerServiceNotificationDelivery | None:
         user_id = self._payload_int(payload, "user_id")
         if user_id is None:
@@ -464,10 +475,7 @@ class CustomerServiceNotificationDeliveryService:
         order_label = self._order_label(payload)
         if name == MANUAL_PAYMENT_APPROVED:
             event_name = MANUAL_PAYMENT_APPROVED_CUSTOMER
-            message = (
-                "Оплата подтверждена\n\n"
-                f"Заказ {order_label} принят в обработку."
-            )
+            message = f"Оплата подтверждена\n\nЗаказ {order_label} принят в обработку."
         elif name == MANUAL_PAYMENT_REJECTED:
             event_name = MANUAL_PAYMENT_REJECTED_CUSTOMER
             reason = self._payload_value(
@@ -476,22 +484,19 @@ class CustomerServiceNotificationDeliveryService:
                 fallback="причина не указана",
             )
             message = (
-                "Оплата отклонена\n\n"
-                f"Заказ {order_label}. Причина: {reason}. "
-                "Резерв товара снят."
+                f"Оплата отклонена\n\nЗаказ {order_label}. Причина: {reason}. Резерв товара снят."
             )
         else:
             event_name = MANUAL_PAYMENT_EXPIRED_CUSTOMER
-            message = (
-                "Время оплаты истекло\n\n"
-                f"Заказ {order_label} отменен. Резерв товара снят."
-            )
+            message = f"Время оплаты истекло\n\nЗаказ {order_label} отменен. Резерв товара снят."
 
         return await self._deliver_service_notification(
             user_id=user_id,
             order_id=self._payload_int(payload, "order_id"),
             event_name=event_name,
             message=message,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
 
     async def _deliver_service_notification(
@@ -501,15 +506,33 @@ class CustomerServiceNotificationDeliveryService:
         order_id: int | None,
         event_name: str,
         message: str,
+        source_event_id: UUID | None = None,
+        source_consumer: str | None = None,
     ) -> CustomerServiceNotificationDelivery:
         subscription = await self.repository.get_by_user_id(user_id)
-        delivery = CustomerServiceNotificationDelivery(
+        delivery = (
+            await self.repository.get_delivery_by_source(
+                event_id=source_event_id, consumer=source_consumer
+            )
+            if source_event_id is not None and source_consumer is not None
+            else None
+        )
+        if delivery is not None and delivery.status in {
+            CustomerServiceNotificationDeliveryStatus.SENT,
+            CustomerServiceNotificationDeliveryStatus.SKIPPED,
+            CustomerServiceNotificationDeliveryStatus.BLOCKED,
+        }:
+            return delivery
+        is_new = delivery is None
+        delivery = delivery or CustomerServiceNotificationDelivery(
             user_id=user_id,
             order_id=order_id,
             subscription_id=subscription.id if subscription is not None else None,
             event_name=event_name,
             channel=NotificationChannel.TELEGRAM,
             status=CustomerServiceNotificationDeliveryStatus.PENDING,
+            source_event_id=source_event_id,
+            source_consumer=source_consumer,
         )
 
         skip_reason = self._skip_reason(subscription, user_id=user_id)
@@ -518,14 +541,16 @@ class CustomerServiceNotificationDeliveryService:
             delivery.status = CustomerServiceNotificationDeliveryStatus.SKIPPED
             delivery.error_code = error_code
             delivery.error_message = error_message
-            self.repository.add_delivery(delivery)
+            if is_new:
+                self.repository.add_delivery(delivery)
             await self._flush_if_supported()
             await self._audit_delivery(delivery, action=ACTION_CUSTOMER_ORDER_NOTIFICATION_FAILED)
             await self._commit("Customer service notification skip recording failed")
             return delivery
 
-        self.repository.add_delivery(delivery)
-        await self._commit("Customer service notification delivery creation failed")
+        if is_new:
+            self.repository.add_delivery(delivery)
+            await self._commit("Customer service notification delivery creation failed")
 
         assert subscription is not None
         send_target = resolve_customer_service_send_target(subscription)
@@ -1228,9 +1253,7 @@ class CustomerNotificationsService:
                 [
                     {
                         "text": (
-                            "Выключить заказы"
-                            if subscription.service_opt_in
-                            else "Включить заказы"
+                            "Выключить заказы" if subscription.service_opt_in else "Включить заказы"
                         ),
                         "callback_data": f"{CALLBACK_PREFIX}:service:{service_action}",
                     }
@@ -1410,9 +1433,7 @@ class CustomerNotificationsService:
             "service_opt_in": subscription.service_opt_in,
             "marketing_opt_in": subscription.marketing_opt_in,
             "blocked_at": (
-                subscription.blocked_at.isoformat()
-                if subscription.blocked_at is not None
-                else None
+                subscription.blocked_at.isoformat() if subscription.blocked_at is not None else None
             ),
         }
 

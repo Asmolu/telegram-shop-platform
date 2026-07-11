@@ -1,6 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -225,6 +227,19 @@ class BroadcastDeliveryStatus(StrEnum):
     SKIPPED = "skipped"
     BLOCKED = "blocked"
     RATE_LIMITED = "rate_limited"
+
+
+class OutboxStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
+
+
+class OutboxDeliveryStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
 
 
 class SellerRegistrationStatus(StrEnum):
@@ -2405,8 +2420,17 @@ class Favorite(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_event_id",
+            "source_consumer",
+            name="uq_notifications_source_event_consumer",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    source_event_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    source_consumer: Mapped[str | None] = mapped_column(String(50), nullable=True)
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
@@ -2450,8 +2474,17 @@ class Notification(Base):
 
 class CustomerServiceNotificationDelivery(Base):
     __tablename__ = "customer_service_notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_event_id",
+            "source_consumer",
+            name="uq_customer_service_deliveries_source_event_consumer",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    source_event_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    source_consumer: Mapped[str | None] = mapped_column(String(50), nullable=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -2720,6 +2753,92 @@ class BroadcastDelivery(Base):
 
     campaign: Mapped[BroadcastCampaign] = relationship()
     subscription: Mapped[CustomerTelegramSubscription] = relationship()
+
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_outbox_events_event_id"),
+        CheckConstraint("attempt_count >= 0", name="ck_outbox_events_attempt_count"),
+        CheckConstraint("max_attempts > 0", name="ck_outbox_events_max_attempts"),
+        Index("ix_outbox_events_poll", "status", "next_attempt_at", "created_at"),
+        Index("ix_outbox_events_locked", "status", "locked_at"),
+        Index("ix_outbox_events_aggregate", "aggregate_type", "aggregate_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    event_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    aggregate_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    status: Mapped[OutboxStatus] = mapped_column(
+        Enum(OutboxStatus, name="outbox_status", values_callable=_enum_values),
+        nullable=False,
+        default=OutboxStatus.PENDING,
+        server_default=OutboxStatus.PENDING.value,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    deliveries: Mapped[list["OutboxDelivery"]] = relationship(
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="OutboxDelivery.id",
+    )
+
+
+class OutboxDelivery(Base):
+    __tablename__ = "outbox_deliveries"
+    __table_args__ = (
+        UniqueConstraint("outbox_event_id", "consumer", name="uq_outbox_delivery_consumer"),
+        CheckConstraint("attempt_count >= 0", name="ck_outbox_deliveries_attempt_count"),
+        Index("ix_outbox_deliveries_event_status", "outbox_event_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    outbox_event_id: Mapped[int] = mapped_column(
+        ForeignKey("outbox_events.id", ondelete="CASCADE"), nullable=False
+    )
+    consumer: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[OutboxDeliveryStatus] = mapped_column(
+        Enum(
+            OutboxDeliveryStatus,
+            name="outbox_delivery_status",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=OutboxDeliveryStatus.PENDING,
+        server_default=OutboxDeliveryStatus.PENDING.value,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    event: Mapped[OutboxEvent] = relationship(back_populates="deliveries")
 
 
 class AnalyticsEvent(Base):

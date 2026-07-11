@@ -15,7 +15,7 @@ This document is the current production deploy runbook for StyleXac.
 | Mini App direct domain | `https://mini.stylexac.ru` |
 | API domain | `https://api.stylexac.ru` |
 | Seller Panel domain | `https://seller.stylexac.ru` |
-| Current migration head | `20260703_0047` |
+| Current migration head | `20260711_0053` |
 
 The production stack contains `backend`, `postgres`, `redis`, `mini-app`, and `seller-panel`. Host Caddy terminates TLS and reverse-proxies to the containers.
 
@@ -231,3 +231,15 @@ Record:
 - smoke check results
 - relevant log status
 - any Telegram/customer notification verification performed
+
+## Outbox Deployment and Rollback
+
+Revision `20260711_0053` must be applied before starting the new backend image because the
+FastAPI lifespan starts the outbox worker. The existing deployment order—backup, build,
+`alembic upgrade head`, verify `alembic current`, then `up -d`—is safe. After startup, verify
+`GET /health`, backend logs, and the authorized outbox diagnostics endpoint.
+
+For rollback, stop the new backend before downgrading the migration. A code rollback that
+leaves `20260711_0053` applied is safe; the tables remain dormant. A database downgrade removes
+outbox history and notification source-event keys, so take and verify a production backup first.
+Never downgrade while the outbox worker is running.

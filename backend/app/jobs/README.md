@@ -8,6 +8,7 @@ Background jobs are currently started from the FastAPI lifespan inside the backe
 | --- | --- | --- |
 | Customer campaign worker | Processes scheduled/active customer campaign delivery batches | `CUSTOMER_CAMPAIGN_WORKER_ENABLED`, `CUSTOMER_CAMPAIGN_WORKER_POLL_SECONDS` |
 | Manual payment expiration worker | Expires manual payments according to configured deadlines | `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED`, `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS` |
+| Transactional outbox worker | Delivers committed order/payment events to seller and customer consumers | `OUTBOX_ENABLED`, `OUTBOX_POLL_INTERVAL_SECONDS` |
 
 ## Customer Campaign Worker
 
@@ -30,6 +31,14 @@ Related settings:
 
 - `MANUAL_PAYMENT_EXPIRATION_WORKER_ENABLED`
 - `MANUAL_PAYMENT_EXPIRATION_POLL_SECONDS`
+
+## Transactional Outbox Worker
+
+The outbox worker claims bounded batches with PostgreSQL `FOR UPDATE SKIP LOCKED`, commits
+the claim, then performs Telegram calls without holding a database transaction open. Seller
+and customer consumers have independent delivery rows. Stale `PROCESSING` events are recovered
+after `OUTBOX_LOCK_TIMEOUT_SECONDS`; failures use bounded exponential backoff and become
+observable `FAILED` events after `OUTBOX_MAX_ATTEMPTS`.
 
 ## Production Logs
 

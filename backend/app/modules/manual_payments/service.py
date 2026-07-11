@@ -42,6 +42,8 @@ from app.modules.manual_payments.schemas import (
     SellerPaymentSettingsUpdate,
 )
 from app.modules.orders.delivery import delivery_method_label
+from app.modules.outbox.constants import CUSTOMER_CONSUMER, SELLER_CONSUMER
+from app.modules.outbox.service import OutboxService
 from app.modules.telegram.service import TelegramDeliveryError, TelegramService
 from app.modules.uploads.service import UploadsService
 from app.modules.uploads.storage import LocalStorageService
@@ -80,7 +82,7 @@ class ManualPaymentEventPublisher:
 
     async def emit(self, name: str, payload: Mapping[str, object]) -> None:
         if name == MANUAL_PAYMENT_SUBMITTED:
-            await self._notify_seller(payload)
+            await self.emit_seller(name, payload)
             return
         if name in {
             MANUAL_PAYMENT_APPROVED,
@@ -88,7 +90,7 @@ class ManualPaymentEventPublisher:
             MANUAL_PAYMENT_EXPIRED,
         }:
             try:
-                await self._finalize_seller_message(name, payload)
+                await self.emit_seller(name, payload)
             except Exception:
                 logger.warning(
                     "manual_payment.seller_bot_finalization_failed",
@@ -100,12 +102,25 @@ class ManualPaymentEventPublisher:
                 )
             await self.customer_publisher.emit(name, payload)
 
+    async def emit_seller(self, name: str, payload: Mapping[str, object]) -> None:
+        if name == MANUAL_PAYMENT_SUBMITTED:
+            await self._notify_seller(payload)
+            return
+        if name in {
+            MANUAL_PAYMENT_APPROVED,
+            MANUAL_PAYMENT_REJECTED,
+            MANUAL_PAYMENT_EXPIRED,
+        }:
+            await self._finalize_seller_message(name, payload)
+
     async def _notify_seller(self, payload: Mapping[str, object]) -> None:
         payment_id = int(payload["payment_id"])
         order_id = int(payload["order_id"])
         notification_payload = dict(payload)
         payment = await self.repository.get_by_id(payment_id, populate_existing=True)
         if payment is not None:
+            if payment.seller_telegram_message_id is not None:
+                return
             notification_payload["receipt_image_path"] = payment.receipt_image_path
             notification_payload["has_receipt"] = bool(payment.receipt_image_path)
         message = self._review_message(notification_payload)
@@ -412,7 +427,8 @@ class ManualPaymentsService:
     ) -> None:
         self.session = session
         self.repository = ManualPaymentsRepository(session)
-        self.event_publisher = event_publisher or ManualPaymentEventPublisher(session)
+        self.event_publisher = event_publisher
+        self.outbox_service = None if event_publisher is not None else OutboxService(session)
         self.audit_service = audit_service or NoopAuditService()
         self.uploads_service = uploads_service or UploadsService(session)
         self.storage = storage or self.uploads_service.storage
@@ -547,6 +563,7 @@ class ManualPaymentsService:
         now = self._now()
         if await self._expire_if_due(payment, now=now):
             payment_id = payment.id
+            self._enqueue_event(MANUAL_PAYMENT_EXPIRED, payment)
             await self._commit("Payment expiration failed")
             payment = await self._reload_payment(payment_id)
             self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
@@ -574,6 +591,7 @@ class ManualPaymentsService:
             response_body=response.model_dump(mode="json"),
             response_status_code=status.HTTP_200_OK,
         )
+        self._enqueue_event(MANUAL_PAYMENT_SUBMITTED, payment)
         await self._commit("Payment submission failed")
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_SUBMITTED, payment)
@@ -619,6 +637,7 @@ class ManualPaymentsService:
         now = self._now()
         if await self._expire_if_due(payment, now=now):
             payment_id = payment.id
+            self._enqueue_event(MANUAL_PAYMENT_EXPIRED, payment)
             await self._commit("Payment expiration failed")
             payment = await self._reload_payment(payment_id)
             self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
@@ -763,6 +782,7 @@ class ManualPaymentsService:
             return self._payment_response(payment, server_now=now)
         if await self._expire_if_due(payment, now=now):
             payment_id = payment.id
+            self._enqueue_event(MANUAL_PAYMENT_EXPIRED, payment)
             await self._commit("Payment expiration failed")
             payment = await self._reload_payment(payment_id)
             self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
@@ -789,6 +809,12 @@ class ManualPaymentsService:
             },
         )
         payment_id = payment.id
+        self._enqueue_event(
+            MANUAL_PAYMENT_APPROVED,
+            payment,
+            seller_chat_id=seller_chat_id,
+            seller_message_id=seller_message_id,
+        )
         await self._commit("Payment approval failed")
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_APPROVED, payment)
@@ -821,6 +847,7 @@ class ManualPaymentsService:
             return self._payment_response(payment, server_now=now)
         if await self._expire_if_due(payment, now=now):
             payment_id = payment.id
+            self._enqueue_event(MANUAL_PAYMENT_EXPIRED, payment)
             await self._commit("Payment expiration failed")
             payment = await self._reload_payment(payment_id)
             self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
@@ -853,6 +880,12 @@ class ManualPaymentsService:
             },
         )
         payment_id = payment.id
+        self._enqueue_event(
+            MANUAL_PAYMENT_REJECTED,
+            payment,
+            seller_chat_id=seller_chat_id,
+            seller_message_id=seller_message_id,
+        )
         await self._commit("Payment rejection failed")
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_REJECTED, payment)
@@ -874,6 +907,7 @@ class ManualPaymentsService:
             return False
         await self._mark_expired(payment, now=now)
         payment_id = payment.id
+        self._enqueue_event(MANUAL_PAYMENT_EXPIRED, payment)
         await self._commit("Payment expiration failed")
         payment = await self._reload_payment(payment_id)
         self._log_persisted(MANUAL_PAYMENT_EXPIRED, payment)
@@ -930,12 +964,15 @@ class ManualPaymentsService:
         seller_chat_id: int | None = None,
         seller_message_id: int | None = None,
     ) -> None:
+        if self.outbox_service is not None:
+            return
         payload = self._event_payload(payment)
         if seller_chat_id is not None:
             payload["seller_telegram_chat_id"] = seller_chat_id
         if seller_message_id is not None:
             payload["seller_telegram_message_id"] = seller_message_id
         try:
+            assert self.event_publisher is not None
             await self.event_publisher.emit(name, payload)
         except Exception as exc:
             if name == MANUAL_PAYMENT_SUBMITTED:
@@ -958,6 +995,34 @@ class ManualPaymentsService:
                 await self.session.rollback()
             except Exception:
                 logger.warning("Failed to reset payment event session", exc_info=True)
+
+    def _enqueue_event(
+        self,
+        name: str,
+        payment: ManualPayment,
+        *,
+        seller_chat_id: int | None = None,
+        seller_message_id: int | None = None,
+    ) -> None:
+        if self.outbox_service is None:
+            return
+        payload = self._event_payload(payment)
+        if seller_chat_id is not None:
+            payload["seller_telegram_chat_id"] = seller_chat_id
+        if seller_message_id is not None:
+            payload["seller_telegram_message_id"] = seller_message_id
+        consumers = (
+            (SELLER_CONSUMER,)
+            if name == MANUAL_PAYMENT_SUBMITTED
+            else (SELLER_CONSUMER, CUSTOMER_CONSUMER)
+        )
+        self.outbox_service.enqueue(
+            event_name=name,
+            aggregate_type="manual_payment",
+            aggregate_id=payment.id,
+            payload=payload,
+            consumers=consumers,
+        )
 
     def _event_payload(self, payment: ManualPayment) -> dict[str, object]:
         order = payment.order

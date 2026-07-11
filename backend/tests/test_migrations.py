@@ -263,6 +263,25 @@ def test_sprint_10_notification_migration_adds_status_and_channel_enums() -> Non
     assert "sent_at" in content
 
 
+def test_transactional_outbox_migration_adds_locking_and_idempotency_constraints() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260711_0053_add_transactional_outbox.py"
+    )
+    content = migration_path.read_text()
+    assert 'revision: str = "20260711_0053"' in content
+    assert 'down_revision: str | None = "20260710_0052"' in content
+    assert "outbox_events" in content
+    assert "outbox_deliveries" in content
+    assert "ix_outbox_events_poll" in content
+    assert "uq_outbox_events_event_id" in content
+    assert "uq_outbox_delivery_consumer" in content
+    assert "uq_notifications_source_event_consumer" in content
+    assert "uq_customer_service_deliveries_source_event_consumer" in content
+
+
 def test_sprint_11_migration_adds_analytics_and_audit_tables() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

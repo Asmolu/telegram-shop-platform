@@ -17,7 +17,7 @@ The repository is documentation-driven and module-oriented. Backend routers stay
 | Production path | `/opt/telegram-shop` |
 | Production compose file | `docker-compose.prod.yml` |
 | Production env file | `backend/.env.production` |
-| Current migration head | `20260703_0047` |
+| Current migration head | `20260711_0053` |
 
 Reverse proxying is handled by host Caddy. HTTP/3/QUIC is intentionally disabled, and `tsplatform-mss-clamp.service` is intentionally enabled to improve Telegram WebView, VPN, and MTU compatibility.
 
@@ -215,3 +215,12 @@ If the local host does not have Python, Ruff, Pytest, or PostgreSQL-compatible s
 - Bot 1 and Bot 2 responsibilities must stay separated.
 - Telegram `initData` must always be validated server-side.
 - Raw `initData` must not be logged or stored.
+
+## Reliable Domain Events
+
+Order and manual-payment notification events use a PostgreSQL transactional outbox as of
+Alembic revision `20260711_0053`. Business state and immutable event snapshots commit together;
+an in-process lifespan worker performs independent seller/customer delivery with bounded retry,
+stale-lock recovery, and authorized diagnostics. Semantics are at-least-once. Database consumer
+keys minimize duplicates, but Telegram cannot guarantee exactly-once delivery across a send/ack
+process failure.
