@@ -37,8 +37,10 @@ Related settings:
 The outbox worker claims bounded batches with PostgreSQL `FOR UPDATE SKIP LOCKED`, commits
 the claim, then performs Telegram calls without holding a database transaction open. Seller
 and customer consumers have independent delivery rows. Stale `PROCESSING` events are recovered
-after `OUTBOX_LOCK_TIMEOUT_SECONDS`; failures use bounded exponential backoff and become
-observable `FAILED` events after `OUTBOX_MAX_ATTEMPTS`.
+after `OUTBOX_LOCK_TIMEOUT_SECONDS`. Each claim has a random UUID ownership token, active work
+renews its lease every one third of the lock timeout, and acknowledgements are fenced by that
+token. Failures use bounded exponential backoff and become observable `FAILED` events after
+`OUTBOX_MAX_ATTEMPTS`.
 
 ## Production Logs
 

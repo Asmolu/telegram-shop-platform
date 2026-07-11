@@ -189,7 +189,12 @@ Do not hardcode production API URLs in frontend source. Use environment variable
 | `OUTBOX_POLL_INTERVAL_SECONDS` | `2` | Idle delay between polls. |
 | `OUTBOX_BATCH_SIZE` | `20` | Maximum events claimed per transaction. |
 | `OUTBOX_MAX_ATTEMPTS` | `8` | Per-consumer attempts before terminal failure. |
-| `OUTBOX_LOCK_TIMEOUT_SECONDS` | `300` | Age after which an abandoned processing claim is recoverable. |
+| `OUTBOX_LOCK_TIMEOUT_SECONDS` | `300` | Age after which an abandoned processing claim is recoverable; an owned claim renews every one third of this interval. |
 | `OUTBOX_RETRY_BASE_SECONDS` | `5` | Initial exponential retry delay. |
 | `OUTBOX_RETRY_MAX_SECONDS` | `900` | Retry delay cap. |
 | `OUTBOX_WORKER_ID` | generated | Optional stable diagnostic worker name; never put secrets in it. |
+
+All positive numeric outbox settings are validated at startup, and the retry maximum must be at
+least the retry base. The derived heartbeat interval is `OUTBOX_LOCK_TIMEOUT_SECONDS / 3`, which
+is always below half the stale timeout. Worker IDs are diagnostic labels; per-claim UUID tokens
+provide ownership fencing.

@@ -35,7 +35,7 @@ flowchart LR
 | Mini App | `https://mini.stylexac.ru` |
 | API | `https://api.stylexac.ru` |
 | Seller Panel | `https://seller.stylexac.ru` |
-| Current migration head | `20260711_0053` |
+| Current migration head | `20260712_0054` |
 
 Production uses Docker Compose for application services and host Caddy for TLS and reverse proxying. HTTP/3/QUIC is intentionally disabled in Caddy. The host `tsplatform-mss-clamp.service` intentionally clamps TCP MSS for ports `80` and `443` to improve Telegram WebView, VPN, and MTU compatibility.
 

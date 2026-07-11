@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import Settings
 
 
@@ -30,3 +32,27 @@ def test_settings_split_telegram_chat_fallbacks() -> None:
     assert config.telegram_orders_notification_chat_id == "-100-legacy"
     assert config.telegram_returns_notification_chat_id == "-100-legacy"
     assert config.telegram_backup_notification_chat_id == "-100-legacy"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("outbox_poll_interval_seconds", 0),
+        ("outbox_batch_size", 0),
+        ("outbox_max_attempts", 0),
+        ("outbox_lock_timeout_seconds", 0),
+        ("outbox_retry_base_seconds", 0),
+    ],
+)
+def test_outbox_settings_must_be_positive(field: str, value: int) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, **{field: value})
+
+
+def test_outbox_retry_maximum_cannot_be_below_base() -> None:
+    with pytest.raises(ValueError):
+        Settings(
+            _env_file=None,
+            outbox_retry_base_seconds=10,
+            outbox_retry_max_seconds=9,
+        )

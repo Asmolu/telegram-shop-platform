@@ -125,6 +125,7 @@ class NotificationsService:
                     existing.channel == NotificationChannel.TELEGRAM
                     and existing.status != NotificationStatus.SENT
                 ):
+                    await self.session.commit()
                     await self._deliver_telegram(existing)
                 return NotificationRead.model_validate(existing)
         if name == ORDER_CREATED:

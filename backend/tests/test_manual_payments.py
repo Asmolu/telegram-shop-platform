@@ -787,7 +787,7 @@ async def test_missing_seller_bot_configuration_does_not_break_submit() -> None:
     assert result.status == ManualPaymentStatus.SUBMITTED
     assert repository.payments[1].status == ManualPaymentStatus.SUBMITTED
     assert telegram.messages == []
-    assert session.rollback_count == 0
+    assert session.rollback_count == 1
 
 
 @pytest.mark.asyncio

@@ -827,7 +827,7 @@ Recent migrations:
 
 ## Transactional Outbox Handover
 
-The current migration head is `20260711_0053`. Order created/promo/status/shipped events and
+The current migration head is `20260712_0054`. Order created/promo/status/shipped events and
 manual-payment submitted/approved/rejected/expired events are enqueued atomically and processed
 by the backend lifespan worker. Operational status is available through the authorized outbox
 diagnostics endpoint; payloads are deliberately excluded. Analytics remains best-effort, and

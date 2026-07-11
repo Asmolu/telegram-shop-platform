@@ -153,7 +153,12 @@ class ManualPaymentEventPublisher:
             },
         )
         if not bot_token or not seller_chat_id:
-            return
+            raise TelegramDeliveryError(
+                "Telegram seller notification is not configured",
+                error_code="configuration_error",
+            )
+        if getattr(self.session, "in_transaction", lambda: False)():
+            await self.session.commit()
         delivery_type = "text"
         if receipt_path is not None:
             try:
@@ -268,6 +273,12 @@ class ManualPaymentEventPublisher:
         message_id = payload.get("seller_telegram_message_id")
         final_line = self._final_payment_line(name, payload)
         final_message = f"{self._review_message(payload)}\n\n{final_line}"
+
+        if not chat_id:
+            raise TelegramDeliveryError(
+                "Telegram seller notification is not configured",
+                error_code="configuration_error",
+            )
 
         if chat_id and message_id:
             edit_result = await self._edit_seller_message(

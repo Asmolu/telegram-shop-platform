@@ -23,7 +23,7 @@ FastAPI backend for StyleXac / TelegramShopPlatform.
 | Production path | `/opt/telegram-shop` |
 | Production compose | `docker-compose.prod.yml` |
 | Production env | `backend/.env.production` |
-| Current migration head | `20260711_0053` |
+| Current migration head | `20260712_0054` |
 
 ## Module Structure
 
@@ -182,4 +182,4 @@ See:
 The backend atomically stores order/manual-payment domain events and processes them from the
 FastAPI lifespan. Configure with the `OUTBOX_*` variables in `.env.example`. Run
 `pytest tests/test_outbox.py -W error`; use a disposable `TEST_POSTGRES_URL` for the real
-concurrency test. Migration `20260711_0053` must be applied before the new backend starts.
+concurrency test. Migrations through `20260712_0054` must be applied before the new backend starts.

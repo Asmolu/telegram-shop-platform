@@ -214,6 +214,25 @@ class Settings(BaseSettings):
         return join_public_url(self.public_uploads_url, value)
 
     @model_validator(mode="after")
+    def validate_outbox_safety(self) -> "Settings":
+        positive_values = {
+            "OUTBOX_POLL_INTERVAL_SECONDS": self.outbox_poll_interval_seconds,
+            "OUTBOX_BATCH_SIZE": self.outbox_batch_size,
+            "OUTBOX_MAX_ATTEMPTS": self.outbox_max_attempts,
+            "OUTBOX_LOCK_TIMEOUT_SECONDS": self.outbox_lock_timeout_seconds,
+            "OUTBOX_RETRY_BASE_SECONDS": self.outbox_retry_base_seconds,
+        }
+        for name, value in positive_values.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than zero")
+        if self.outbox_retry_max_seconds < self.outbox_retry_base_seconds:
+            raise ValueError(
+                "OUTBOX_RETRY_MAX_SECONDS must be greater than or equal to "
+                "OUTBOX_RETRY_BASE_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         if self.app_env.lower() not in PRODUCTION_ENVS:
             return self

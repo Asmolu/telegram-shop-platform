@@ -15,7 +15,7 @@ This document covers routine production operations for StyleXac.
 | API health | `https://api.stylexac.ru/health` |
 | Mini App | `https://mini.stylexac.ru/` |
 | Seller Panel | `https://seller.stylexac.ru/` |
-| Current migration head | `20260711_0053` |
+| Current migration head | `20260712_0054` |
 
 ## Daily Status Check
 

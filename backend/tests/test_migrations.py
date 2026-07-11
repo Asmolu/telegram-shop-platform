@@ -282,6 +282,22 @@ def test_transactional_outbox_migration_adds_locking_and_idempotency_constraints
     assert "uq_customer_service_deliveries_source_event_consumer" in content
 
 
+def test_outbox_claim_fencing_is_a_follow_up_migration() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260712_0054_add_outbox_claim_fencing.py"
+    )
+    content = migration_path.read_text()
+    assert 'revision: str = "20260712_0054"' in content
+    assert 'down_revision: str | None = "20260711_0053"' in content
+    assert '"outbox_events"' in content
+    assert '"claim_token"' in content
+    assert '"outbox_deliveries"' in content
+    assert '"last_claim_token"' in content
+
+
 def test_sprint_11_migration_adds_analytics_and_audit_tables() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]

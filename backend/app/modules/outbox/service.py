@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -18,6 +19,7 @@ from app.modules.outbox.repository import OutboxRepository
 from app.modules.outbox.schemas import OutboxDiagnostics, OutboxEventDiagnostic
 
 OUTBOX_ERROR_MAX_LENGTH = 2000
+logger = logging.getLogger(__name__)
 
 
 def retry_delay_seconds(attempt_count: int, *, base_seconds: int, max_seconds: int) -> int:
@@ -81,40 +83,97 @@ class OutboxService:
         self.repository.add(event)
         return event
 
-    async def mark_delivery_processed(self, *, event_id: UUID, consumer: str) -> None:
-        record = await self.repository.get_delivery(
-            event_id=event_id, consumer=consumer, for_update=True
+    async def mark_delivery_processed(
+        self,
+        *,
+        event_database_id: int,
+        event_id: UUID,
+        claim_token: UUID,
+        consumer: str,
+    ) -> bool:
+        event = await self.repository.get_owned_with_deliveries(
+            event_database_id=event_database_id,
+            claim_token=claim_token,
+            for_update=True,
         )
-        if record is None:
-            raise RuntimeError("Outbox delivery disappeared")
-        _, delivery = record
+        if event is None:
+            self._log_stale_ack(event_id, consumer, "success")
+            return False
+        delivery = self._delivery(event, consumer)
+        if delivery.status == OutboxDeliveryStatus.PROCESSED:
+            return True
+        if delivery.last_claim_token == claim_token:
+            return True
         delivery.status = OutboxDeliveryStatus.PROCESSED
         delivery.processed_at = datetime.now(UTC)
         delivery.last_error = None
+        delivery.last_claim_token = claim_token
         await self.session.commit()
+        return True
 
     async def mark_delivery_failed(
-        self, *, event_id: UUID, consumer: str, error: BaseException
-    ) -> None:
-        record = await self.repository.get_delivery(
-            event_id=event_id, consumer=consumer, for_update=True
+        self,
+        *,
+        event_database_id: int,
+        event_id: UUID,
+        claim_token: UUID,
+        consumer: str,
+        error: BaseException,
+    ) -> bool:
+        event = await self.repository.get_owned_with_deliveries(
+            event_database_id=event_database_id,
+            claim_token=claim_token,
+            for_update=True,
         )
-        if record is None:
-            raise RuntimeError("Outbox delivery disappeared")
-        event, delivery = record
+        if event is None:
+            self._log_stale_ack(event_id, consumer, "failure")
+            return False
+        delivery = self._delivery(event, consumer)
+        if delivery.status == OutboxDeliveryStatus.PROCESSED:
+            return True
+        if delivery.last_claim_token == claim_token:
+            return True
         delivery.attempt_count += 1
+        delivery.last_claim_token = claim_token
         delivery.last_error = sanitize_outbox_error(error)
         event.last_error = delivery.last_error
         if delivery.attempt_count >= event.max_attempts:
             delivery.status = OutboxDeliveryStatus.FAILED
         await self.session.commit()
+        return True
 
-    async def finish_attempt(self, event_id: UUID) -> None:
-        event = await self.repository.get_with_deliveries(event_id, for_update=True)
+    async def finish_attempt(
+        self, *, event_database_id: int, event_id: UUID, claim_token: UUID
+    ) -> bool:
+        event = await self.repository.get_owned_with_deliveries(
+            event_database_id=event_database_id,
+            claim_token=claim_token,
+            for_update=True,
+        )
         if event is None:
-            return
+            self._log_stale_ack(event_id, None, "finish")
+            return False
         await self._finalize_event(event)
         await self.session.commit()
+        return True
+
+    async def renew_claim(
+        self, *, event_database_id: int, event_id: UUID, claim_token: UUID
+    ) -> bool:
+        renewed = await self.repository.renew_claim(
+            event_database_id=event_database_id,
+            claim_token=claim_token,
+            now=datetime.now(UTC),
+        )
+        if renewed:
+            await self.session.commit()
+            return True
+        await self.session.rollback()
+        logger.warning(
+            "outbox claim lease renewal lost ownership",
+            extra={"event_id": str(event_id), "acknowledgement_result": "stale"},
+        )
+        return False
 
     async def retry_failed(self, event_id: UUID) -> OutboxEvent:
         event = await self.repository.get_with_deliveries(event_id, for_update=True)
@@ -133,6 +192,7 @@ class OutboxService:
         event.next_attempt_at = datetime.now(UTC)
         event.locked_at = None
         event.locked_by = None
+        event.claim_token = None
         event.processed_at = None
         event.last_error = None
         await self.session.commit()
@@ -157,6 +217,7 @@ class OutboxService:
         now = datetime.now(UTC)
         event.locked_at = None
         event.locked_by = None
+        event.claim_token = None
         if pending:
             event.status = OutboxStatus.PENDING
             event.next_attempt_at = now + timedelta(
@@ -174,6 +235,25 @@ class OutboxService:
         event.status = OutboxStatus.PROCESSED
         event.processed_at = now
         event.last_error = None
+
+    @staticmethod
+    def _delivery(event: OutboxEvent, consumer: str) -> OutboxDelivery:
+        for delivery in event.deliveries:
+            if delivery.consumer == consumer:
+                return delivery
+        raise RuntimeError("Outbox delivery disappeared")
+
+    @staticmethod
+    def _log_stale_ack(event_id: UUID, consumer: str | None, acknowledgement: str) -> None:
+        logger.info(
+            "stale outbox acknowledgement ignored",
+            extra={
+                "event_id": str(event_id),
+                "consumer": consumer,
+                "acknowledgement": acknowledgement,
+                "acknowledgement_result": "stale",
+            },
+        )
 
     @staticmethod
     def _diagnostic(event: OutboxEvent) -> OutboxEventDiagnostic:

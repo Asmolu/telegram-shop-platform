@@ -1,7 +1,46 @@
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
+from types import MappingProxyType
 from uuid import UUID
 
 from pydantic import BaseModel
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxClaim:
+    database_id: int
+    event_id: UUID
+    claim_token: UUID
+    event_name: str
+    payload: Mapping[str, object]
+    pending_consumers: tuple[str, ...]
+    attempt_count: int
+    recovered_stale: bool
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        database_id: int,
+        event_id: UUID,
+        claim_token: UUID,
+        event_name: str,
+        payload: dict[str, object],
+        pending_consumers: tuple[str, ...],
+        attempt_count: int = 1,
+        recovered_stale: bool = False,
+    ) -> "OutboxClaim":
+        return cls(
+            database_id=database_id,
+            event_id=event_id,
+            claim_token=claim_token,
+            event_name=event_name,
+            payload=MappingProxyType(payload.copy()),
+            pending_consumers=pending_consumers,
+            attempt_count=attempt_count,
+            recovered_stale=recovered_stale,
+        )
 
 
 class OutboxEventDiagnostic(BaseModel):

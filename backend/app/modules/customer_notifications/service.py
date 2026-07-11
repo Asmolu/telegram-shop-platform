@@ -551,6 +551,8 @@ class CustomerServiceNotificationDeliveryService:
         if is_new:
             self.repository.add_delivery(delivery)
             await self._commit("Customer service notification delivery creation failed")
+        else:
+            await self._commit("Customer service notification pre-send commit failed")
 
         assert subscription is not None
         send_target = resolve_customer_service_send_target(subscription)

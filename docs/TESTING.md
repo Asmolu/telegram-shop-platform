@@ -85,10 +85,10 @@ rg -n "tsplatform\.ru|mini\.tsplatform\.ru|api\.tsplatform\.ru|seller\.tsplatfor
 Search for stale migration references:
 
 ```bash
-rg -n "20260711_0053" .
+rg -n "20260712_0054" .
 ```
 
-`20260711_0053` is the current documented migration head. Older migration ids may appear only when clearly labeled as historical.
+`20260712_0054` is the current documented migration head. Older migration ids may appear only when clearly labeled as historical.
 
 Manual smoke scenarios for the current release:
 
