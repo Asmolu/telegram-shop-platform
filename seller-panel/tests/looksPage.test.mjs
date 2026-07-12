@@ -12,6 +12,28 @@ const pageSource = readFileSync(
   new URL('../src/pages/Looks/LooksPage.tsx', import.meta.url),
   'utf8',
 );
+const productEditorSource = readFileSync(
+  new URL('../src/pages/ProductEditor/ProductEditorPage.tsx', import.meta.url),
+  'utf8',
+);
+const badgeConfiguratorSource = readFileSync(
+  new URL('../src/shared/ui/ImageBadgeConfigurator.tsx', import.meta.url),
+  'utf8',
+);
+
+test('Product and Look editors use the same image badge configurator contract', () => {
+  assert.match(productEditorSource, /<ImageBadgeConfigurator/);
+  assert.match(pageSource, /<ImageBadgeConfigurator/);
+  assert.match(badgeConfiguratorSource, /'none', 'new', 'sale', 'hit', 'exclusive', 'custom'/);
+  assert.match(badgeConfiguratorSource, /'purple', 'pink', 'red', 'orange', 'blue', 'green', 'black', 'white'/);
+  assert.match(badgeConfiguratorSource, /'top-left', 'top-right', 'bottom-left', 'bottom-right'/);
+  assert.match(badgeConfiguratorSource, /normalizeImageBadgeText/);
+  assert.match(badgeConfiguratorSource, /isImageBadgeConfigurationValid/);
+  assert.match(badgeConfiguratorSource, /text: type === 'custom' \? current\.text : ''/);
+  assert.match(badgeConfiguratorSource, /image-badge-preview--color-\$\{value\.color\}/);
+  assert.match(badgeConfiguratorSource, /image-badge-preview--position-\$\{value\.position\}/);
+  assert.match(badgeConfiguratorSource, /productEditor\.badgeCustom/);
+});
 
 test('looks navigation and routes are wired', () => {
   assert.match(appSource, /\/looks/);
