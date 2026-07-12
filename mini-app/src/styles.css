@@ -1193,7 +1193,6 @@ label {
   object-fit: cover;
 }
 
-.look-card__badge,
 .look-card__availability {
   position: absolute;
   z-index: 3;
@@ -1203,13 +1202,6 @@ label {
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
-}
-
-.look-card__badge {
-  top: 8px;
-  left: 8px;
-  background: rgba(17, 24, 39, 0.72);
-  color: #ffffff;
 }
 
 .look-card__availability {

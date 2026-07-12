@@ -4,7 +4,13 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.pagination import PageMeta
-from app.db.models import LookStatus, ProductSizeGroup
+from app.db.models import (
+    LookStatus,
+    ProductImageBadgeColor,
+    ProductImageBadgePosition,
+    ProductImageBadgeType,
+    ProductSizeGroup,
+)
 from app.modules.cart.schemas import CartRead
 from app.modules.products.schemas import SLUG_PATTERN
 
@@ -23,6 +29,10 @@ class LookBase(BaseModel):
     status: LookStatus = LookStatus.DRAFT
     is_listed: bool = True
     search_priority: int = Field(default=1, ge=1, le=3)
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = Field(default=None, max_length=20)
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
 
     @field_validator("title", "slug", mode="before")
     @classmethod
@@ -40,6 +50,26 @@ class LookBase(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @field_validator("image_badge_text")
+    @classmethod
+    def normalize_badge_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if "<" in normalized or ">" in normalized:
+            raise ValueError("image_badge_text must not contain HTML")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_badge(self) -> "LookBase":
+        if self.image_badge_type == ProductImageBadgeType.CUSTOM and not self.image_badge_text:
+            raise ValueError("image_badge_text is required for a custom badge")
+        if self.image_badge_type != ProductImageBadgeType.CUSTOM:
+            self.image_badge_text = None
+        return self
 
 
 class LookCreate(LookBase):
@@ -58,6 +88,10 @@ class LookUpdate(BaseModel):
     status: LookStatus | None = None
     is_listed: bool | None = None
     search_priority: int | None = Field(default=None, ge=1, le=3)
+    image_badge_type: ProductImageBadgeType | None = None
+    image_badge_text: str | None = Field(default=None, max_length=20)
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     items: list[LookItemInput] | None = None
 
     @field_validator("title", "slug", mode="before")
@@ -76,6 +110,13 @@ class LookUpdate(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @field_validator("image_badge_text")
+    @classmethod
+    def normalize_badge_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
     @model_validator(mode="after")
     def validate_unique_products(self) -> "LookUpdate":
@@ -133,10 +174,19 @@ class LookAdminRead(BaseModel):
     status: LookStatus
     is_listed: bool
     search_priority: int
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = None
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     images: list[LookImageRead] = Field(default_factory=list)
     items: list[LookAdminItemRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("image_badge_type", mode="before")
+    @classmethod
+    def default_badge_type(cls, value: ProductImageBadgeType | None) -> ProductImageBadgeType:
+        return value or ProductImageBadgeType.NONE
 
 
 class LookAdminList(BaseModel):
@@ -185,6 +235,10 @@ class LookCardRead(BaseModel):
     price: Decimal
     old_price: Decimal | None = None
     item_count: int
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = None
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     default_selected_item_ids: list[int] = Field(default_factory=list)
     is_available: bool
     available_sizes: list[str] = Field(default_factory=list)
@@ -204,6 +258,10 @@ class LookDetailRead(BaseModel):
     slug: str
     title: str
     description: str | None = None
+    image_badge_type: ProductImageBadgeType = ProductImageBadgeType.NONE
+    image_badge_text: str | None = None
+    image_badge_color: ProductImageBadgeColor | None = None
+    image_badge_position: ProductImageBadgePosition | None = None
     images: list[LookImageRead] = Field(default_factory=list)
     items: list[LookPublicItemRead] = Field(default_factory=list)
     default_selected_item_ids: list[int] = Field(default_factory=list)

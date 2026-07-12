@@ -5,6 +5,9 @@ import type {
   LookCreatePayload,
   LookItemPayload,
   LookStatus,
+  ProductImageBadgeColor,
+  ProductImageBadgePosition,
+  ProductImageBadgeType,
   Product,
 } from '../../shared/api';
 import { useI18n } from '../../shared/i18n';
@@ -30,6 +33,10 @@ interface LookFormState {
   status: LookStatus;
   isListed: boolean;
   searchPriority: '1' | '2' | '3';
+  imageBadgeType: ProductImageBadgeType;
+  imageBadgeText: string;
+  imageBadgeColor: ProductImageBadgeColor;
+  imageBadgePosition: ProductImageBadgePosition;
 }
 
 interface LookItemRow {
@@ -50,6 +57,10 @@ const initialLookForm: LookFormState = {
   status: 'DRAFT',
   isListed: true,
   searchPriority: '1',
+  imageBadgeType: 'none',
+  imageBadgeText: '',
+  imageBadgeColor: 'purple',
+  imageBadgePosition: 'top-left',
 };
 
 export function LooksPage({ onNavigate, onAuthExpired }: PageProps) {
@@ -319,6 +330,10 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
             status: loadedLook.status,
             isListed: loadedLook.is_listed,
             searchPriority: String(loadedLook.search_priority ?? 1) as LookFormState['searchPriority'],
+            imageBadgeType: loadedLook.image_badge_type ?? 'none',
+            imageBadgeText: loadedLook.image_badge_text ?? '',
+            imageBadgeColor: loadedLook.image_badge_color ?? 'purple',
+            imageBadgePosition: loadedLook.image_badge_position ?? 'top-left',
           });
           setItems(
             loadedLook.items
@@ -614,6 +629,19 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
                 onChange={(event) => updateField('description', event.target.value)}
               />
             </label>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>{t('productEditor.imageBadge')}</h2>
+          <div className="badge-editor">
+            <label className="field"><span>{t('productEditor.imageBadge')}</span><select value={form.imageBadgeType} onChange={(event) => setForm((current) => ({ ...current, imageBadgeType: event.target.value as ProductImageBadgeType, imageBadgeText: event.target.value === 'custom' ? current.imageBadgeText : '' }))}>
+              <option value="none">{t('productEditor.badgeNone')}</option><option value="new">NEW</option><option value="sale">{t('productEditor.badgeSale')}</option><option value="hit">{t('productEditor.badgeHit')}</option><option value="exclusive">{t('productEditor.badgeExclusive')}</option><option value="custom">{t('productEditor.badgeCustom')}</option>
+            </select></label>
+            {form.imageBadgeType === 'custom' ? <label className="field"><span>{t('productEditor.badgeText')}</span><input maxLength={20} value={form.imageBadgeText} onChange={(event) => updateField('imageBadgeText', event.target.value)} /><small className="field-hint">{form.imageBadgeText.length}/20</small></label> : null}
+            <label className="field"><span>{t('productEditor.badgeColor')}</span><select value={form.imageBadgeColor} onChange={(event) => updateField('imageBadgeColor', event.target.value as ProductImageBadgeColor)}>{['purple','pink','red','orange','blue','green','black','white'].map((color) => <option key={color} value={color}>{t(`productEditor.badgeColor${color[0].toUpperCase()}${color.slice(1)}`)}</option>)}</select></label>
+            <label className="field"><span>{t('productEditor.badgePosition')}</span><select value={form.imageBadgePosition} onChange={(event) => updateField('imageBadgePosition', event.target.value as ProductImageBadgePosition)}>{['top-left','top-right','bottom-left','bottom-right'].map((position) => <option key={position} value={position}>{position}</option>)}</select></label>
+            {form.imageBadgeType !== 'none' ? <div className="image-badge-preview-frame" aria-label={t('productEditor.badgePreview')}><div className={`image-badge-preview image-badge-preview--color-${form.imageBadgeColor} image-badge-preview--position-${form.imageBadgePosition}`}>{form.imageBadgeType === 'new' ? 'NEW' : form.imageBadgeType === 'sale' ? t('productEditor.badgeSale') : form.imageBadgeType === 'hit' ? t('productEditor.badgeHit') : form.imageBadgeType === 'exclusive' ? t('productEditor.badgeExclusive') : form.imageBadgeText.trim()}</div></div> : null}
           </div>
         </section>
 
@@ -959,6 +987,10 @@ function buildLookPayload(form: LookFormState, items: LookItemRow[]): LookCreate
     status: form.status,
     is_listed: form.isListed,
     search_priority: Number(form.searchPriority) as 1 | 2 | 3,
+    image_badge_type: form.imageBadgeType,
+    image_badge_text: form.imageBadgeType === 'custom' ? form.imageBadgeText.trim() : null,
+    image_badge_color: form.imageBadgeType === 'none' ? null : form.imageBadgeColor,
+    image_badge_position: form.imageBadgeType === 'none' ? null : form.imageBadgePosition,
     items: items.map((item, index): LookItemPayload => ({
       product_id: item.productId,
       position: index,
@@ -982,6 +1014,9 @@ function validateLookForm(
   }
   if (!slugPattern.test(form.slug.trim())) {
     return t('looks.slugInvalid');
+  }
+  if (form.imageBadgeType === 'custom' && !form.imageBadgeText.trim()) {
+    return t('productEditor.badgeCustomRequired');
   }
   if (items.some((item) => !Number.isInteger(item.quantity) || item.quantity < 1)) {
     return t('looks.quantityInvalid');

@@ -70,7 +70,7 @@ describe('LooksPage', () => {
     render(<LooksPage />);
 
     expect(await screen.findByText('Summer Look')).toBeTruthy();
-    expect(screen.getByText('Образ')).toBeTruthy();
+    expect(screen.queryByText('Образ')).toBeNull();
     expect(getLooks).toHaveBeenCalledWith({ limit: 60, offset: 0 }, { dedupe: false });
     expect(screen.getByText('Summer Look').closest('a')?.getAttribute('href')).toBe(
       '/looks/summer-look?returnTo=%2Flooks',

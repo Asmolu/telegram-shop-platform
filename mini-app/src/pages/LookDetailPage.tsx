@@ -156,8 +156,8 @@ export function LookDetailPage() {
       return;
     }
 
-    if (selectedClothingSize && !sizeState.clothingSizes.includes(selectedClothingSize)) {
-      setSelectedClothingSize(null);
+    if (!selectedClothingSize || !sizeState.clothingSizes.includes(selectedClothingSize)) {
+      setSelectedClothingSize(sizeState.clothingSizes[0]);
     }
   }, [selectedClothingSize, sizeState.clothingSizes, sizeState.requiresClothingSize]);
 
@@ -169,8 +169,8 @@ export function LookDetailPage() {
       return;
     }
 
-    if (selectedFootwearSize && !sizeState.footwearSizes.includes(selectedFootwearSize)) {
-      setSelectedFootwearSize(null);
+    if (!selectedFootwearSize || !sizeState.footwearSizes.includes(selectedFootwearSize)) {
+      setSelectedFootwearSize(sizeState.footwearSizes[0]);
     }
   }, [selectedFootwearSize, sizeState.footwearSizes, sizeState.requiresFootwearSize]);
 
@@ -576,20 +576,7 @@ function LookItemImage({ item }: { item: LookItem }) {
 }
 
 function getInitialSelectedItemIds(look: LookDetail) {
-  const validIds = new Set(look.items.map((item) => item.look_item_id));
-  const configured = look.default_selected_item_ids.filter((itemId) => validIds.has(itemId));
-  if (configured.length > 0) {
-    return configured;
-  }
-
-  const itemDefaults = look.items
-    .filter((item) => item.is_default_selected)
-    .map((item) => item.look_item_id);
-  if (itemDefaults.length > 0) {
-    return itemDefaults;
-  }
-
-  return look.items[0] ? [look.items[0].look_item_id] : [];
+  return look.items.map((item) => item.look_item_id);
 }
 
 function getSizeStateForSelection(items: LookItem[]) {

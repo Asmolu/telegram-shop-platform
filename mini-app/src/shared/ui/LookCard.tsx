@@ -2,7 +2,7 @@ import React from 'react';
 import type { LookCard as LookCardType } from '../api';
 import { Link, useRouter, withReturnTo } from '../router/RouterProvider';
 import { runLockedAction } from '../utils/actionLock';
-import { formatCompactPrice, pluralizeProducts } from '../utils/format';
+import { formatCompactPrice, formatDiscountPercent, getDiscountBadgeTier, getDiscountPercent, getDisplayOldPrice, pluralizeProducts } from '../utils/format';
 import { normalizeAssetUrl } from '../utils/images';
 import { CartIcon } from './Icons';
 
@@ -22,6 +22,14 @@ export function LookCard({
   const actionLock = React.useRef({ current: false });
   const imageUrl = normalizeAssetUrl(look.primary_image_url);
   const lookPath = withReturnTo(`/looks/${encodeURIComponent(look.slug)}`, currentPath);
+  const badgeType = look.image_badge_type ?? 'none';
+  const badge = badgeType === 'new' ? 'NEW' : badgeType === 'sale' ? 'Распродажа' : badgeType === 'hit' ? 'Хит' : badgeType === 'exclusive' ? 'Эксклюзив' : badgeType === 'custom' ? look.image_badge_text?.trim() || null : null;
+  const badgeColor = look.image_badge_color ?? (badgeType === 'sale' ? 'red' : badgeType === 'hit' ? 'orange' : 'purple');
+  const badgePosition = look.image_badge_position ?? (badgeType === 'new' ? 'top-left' : 'bottom-left');
+  const oldPrice = getDisplayOldPrice(look.price, look.old_price);
+  const discountPercent = oldPrice ? getDiscountPercent(look.price, oldPrice) : null;
+  const discount = oldPrice ? formatDiscountPercent(look.price, oldPrice) : null;
+  const discountTier = getDiscountBadgeTier(discountPercent);
 
   async function addToCart() {
     if (!onAddToCart) {
@@ -56,7 +64,12 @@ export function LookCard({
             <span>{look.title.slice(0, 1).toUpperCase()}</span>
           </span>
         )}
-        <span className="look-card__badge">Образ</span>
+        {badge ? (
+          <span className={`product-badge product-badge--${badgeType} product-badge--color-${badgeColor} product-badge--position-${badgePosition} product-badge--configured ${discountTier && badgePosition === 'bottom-left' ? `product-badge--above-discount product-badge--above-discount-tier-${discountTier}` : ''}`}>
+            {badge}
+          </span>
+        ) : null}
+        {discount && discountTier ? <span className={`product-discount-badge discount-badge--tier-${discountTier}`}>{discount}</span> : null}
         {!look.is_available ? <span className="look-card__availability">Недоступен</span> : null}
         </Link>
         {onAddToCart ? (
@@ -75,12 +88,9 @@ export function LookCard({
         <Link className="product-card__info" to={lookPath}>
           <span className="product-card__brand">{pluralizeProducts(look.item_count)}</span>
           <span className="product-card__title">{look.title}</span>
-          <span className="product-card__review-line">
-            {look.available_sizes.length > 0 ? look.available_sizes.join(' / ') : 'Нет общего размера'}
-          </span>
           <span className="product-card__price-row">
             <strong className="product-card__price">{formatCompactPrice(look.price)}</strong>
-            {look.old_price ? <del>{formatCompactPrice(look.old_price)}</del> : null}
+            {oldPrice ? <del>{formatCompactPrice(oldPrice)}</del> : null}
           </span>
         </Link>
       </div>

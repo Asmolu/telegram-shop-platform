@@ -89,7 +89,7 @@ describe('LookDetailPage', () => {
     expect(screen.getByRole('button', { name: /Cap/ }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('heading', { level: 2, name: 'Размер одежды' })).toBeTruthy();
     expect(within(screen.getByLabelText('Доступные размеры одежды')).getByRole('button', { name: /M/ })).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('fetches and renders similar products below included Look products', async () => {
@@ -237,7 +237,7 @@ describe('LookDetailPage', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Размер обуви' })).toBeTruthy();
     expect(screen.queryByRole('heading', { level: 2, name: 'Размер одежды' })).toBeNull();
-    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(within(screen.getByLabelText('Доступные размеры обуви')).getByRole('button', { name: /42/ }));
     await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
@@ -260,10 +260,10 @@ describe('LookDetailPage', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Размер одежды' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: 'Размер обуви' })).toBeTruthy();
     expect(screen.queryByText('Нет общего доступного размера для выбранных товаров.')).toBeNull();
-    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(within(screen.getByLabelText('Доступные размеры одежды')).getByRole('button', { name: /M/ }));
-    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(screen.getByLabelText('Доступные размеры обуви')).getByRole('button', { name: /42/ }));
     await waitFor(() => expect((screen.getByRole('button', { name: 'В корзину' }) as HTMLButtonElement).disabled).toBe(false));
 

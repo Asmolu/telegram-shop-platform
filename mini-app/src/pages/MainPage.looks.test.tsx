@@ -112,7 +112,7 @@ describe('MainPage mixed feed', () => {
 
     expect(await screen.findByText('Line Break Hoodie')).toBeTruthy();
     expect(screen.getByText('Summer Look')).toBeTruthy();
-    expect(screen.getByText('Образ')).toBeTruthy();
+    expect(screen.queryByText('Образ')).toBeNull();
     expect(container.querySelectorAll('.product-grid > .product-card')).toHaveLength(2);
     expect(getFeed).toHaveBeenCalledWith({ limit: 40, offset: 0 });
   });

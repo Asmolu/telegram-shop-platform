@@ -2066,6 +2066,33 @@ class Look(Base):
         server_default="1",
         index=True,
     )
+    image_badge_type: Mapped[ProductImageBadgeType] = mapped_column(
+        Enum(
+            ProductImageBadgeType,
+            name="product_image_badge_type",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=ProductImageBadgeType.NONE,
+        server_default=ProductImageBadgeType.NONE.value,
+    )
+    image_badge_text: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    image_badge_color: Mapped[ProductImageBadgeColor | None] = mapped_column(
+        Enum(
+            ProductImageBadgeColor,
+            name="product_image_badge_color",
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
+    image_badge_position: Mapped[ProductImageBadgePosition | None] = mapped_column(
+        Enum(
+            ProductImageBadgePosition,
+            name="product_image_badge_position",
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

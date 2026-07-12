@@ -253,6 +253,10 @@ export type LookCard = {
   price: string | number;
   old_price?: string | number | null;
   item_count: number;
+  image_badge_type?: ProductImageBadgeType;
+  image_badge_text?: string | null;
+  image_badge_color?: ProductImageBadgeColor | null;
+  image_badge_position?: ProductImageBadgePosition | null;
   default_selected_item_ids: number[];
   is_available: boolean;
   available_sizes: string[];
@@ -289,6 +293,10 @@ export type LookDetail = {
   slug: string;
   title: string;
   description?: string | null;
+  image_badge_type?: ProductImageBadgeType;
+  image_badge_text?: string | null;
+  image_badge_color?: ProductImageBadgeColor | null;
+  image_badge_position?: ProductImageBadgePosition | null;
   images: LookImage[];
   items: LookItem[];
   default_selected_item_ids: number[];

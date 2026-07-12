@@ -526,6 +526,10 @@ export interface Look {
   status: LookStatus;
   is_listed: boolean;
   search_priority: 1 | 2 | 3;
+  image_badge_type: ProductImageBadgeType;
+  image_badge_text: string | null;
+  image_badge_color: ProductImageBadgeColor | null;
+  image_badge_position: ProductImageBadgePosition | null;
   images: LookImage[];
   items: LookItem[];
   created_at: string;
@@ -550,6 +554,10 @@ export interface LookCreatePayload {
   status?: LookStatus;
   is_listed?: boolean;
   search_priority?: 1 | 2 | 3;
+  image_badge_type?: ProductImageBadgeType;
+  image_badge_text?: string | null;
+  image_badge_color?: ProductImageBadgeColor | null;
+  image_badge_position?: ProductImageBadgePosition | null;
   items?: LookItemPayload[];
 }
 
@@ -560,6 +568,10 @@ export interface LookUpdatePayload {
   status?: LookStatus;
   is_listed?: boolean;
   search_priority?: 1 | 2 | 3;
+  image_badge_type?: ProductImageBadgeType;
+  image_badge_text?: string | null;
+  image_badge_color?: ProductImageBadgeColor | null;
+  image_badge_position?: ProductImageBadgePosition | null;
   items?: LookItemPayload[];
 }
 

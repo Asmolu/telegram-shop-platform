@@ -18,6 +18,7 @@ from app.db.models import (
     LookItem,
     LookStatus,
     Product,
+    ProductImageBadgeType,
     ProductSizeGroup,
     ProductStatus,
     ProductVariant,
@@ -279,6 +280,10 @@ class LooksService:
                 status=payload.status,
                 is_listed=payload.is_listed,
                 search_priority=payload.search_priority,
+                image_badge_type=payload.image_badge_type,
+                image_badge_text=payload.image_badge_text,
+                image_badge_color=payload.image_badge_color,
+                image_badge_position=payload.image_badge_position,
                 items=[
                     LookItem(
                         product_id=item.product_id,
@@ -334,6 +339,23 @@ class LooksService:
                 look.is_listed = payload.is_listed
             if payload.search_priority is not None:
                 look.search_priority = payload.search_priority
+            if payload.image_badge_type is not None:
+                look.image_badge_type = payload.image_badge_type
+            if "image_badge_text" in payload.model_fields_set:
+                look.image_badge_text = payload.image_badge_text
+            if "image_badge_color" in payload.model_fields_set:
+                look.image_badge_color = payload.image_badge_color
+            if "image_badge_position" in payload.model_fields_set:
+                look.image_badge_position = payload.image_badge_position
+            badge_type = look.image_badge_type or ProductImageBadgeType.NONE
+            look.image_badge_type = badge_type
+            if badge_type == ProductImageBadgeType.CUSTOM and not look.image_badge_text:
+                raise AppError(
+                    "image_badge_text is required for a custom badge",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if badge_type != ProductImageBadgeType.CUSTOM:
+                look.image_badge_text = None
             if payload.status is not None:
                 look.status = payload.status
 
@@ -710,7 +732,7 @@ class LooksService:
         return self._build_card(look)
 
     def _build_card(self, look: Look) -> LookCardRead:
-        selected_items = self._default_selected_items(look)
+        selected_items = list(look.items)
         size_summary = self._size_summary(selected_items)
         price, old_price = self._sum_price(selected_items)
         return LookCardRead(
@@ -722,6 +744,10 @@ class LooksService:
             price=price,
             old_price=old_price,
             item_count=len(look.items),
+            image_badge_type=look.image_badge_type or ProductImageBadgeType.NONE,
+            image_badge_text=look.image_badge_text,
+            image_badge_color=look.image_badge_color,
+            image_badge_position=look.image_badge_position,
             default_selected_item_ids=[item.id for item in selected_items],
             is_available=size_summary.is_available,
             available_sizes=size_summary.available_sizes,
@@ -732,7 +758,7 @@ class LooksService:
         )
 
     def _build_detail(self, look: Look) -> LookDetailRead:
-        selected_items = self._default_selected_items(look)
+        selected_items = list(look.items)
         size_summary = self._size_summary(selected_items)
         price, old_price = self._sum_price(selected_items)
         return LookDetailRead(
@@ -740,6 +766,10 @@ class LooksService:
             slug=look.slug,
             title=look.title,
             description=look.description,
+            image_badge_type=look.image_badge_type or ProductImageBadgeType.NONE,
+            image_badge_text=look.image_badge_text,
+            image_badge_color=look.image_badge_color,
+            image_badge_position=look.image_badge_position,
             images=[LookImageRead.model_validate(image) for image in look.images],
             items=[self._build_public_item(item) for item in look.items],
             default_selected_item_ids=[item.id for item in selected_items],
