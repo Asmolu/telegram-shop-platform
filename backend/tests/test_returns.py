@@ -323,22 +323,32 @@ async def test_non_delivered_order_is_not_eligible() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delivered_order_within_window_is_eligible() -> None:
+@pytest.mark.parametrize(
+    "elapsed",
+    [
+        timedelta(0),
+        timedelta(hours=23, minutes=59, seconds=59),
+        timedelta(hours=24),
+    ],
+)
+async def test_delivered_order_is_eligible_through_exact_24_hour_deadline(
+    elapsed: timedelta,
+) -> None:
     service, repository, _session, _storage = _returns_service()
-    repository.orders[1] = _order(delivered_at=NOW - timedelta(days=2))
+    repository.orders[1] = _order(delivered_at=NOW - elapsed)
 
     eligibility = await service.get_return_eligibility(order_id=1, user_id=1)
 
     assert eligibility.eligible is True
-    assert eligibility.return_window_until == NOW + timedelta(days=12)
+    assert eligibility.return_window_until == NOW - elapsed + timedelta(hours=24)
     assert eligibility.items[0].eligible is True
     assert eligibility.items[0].image_url == "/uploads/products/thumb.webp"
 
 
 @pytest.mark.asyncio
-async def test_delivered_order_after_window_is_not_eligible() -> None:
+async def test_delivered_order_one_microsecond_after_deadline_is_not_eligible() -> None:
     service, repository, _session, _storage = _returns_service()
-    repository.orders[1] = _order(delivered_at=NOW - timedelta(days=15))
+    repository.orders[1] = _order(delivered_at=NOW - timedelta(hours=24, microseconds=1))
 
     eligibility = await service.get_return_eligibility(order_id=1, user_id=1)
 
@@ -347,28 +357,29 @@ async def test_delivered_order_after_window_is_not_eligible() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delivered_at_is_preferred_over_created_at_for_window() -> None:
+async def test_return_window_uses_delivered_at_instead_of_created_at() -> None:
     service, repository, _session, _storage = _returns_service()
     repository.orders[1] = _order(
         created_at=NOW - timedelta(days=30),
-        delivered_at=NOW - timedelta(days=1),
+        delivered_at=NOW - timedelta(hours=23),
     )
 
     eligibility = await service.get_return_eligibility(order_id=1, user_id=1)
 
     assert eligibility.eligible is True
-    assert eligibility.return_window_until == NOW + timedelta(days=13)
+    assert eligibility.return_window_until == NOW + timedelta(hours=1)
 
 
 @pytest.mark.asyncio
-async def test_created_at_fallback_works_when_delivered_at_missing() -> None:
+async def test_delivered_order_without_delivered_at_is_not_eligible() -> None:
     service, repository, _session, _storage = _returns_service()
     repository.orders[1] = _order(created_at=NOW - timedelta(days=3), delivered_at=None)
 
     eligibility = await service.get_return_eligibility(order_id=1, user_id=1)
 
-    assert eligibility.eligible is True
-    assert eligibility.return_window_until == NOW + timedelta(days=11)
+    assert eligibility.eligible is False
+    assert eligibility.reason_code == "delivered_at_missing"
+    assert eligibility.return_window_until is None
 
 
 @pytest.mark.asyncio
@@ -810,10 +821,38 @@ async def test_cannot_create_return_for_non_delivered_order() -> None:
 @pytest.mark.asyncio
 async def test_cannot_create_return_after_window() -> None:
     service, repository, _session, _storage = _returns_service()
-    repository.orders[1] = _order(delivered_at=NOW - timedelta(days=15))
+    repository.orders[1] = _order(delivered_at=NOW - timedelta(hours=24, microseconds=1))
 
-    with pytest.raises(AppError, match="expired"):
+    with pytest.raises(AppError, match="Срок оформления возврата истёк") as exc_info:
         await service.create_return_request(order_id=1, user_id=1, payload=_payload([(1, 1)]))
+    assert exc_info.value.status_code == 400
+
+
+def test_direct_return_api_request_cannot_bypass_expired_deadline() -> None:
+    app = create_app()
+    service, repository, _session, _storage = _returns_service()
+    repository.orders[1] = _order(
+        delivered_at=NOW - timedelta(hours=24, microseconds=1)
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: _user(role=UserRole.USER)
+    app.dependency_overrides[get_returns_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/orders/1/returns",
+                json=_payload([(1, 1)]).model_dump(mode="json"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": (
+            "Срок оформления возврата истёк. Возврат доступен в течение 24 часов "
+            "после получения заказа."
+        )
+    }
 
 
 @pytest.mark.asyncio

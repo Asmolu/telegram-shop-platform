@@ -39,6 +39,7 @@ from app.modules.orders.schemas import (
     OrderCheckoutCreate,
     OrderList,
     OrderRead,
+    OrderReturnEligibilitySummaryRead,
     OrderStatusUpdate,
     PaymentSuccessBannerPendingRead,
     PaymentSuccessBannerSeenRead,
@@ -46,6 +47,7 @@ from app.modules.orders.schemas import (
 from app.modules.outbox.constants import CUSTOMER_CONSUMER, SELLER_CONSUMER
 from app.modules.outbox.service import OutboxService
 from app.modules.promo_codes.service import PromoCodeCalculation, PromoCodesService
+from app.modules.returns.service import ReturnsService
 from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,8 @@ class OrdersService:
         manual_payments_service: ManualPaymentsService | None = None,
         idempotency_service: IdempotencyService | None = None,
         users_service: UsersService | None = None,
+        returns_service: ReturnsService | None = None,
+        now_factory=None,
     ) -> None:
         self.session = session
         self.repository = OrdersRepository(session)
@@ -125,6 +129,7 @@ class OrdersService:
         self.manual_payments_service = manual_payments_service or ManualPaymentsService(session)
         self.idempotency_service = idempotency_service or IdempotencyService(session)
         self.users_service = users_service or UsersService(session)
+        self.returns_service = returns_service or ReturnsService(session, now_factory=now_factory)
 
     async def checkout_current_user_cart(
         self,
@@ -304,13 +309,29 @@ class OrdersService:
         offset: int = 0,
     ) -> OrderList:
         orders = await self.repository.list_for_user(user_id=user_id, limit=limit, offset=offset)
-        return OrderList(items=[OrderRead.model_validate(order) for order in orders])
+        return OrderList(items=[self._customer_order_read(order) for order in orders])
 
     async def get_current_user_order(self, user_id: int, order_id: int) -> OrderRead:
         order = await self.repository.get_for_user(user_id=user_id, order_id=order_id)
         if order is None:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
-        return OrderRead.model_validate(order)
+        return self._customer_order_read(order)
+
+    def _customer_order_read(self, order: Order) -> OrderRead:
+        existing_request = order.return_request
+        eligibility = self.returns_service.build_eligibility(
+            order,
+            existing_request=existing_request,
+        )
+        summary = OrderReturnEligibilitySummaryRead(
+            eligible=eligibility.eligible,
+            reason_code=eligibility.reason_code,
+            return_request_id=eligibility.return_request_id,
+            deadline_at=eligibility.return_window_until,
+        )
+        return OrderRead.model_validate(order).model_copy(
+            update={"return_eligibility": summary}
+        )
 
     async def list_orders(
         self,

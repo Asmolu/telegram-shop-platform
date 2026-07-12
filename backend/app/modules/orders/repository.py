@@ -203,4 +203,5 @@ class OrdersRepository:
             .selectinload(Product.images),
             selectinload(Order.items).selectinload(OrderItem.product_variant),
             selectinload(Order.manual_payment),
+            selectinload(Order.return_request),
         )

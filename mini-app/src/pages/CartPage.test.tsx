@@ -3,10 +3,12 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getCart,
+  getOrders,
   loginWithTelegram,
   removeCartItem,
   updateCartItem,
   updateCartItemSelection,
+  type Order,
 } from '../shared/api';
 import { CartPage } from './CartPage';
 
@@ -105,6 +107,7 @@ describe('CartPage compact favorites', () => {
     routerMocks.searchParams = new URLSearchParams('tab=favorites');
     routerMocks.navigate.mockClear();
     vi.mocked(getCart).mockClear();
+    vi.mocked(getOrders).mockReset().mockResolvedValue({ items: [] });
     vi.mocked(loginWithTelegram).mockClear();
     vi.mocked(removeCartItem).mockClear();
     vi.mocked(updateCartItem).mockClear();
@@ -246,7 +249,111 @@ describe('CartPage compact favorites', () => {
 
     await waitFor(() => expect(removeCartItem).toHaveBeenCalledWith(11));
   });
+  it('shows the return action only for the backend-eligible order', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [
+        orderFixture({ return_eligibility: { eligible: true } }),
+        orderFixture({ id: 100, order_number: 'ORD-000100', return_eligibility: { eligible: false, reason_code: 'return_window_expired' } }),
+      ],
+    });
+
+    render(<CartPage />);
+
+    const returnButton = await screen.findByRole('button', { name: 'Оформить возврат' });
+    const card = returnButton.closest('.order-card');
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByRole('button', { name: 'Подробнее' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Оформить возврат' })).toHaveLength(1);
+  });
+
+  it('keeps orders readable when eligibility is absent or a return already exists', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [
+        orderFixture({ return_eligibility: undefined }),
+        orderFixture({
+          id: 100,
+          order_number: 'ORD-000100',
+          return_eligibility: {
+            eligible: false,
+            reason_code: 'return_request_exists',
+            return_request_id: 7,
+          },
+        }),
+      ],
+    });
+
+    render(<CartPage />);
+
+    expect(await screen.findByText('Заказ ORD-000099')).toBeTruthy();
+    expect(screen.getByText('Заказ ORD-000100')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Подробнее' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Оформить возврат' })).toBeNull();
+  });
+
+  it('preserves unpaid-order payment routing', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [orderFixture({ manual_payment: { id: 1, status: 'PENDING', expires_at: '2026-07-13T00:00:00Z' } })],
+    });
+
+    render(<CartPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Подробнее' }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/payment/99');
+  });
+
+  it('opens rules without immediate navigation and continues after consent', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    vi.mocked(getOrders).mockResolvedValueOnce({ items: [orderFixture({ return_eligibility: { eligible: true } })] });
+
+    render(<CartPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Оформить возврат' }));
+
+    expect(screen.getByRole('dialog', { name: 'Правила возврата' })).toBeTruthy();
+    const continueButton = screen.getByRole('button', { name: 'Продолжить оформление' });
+    expect((continueButton as HTMLButtonElement).disabled).toBe(true);
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/orders/99/return');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(continueButton);
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/orders/99/return');
+  });
 });
+
+function orderFixture(overrides: Partial<Order> = {}): Order {
+  return {
+    id: 99,
+    order_number: 'ORD-000099',
+    user_id: 1,
+    status: 'DELIVERED',
+    subtotal_amount: '100.00',
+    discount_amount: '0.00',
+    total_amount: '100.00',
+    delivery_price: '0.00',
+    contact_name: 'Ada',
+    contact_phone: '+79990000000',
+    delivery_address: 'Main street',
+    manual_payment: null,
+    items: [{
+      id: 1,
+      product_id: 20,
+      product_variant_id: 30,
+      product_name: 'Hoodie',
+      variant_size: 'M',
+      variant_size_grid: 'clothing_alpha',
+      variant_sku: 'SKU-M',
+      unit_price: '100.00',
+      quantity: 1,
+      subtotal: '100.00',
+      is_returnable: true,
+      created_at: '2026-07-12T00:00:00Z',
+    }],
+    delivered_at: '2026-07-12T00:00:00Z',
+    created_at: '2026-07-12T00:00:00Z',
+    updated_at: '2026-07-12T00:00:00Z',
+    ...overrides,
+  };
+}
 
 function cartWithSelectedItemFixture() {
   return {

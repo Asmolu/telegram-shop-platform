@@ -49,8 +49,11 @@ from app.modules.users.service import UsersService
 
 logger = logging.getLogger(__name__)
 
-RETURN_WINDOW_DAYS = 14
-RETURN_WINDOW = timedelta(days=RETURN_WINDOW_DAYS)
+RETURN_WINDOW_HOURS = 24
+RETURN_WINDOW = timedelta(hours=RETURN_WINDOW_HOURS)
+RETURN_WINDOW_EXPIRED_MESSAGE = (
+    "Срок оформления возврата истёк. Возврат доступен в течение 24 часов после получения заказа."
+)
 MAX_RETURN_ATTACHMENTS = 5
 MAX_RETURN_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024
 RETURN_CREATED_MESSAGE = "Заявка отправлена. Продавец свяжется с вами."
@@ -241,7 +244,7 @@ class ReturnsService:
         if order is None:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
         existing_request = await self.repository.get_return_for_order(order.id)
-        return self._build_eligibility(order, existing_request=existing_request)
+        return self.build_eligibility(order, existing_request=existing_request)
 
     async def create_return_request(
         self,
@@ -682,7 +685,7 @@ class ReturnsService:
         return_request.completed_by_user_id = actor_user_id
         return_request.completion_comment = comment
 
-    def _build_eligibility(
+    def build_eligibility(
         self,
         order: Order,
         *,
@@ -699,9 +702,12 @@ class ReturnsService:
         elif order.status != OrderStatus.DELIVERED:
             reason_code = "order_not_delivered"
             message = "Returns are available only after delivery"
-        elif return_window_until is None or now > return_window_until:
+        elif order.delivered_at is None:
+            reason_code = "delivered_at_missing"
+            message = "Не удалось определить время получения заказа"
+        elif now > return_window_until:
             reason_code = "return_window_expired"
-            message = "Return window has expired"
+            message = RETURN_WINDOW_EXPIRED_MESSAGE
 
         items = [
             self._eligibility_item(order_item, order_block_reason=reason_code)
@@ -754,7 +760,7 @@ class ReturnsService:
         payload: ReturnRequestCreate,
         existing_request: ReturnRequest | None,
     ) -> list[tuple[OrderItem, int]]:
-        eligibility = self._build_eligibility(order, existing_request=existing_request)
+        eligibility = self.build_eligibility(order, existing_request=existing_request)
         if existing_request is not None:
             raise AppError(
                 "Return request already exists for this order",
@@ -843,10 +849,9 @@ class ReturnsService:
     def _return_window_until(self, order: Order) -> datetime | None:
         if order.status != OrderStatus.DELIVERED:
             return None
-        start = order.delivered_at or order.created_at
-        if start is None:
+        if order.delivered_at is None:
             return None
-        return _as_utc(start) + RETURN_WINDOW
+        return _as_utc(order.delivered_at) + RETURN_WINDOW
 
     def _generate_return_number(self) -> str:
         return f"RET-{token_hex(6).upper()}"

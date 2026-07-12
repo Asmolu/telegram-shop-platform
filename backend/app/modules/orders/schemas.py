@@ -51,6 +51,13 @@ class OrderStatusUpdate(BaseModel):
     status: OrderStatus
 
 
+class OrderReturnEligibilitySummaryRead(BaseModel):
+    eligible: bool
+    reason_code: str | None = None
+    return_request_id: int | None = None
+    deadline_at: datetime | None = None
+
+
 class OrderItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -150,6 +157,7 @@ class OrderRead(BaseModel):
     manual_payment: ManualPaymentSummary | None = None
     items: list[OrderItemRead]
     delivered_at: datetime | None = None
+    return_eligibility: OrderReturnEligibilitySummaryRead | None = None
     created_at: datetime
     updated_at: datetime
 

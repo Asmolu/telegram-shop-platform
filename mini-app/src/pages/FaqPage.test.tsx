@@ -37,20 +37,22 @@ describe('FaqPage return rules', () => {
     const returnButton = screen.getByRole('button', { name: /Как совершить возврат товара/ });
     fireEvent.click(returnButton);
 
-    expect(screen.getByText(/Возврат можно оформить в течение 14 дней/)).toBeTruthy();
+    expect(screen.getByText(/Возврат можно оформить в течение 24 часов/)).toBeTruthy();
     expect(screen.queryByText(/Выберите товар, затем размер или цвет/)).toBeNull();
 
     fireEvent.click(returnButton);
-    expect(screen.queryByText(/Возврат можно оформить в течение 14 дней/)).toBeNull();
+    expect(screen.queryByText(/Возврат можно оформить в течение 24 часов/)).toBeNull();
   });
 
   it('opens topic=return directly and renders the required return rules', () => {
     routerMocks.topic = 'return';
     render(<FaqPage />);
 
-    expect(screen.getByText(/Возврат можно оформить в течение 14 дней/)).toBeTruthy();
-    expect(screen.getByText(/«Корзина» → «Заказы» → «Подробнее»/)).toBeTruthy();
+    expect(screen.getByText(/Возврат можно оформить в течение 24 часов/)).toBeTruthy();
+    expect(screen.getByText(/«Покупки» → вкладка «Заказы» → «Оформить возврат» под нужным заказом/)).toBeTruthy();
+    expect(screen.queryByText(/«Подробнее».*⋮/)).toBeNull();
     expect(screen.getByText(/обязательно укажите причину и приложите хотя бы одно фото или видео/)).toBeTruthy();
     expect(screen.getByText(/Стоимость доставки не возвращается/)).toBeTruthy();
+    expect(screen.getByText(/Продавец вправе отказать в возврате без объяснения причин/)).toBeTruthy();
   });
 });

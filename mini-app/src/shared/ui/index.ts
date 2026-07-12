@@ -4,6 +4,7 @@ export * from './ProductImageCarousel';
 export * from './ProductCard';
 export * from './PromoToast';
 export * from './SellerContactCard';
+export * from './ReturnRulesModal';
 export * from './SimilarProductsCarousel';
 export * from './LookCard';
 export * from './LookSourceHeader';

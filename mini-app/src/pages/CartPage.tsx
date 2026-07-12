@@ -28,6 +28,7 @@ import {
   PageLoader,
   ProductCard,
   PromoToast,
+  ReturnRulesModal,
   TopBar,
   promoToastFromMessage,
   type PromoToastState,
@@ -786,6 +787,8 @@ function CartItemsTab({
 
 function OrdersTab({ orders }: { orders: Order[] }) {
   const { currentPath, navigate } = useRouter();
+  const [returnOrder, setReturnOrder] = React.useState<Order | null>(null);
+  const [returnButton, setReturnButton] = React.useState<HTMLButtonElement | null>(null);
 
   if (orders.length === 0) {
     return <EmptyState title="Заказов пока нет" message="Оформленные покупки появятся здесь." />;
@@ -887,22 +890,47 @@ function OrdersTab({ orders }: { orders: Order[] }) {
               })}
             </div>
 
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() =>
-                navigate(
-                  order.manual_payment && paymentStatus !== 'APPROVED'
-                    ? `/payment/${order.id}`
-                    : `/order-success/${order.id}`,
-                )
-              }
-            >
-              Подробнее
-            </button>
+            <div className="order-card__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() =>
+                  navigate(
+                    order.manual_payment && paymentStatus !== 'APPROVED'
+                      ? `/payment/${order.id}`
+                      : `/order-success/${order.id}`,
+                  )
+                }
+              >
+                Подробнее
+              </button>
+              {order.return_eligibility?.eligible ? (
+                <button
+                  className="order-return-button"
+                  type="button"
+                  onClick={(event) => {
+                    setReturnButton(event.currentTarget);
+                    setReturnOrder(order);
+                  }}
+                >
+                  Оформить возврат
+                </button>
+              ) : null}
+            </div>
           </article>
         );
       })}
+      {returnOrder ? (
+        <ReturnRulesModal
+          returnFocusTo={returnButton}
+          onCancel={() => setReturnOrder(null)}
+          onContinue={() => {
+            const orderId = returnOrder.id;
+            setReturnOrder(null);
+            navigate(withReturnTo(`/orders/${orderId}/return`, '/cart?tab=orders'));
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -1194,6 +1194,25 @@ async def test_user_can_list_own_orders() -> None:
 
     assert [order.user_id for order in orders.items] == [1]
     assert orders.items[0].delivery_method == OrderDeliveryMethod.CDEK
+    assert orders.items[0].return_eligibility is not None
+    assert orders.items[0].return_eligibility.eligible is False
+
+
+@pytest.mark.asyncio
+async def test_customer_order_list_includes_compact_return_eligibility() -> None:
+    service, repository, _, _ = _orders_service()
+    delivered = _order(order_id=10, user_id=1, status_value=OrderStatus.DELIVERED)
+    delivered.delivered_at = _now()
+    repository.orders[10] = delivered
+
+    orders = await service.list_current_user_orders(user_id=1)
+
+    summary = orders.items[0].return_eligibility
+    assert summary is not None
+    assert summary.eligible is True
+    assert summary.reason_code is None
+    assert summary.return_request_id is None
+    assert summary.deadline_at == _now() + timedelta(hours=24)
 
 
 @pytest.mark.asyncio
@@ -1665,6 +1684,7 @@ def _orders_service(
         manual_payments_service=FakeManualPaymentsService(enabled=manual_payments_enabled),
         idempotency_service=idempotency_service,
         users_service=FakeUserBlocksService(),
+        now_factory=_now,
     )
     repository = FakeOrdersRepository()
     repository.carts[1] = _cart(

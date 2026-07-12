@@ -480,6 +480,12 @@ export type Order = {
   } | null;
   items: OrderItem[];
   delivered_at?: string | null;
+  return_eligibility?: {
+    eligible: boolean;
+    reason_code?: string | null;
+    return_request_id?: number | null;
+    deadline_at?: string | null;
+  } | null;
   created_at: string;
   updated_at: string;
 };

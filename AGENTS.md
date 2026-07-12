@@ -19,7 +19,7 @@ Production context:
 | Production path | `/opt/telegram-shop` |
 | Production compose file | `docker-compose.prod.yml` |
 | Production env file | `backend/.env.production` |
-| Current migration head | `20260628_0039` |
+| Current migration head | `20260712_0054` |
 
 Backend stack:
 

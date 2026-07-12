@@ -9,9 +9,9 @@ import {
 } from '../shared/api';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { getAuthPath, useRouter, withReturnTo } from '../shared/router/RouterProvider';
-import { SUPPORT_TELEGRAM_URL, openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
+import { openTelegramLink, requestTelegramWriteAccess } from '../shared/telegram/webApp';
 import { useTheme } from '../shared/theme/ThemeProvider';
-import { EmptyState, TopBar } from '../shared/ui';
+import { EmptyState, SellerContactCard, TopBar } from '../shared/ui';
 import { getUserDisplayName } from '../shared/utils/format';
 
 const NOTIFICATION_WRITE_ACCESS_SOURCE = 'mini_app_request_write_access';
@@ -36,6 +36,7 @@ export function ProfilePage() {
   const [notificationsSaving, setNotificationsSaving] = React.useState<string | null>(null);
   const [notificationsError, setNotificationsError] = React.useState<string | null>(null);
   const [notificationsHint, setNotificationsHint] = React.useState<string | null>(null);
+  const [supportOpen, setSupportOpen] = React.useState(false);
   const displayUser = user ?? telegramUser;
   const displayName = getUserDisplayName(displayUser);
   const username = displayUser?.username
@@ -203,9 +204,18 @@ export function ProfilePage() {
         <button type="button" onClick={() => navigate(withReturnTo('/faq', currentPath))}>
           FAQ<span>›</span>
         </button>
-        <button type="button" onClick={() => openTelegramLink(SUPPORT_TELEGRAM_URL)}>
-          Поддержка<span>›</span>
+        <button
+          aria-expanded={supportOpen}
+          type="button"
+          onClick={() => setSupportOpen((current) => !current)}
+        >
+          Поддержка<span aria-hidden="true">{supportOpen ? '⌃' : '⌄'}</span>
         </button>
+        {supportOpen ? (
+          <div className="profile-support-expansion">
+            <SellerContactCard />
+          </div>
+        ) : null}
       </section>
 
       <section className="settings-card">
