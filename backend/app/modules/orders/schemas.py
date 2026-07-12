@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -23,8 +24,12 @@ class OrderCheckoutCreate(BaseModel):
     contact_name: str = Field(min_length=1, max_length=255)
     contact_phone: str = Field(min_length=1, max_length=32)
     delivery_method: OrderDeliveryMethod
-    delivery_address: str | None = None
+    delivery_address: str = Field(min_length=1)
     delivery_comment: str | None = None
+    height_cm: int = Field(gt=0, le=300)
+    weight_kg: Decimal = Field(gt=0, le=1000)
+    telegram_username: str | None = Field(default=None, max_length=255)
+    customer_comment: str | None = None
     promo_code: str | None = Field(
         default=None,
         min_length=1,
@@ -39,12 +44,53 @@ class OrderCheckoutCreate(BaseModel):
             return None
         return value.strip().upper()
 
-    @field_validator("delivery_address", "delivery_comment")
+    @model_validator(mode="before")
+    @classmethod
+    def extract_legacy_measurements(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        values = dict(data)
+        comment = values.get("delivery_comment")
+        if not isinstance(comment, str):
+            return values
+        remaining: list[str] = []
+        for line in comment.splitlines():
+            height_match = re.fullmatch(r"\s*Рост:\s*([0-9]+)\s*", line, re.IGNORECASE)
+            weight_match = re.fullmatch(
+                r"\s*Вес:\s*([0-9]+(?:[.,][0-9]+)?)\s*", line, re.IGNORECASE
+            )
+            if height_match and "height_cm" not in values:
+                values["height_cm"] = height_match.group(1)
+            elif weight_match and "weight_kg" not in values:
+                values["weight_kg"] = weight_match.group(1).replace(",", ".")
+            else:
+                remaining.append(line)
+        values["delivery_comment"] = "\n".join(remaining)
+        return values
+
+    @field_validator("contact_name", "contact_phone", "delivery_address")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Поле обязательно для заполнения")
+        return value
+
+    @field_validator("delivery_comment", "telegram_username", "customer_comment")
     @classmethod
     def trim_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return value.strip()
+        value = value.strip()
+        return value or None
+
+    @field_validator("telegram_username")
+    @classmethod
+    def normalize_telegram_username(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lstrip("@").strip()
+        return normalized or None
 
 
 class OrderStatusUpdate(BaseModel):

@@ -3959,7 +3959,20 @@ label {
 
 .checkout-form {
   margin-top: 12px;
+  scroll-padding-bottom: calc(132px + var(--keyboard-inset) + env(safe-area-inset-bottom));
 }
+
+.checkout-field-legend { margin: 0; color: var(--muted); font-size: 12px; }
+.checkout-field-marker { margin-left: 2px; font-weight: 900; }
+.checkout-field-marker--required { color: var(--danger); }
+.checkout-field-marker--optional { color: var(--muted); }
+.checkout-field-error { color: var(--danger); font-size: 12px; font-weight: 600; line-height: 1.3; }
+.checkout-form :is(input, textarea, button)[aria-invalid='true'],
+.delivery-method-field[aria-invalid='true'] .delivery-method-trigger {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+.checkout-form :is(input, textarea, button):focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; }
 
 .notification-permission-prompt {
   display: grid;

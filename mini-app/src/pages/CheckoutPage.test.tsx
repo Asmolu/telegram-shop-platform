@@ -59,7 +59,10 @@ vi.mock('../shared/api', () => ({
   getApiErrorTelemetryCategory: vi.fn(() => 'unknown'),
   getCart: vi.fn().mockResolvedValue(cartFixture()),
   getCustomerNotificationSubscription: vi.fn().mockResolvedValue(subscriptionFixture()),
-  getPersonalData: vi.fn().mockResolvedValue(null),
+  getPersonalData: vi.fn().mockResolvedValue({
+    recipient_name: null, contact_phone: null, city: null,
+    height_cm: 180, weight_kg: 75, persistent_comment: null, telegram_username: null,
+  }),
   isTemporaryNetworkError: vi.fn(() => false),
   recordCustomerNotificationWriteAccess: vi.fn().mockResolvedValue(
     subscriptionFixture({
@@ -269,20 +272,15 @@ describe('CheckoutPage item details', () => {
     ));
   });
 
-  it('allows pickup checkout without address', async () => {
+  it('rejects pickup checkout without address', async () => {
     render(<CheckoutPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /СДЭК/ }));
     fireEvent.click(await screen.findByRole('radio', { name: /Самовывоз/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
 
-    await waitFor(() => expect(checkoutCart).toHaveBeenCalledWith(
-      expect.objectContaining({
-        delivery_method: 'PICKUP',
-        delivery_address: '',
-      }),
-      'checkout-key',
-    ));
+    expect(await screen.findByText('Укажите адрес доставки.')).toBeTruthy();
+    expect(checkoutCart).not.toHaveBeenCalled();
   });
 
   it('shows paid delivery price rows and includes delivery in checkout total', async () => {

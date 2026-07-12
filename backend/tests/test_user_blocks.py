@@ -163,6 +163,8 @@ async def test_block_by_telegram_id_prevents_checkout() -> None:
                 contact_phone="+79999999999",
                 delivery_method="CDEK",
                 delivery_address="Main street",
+                height_cm=180,
+                weight_kg=75,
             ),
         )
 

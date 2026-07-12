@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.common.deps import get_current_user
 from app.core.config import settings
@@ -676,36 +677,23 @@ async def test_checkout_stores_each_supported_delivery_method(
 
 
 @pytest.mark.asyncio
-async def test_checkout_with_pickup_succeeds_without_address() -> None:
-    service, repository, _, _ = _orders_service()
+async def test_checkout_with_pickup_requires_address() -> None:
     payload = _checkout_payload_json()
     payload["delivery_method"] = OrderDeliveryMethod.PICKUP.value
     payload["delivery_address"] = ""
 
-    order = await service.checkout_current_user_cart(
-        user_id=1,
-        payload=OrderCheckoutCreate.model_validate(payload),
-    )
-
-    assert order.delivery_method == OrderDeliveryMethod.PICKUP
-    assert order.delivery_address == ""
-    assert order.delivery_price == Decimal("0.00")
-    assert order.total_amount == Decimal("119.80")
-    assert repository.orders[order.id].delivery_price == Decimal("0.00")
+    with pytest.raises(ValidationError):
+        OrderCheckoutCreate.model_validate(payload)
 
 
 @pytest.mark.asyncio
 async def test_checkout_with_paid_delivery_requires_address() -> None:
-    service, _, _, _ = _orders_service()
     payload = _checkout_payload_json()
     payload["delivery_method"] = OrderDeliveryMethod.ROUTE_TAXI.value
     payload["delivery_address"] = " "
 
-    with pytest.raises(AppError, match="Delivery address is required"):
-        await service.checkout_current_user_cart(
-            user_id=1,
-            payload=OrderCheckoutCreate.model_validate(payload),
-        )
+    with pytest.raises(ValidationError):
+        OrderCheckoutCreate.model_validate(payload)
 
 
 @pytest.mark.asyncio
@@ -1859,7 +1847,51 @@ def _checkout_payload_json() -> dict[str, str]:
         "delivery_method": "CDEK",
         "delivery_address": "Main street",
         "delivery_comment": "Door code 42",
+        "height_cm": "180",
+        "weight_kg": "75.5",
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("contact_name", ""), ("contact_name", "   "),
+        ("contact_phone", ""), ("contact_phone", "   "),
+        ("delivery_address", ""), ("delivery_address", "   "),
+        ("height_cm", "missing"), ("height_cm", "abc"), ("height_cm", "0"),
+        ("height_cm", "-1"), ("height_cm", "301"),
+        ("weight_kg", "missing"), ("weight_kg", "abc"), ("weight_kg", "0"),
+        ("weight_kg", "-1"), ("weight_kg", "1001"),
+    ],
+)
+def test_checkout_schema_rejects_invalid_required_values(field: str, value: str) -> None:
+    payload = _checkout_payload_json()
+    if value == "missing":
+        payload.pop(field)
+    else:
+        payload[field] = value
+    with pytest.raises(ValidationError):
+        OrderCheckoutCreate.model_validate(payload)
+
+
+def test_checkout_schema_normalizes_optional_values_and_decimal_weight() -> None:
+    payload = _checkout_payload_json()
+    payload.update(weight_kg="75.25", telegram_username="  @@buyer  ", customer_comment="  ")
+    parsed = OrderCheckoutCreate.model_validate(payload)
+    assert parsed.weight_kg == Decimal("75.25")
+    assert parsed.telegram_username == "buyer"
+    assert parsed.customer_comment is None
+
+
+def test_checkout_schema_extracts_legacy_measurements() -> None:
+    payload = _checkout_payload_json()
+    payload.pop("height_cm")
+    payload.pop("weight_kg")
+    payload["delivery_comment"] = "Рост: 181\nВес: 76,5\nПозвонить"
+    parsed = OrderCheckoutCreate.model_validate(payload)
+    assert parsed.height_cm == 181
+    assert parsed.weight_kg == Decimal("76.5")
+    assert parsed.delivery_comment == "Позвонить"
 
 
 def _order_response(status_value: str = "NEW") -> dict[str, object]:

@@ -668,6 +668,10 @@ export type CheckoutPayload = {
   delivery_method: OrderDeliveryMethod;
   delivery_address: string;
   delivery_comment?: string | null;
+  height_cm: number;
+  weight_kg: number;
+  telegram_username?: string | null;
+  customer_comment?: string | null;
   promo_code?: string | null;
 };
 

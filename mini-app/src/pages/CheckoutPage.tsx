@@ -38,6 +38,8 @@ import { normalizeAssetUrl } from '../shared/utils/images';
 import { getPromoErrorMessage, normalizePromoCode } from '../shared/utils/promo';
 import { displaySize } from '../shared/utils/sizes';
 import { groupLookSourcedItems } from '../shared/utils/sourceGroups';
+import { getMotionAwareScrollBehavior } from '../shared/utils/motion';
+import { checkoutFieldOrder, mapCheckoutApiValidationErrors, validateCheckoutForm, type CheckoutField, type CheckoutFieldErrors } from './checkoutValidation';
 
 const DELIVERY_METHODS: { value: OrderDeliveryMethod; label: string; price: number }[] = [
   { value: 'ROUTE_TAXI', label: 'Маршруткой', price: 200 },
@@ -118,7 +120,8 @@ export function CheckoutPage() {
   const [promoValidation, setPromoValidation] = React.useState<PromoValidation | null>(null);
   const [deliveryMethod, setDeliveryMethod] = React.useState<OrderDeliveryMethod>('CDEK');
   const [deliverySelectorOpen, setDeliverySelectorOpen] = React.useState(false);
-  const [deliveryMethodError, setDeliveryMethodError] = React.useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = React.useState<CheckoutFieldErrors>({});
+  const fieldRefs = React.useRef<Partial<Record<CheckoutField, HTMLElement | null>>>({});
   const [form, setForm] = React.useState({
     contactName: getUserDisplayName(user ?? telegramUser),
     phone: user?.phone ?? '',
@@ -192,6 +195,7 @@ export function CheckoutPage() {
     checkoutKeyRef.current = null;
     editedFields.current.add(field);
     setForm((current) => ({ ...current, [field]: value }));
+    if (field in fieldErrors) setFieldErrors((current) => ({ ...current, [field]: undefined }));
   }
 
   function applyPersonalData(personalData: PersonalData) {
@@ -263,7 +267,7 @@ export function CheckoutPage() {
   function selectDeliveryMethod(method: OrderDeliveryMethod) {
     checkoutKeyRef.current = null;
     setDeliveryMethod(method);
-    setDeliveryMethodError(null);
+    setFieldErrors((current) => ({ ...current, deliveryMethod: undefined }));
     setDeliverySelectorOpen(false);
     setNotice(null);
   }
@@ -342,18 +346,18 @@ export function CheckoutPage() {
         setNotice('Выберите товары для оформления.');
         return;
       }
-      const addressRequired = deliveryMethod !== 'PICKUP';
-      if (!form.contactName.trim() || !form.phone.trim() || (addressRequired && !form.city.trim())) {
-        setNotice(addressRequired
-          ? 'Заполните имя, телефон и адрес.'
-          : 'Заполните имя и телефон.');
+      const errors = validateCheckoutForm({
+        contactName: form.contactName, phone: form.phone, deliveryMethod,
+        city: form.city, height: form.height, weight: form.weight,
+      });
+      const firstError = checkoutFieldOrder.find((field) => errors[field]);
+      if (firstError) {
+        setFieldErrors(errors);
+        setNotice('Проверьте обязательные поля.');
+        focusCheckoutField(firstError);
         return;
       }
-      if (!deliveryMethod) {
-        setDeliveryMethodError('Выберите способ доставки.');
-        setNotice('Выберите способ доставки.');
-        return;
-      }
+      setFieldErrors({});
 
       setBusy(true);
       try {
@@ -367,13 +371,6 @@ export function CheckoutPage() {
           showPromoToast(toast.text, toast.tone);
           return;
         }
-
-        const deliveryComment = [
-          form.height ? `Рост: ${form.height}` : '',
-          form.weight ? `Вес: ${form.weight}` : '',
-          form.username ? `Telegram: @${form.username.replace(/^@/, '')}` : '',
-          form.comment,
-        ].filter(Boolean).join('\n');
 
         if (!checkoutKeyRef.current) {
           checkoutKeyRef.current = createIdempotencyKey('checkout');
@@ -390,7 +387,11 @@ export function CheckoutPage() {
           contact_phone: form.phone.trim(),
           delivery_method: deliveryMethod,
           delivery_address: form.city.trim(),
-          delivery_comment: deliveryComment || null,
+          delivery_comment: null,
+          height_cm: Number.parseInt(form.height.trim(), 10),
+          weight_kg: Number(form.weight.trim().replace(',', '.')),
+          telegram_username: form.username.trim() || null,
+          customer_comment: form.comment.trim() || null,
           promo_code: promoCodeForOrder,
         }, currentCheckoutKey);
         trackTelemetry('checkout.completed', {
@@ -404,6 +405,14 @@ export function CheckoutPage() {
         window.dispatchEvent(new Event('miniapp:cart-updated'));
         navigate(withReturnTo(`/payment/${order.id}`, returnToParam), { replace: true });
       } catch (checkoutError) {
+        const serverErrors = mapCheckoutApiValidationErrors(checkoutError);
+        if (serverErrors) {
+          const firstError = checkoutFieldOrder.find((field) => serverErrors[field]);
+          setFieldErrors(serverErrors);
+          setNotice(firstError ? 'Проверьте обязательные поля.' : 'Проверьте данные и попробуйте снова.');
+          if (firstError) focusCheckoutField(firstError);
+          return;
+        }
         const idempotencyHash = checkoutKeyRef.current
           ? await hashCorrelationKey(checkoutKeyRef.current)
           : undefined;
@@ -423,6 +432,16 @@ export function CheckoutPage() {
       } finally {
         setBusy(false);
       }
+    });
+  }
+
+  function focusCheckoutField(field: CheckoutField) {
+    requestAnimationFrame(() => {
+      const element = fieldRefs.current[field];
+      if (typeof element?.scrollIntoView === 'function') {
+        element.scrollIntoView({ block: 'center', behavior: getMotionAwareScrollBehavior() });
+      }
+      element?.focus({ preventScroll: true });
     });
   }
 
@@ -564,20 +583,23 @@ export function CheckoutPage() {
             </section>
           ) : null}
 
-          <form className="checkout-form" onSubmit={submitCheckout}>
-            <label>Получатель<input value={form.contactName} onChange={(event) => updateField('contactName', event.target.value)} required /></label>
-            <label>Телефон<input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} required inputMode="tel" /></label>
-            <label>Адрес (город, улица, номер дома)<input value={form.city} onChange={(event) => updateField('city', event.target.value)} required={deliveryMethod !== 'PICKUP'} /></label>
+          <form className="checkout-form" onSubmit={submitCheckout} noValidate>
+            <p className="checkout-field-legend"><FieldMarker required /> — обязательное поле; <FieldMarker required={false} /> — необязательное поле.</p>
+            <CheckoutTextField field="contactName" label="Получатель" value={form.contactName} error={fieldErrors.contactName} elementRef={(node) => { fieldRefs.current.contactName = node; }} onChange={(value) => updateField('contactName', value)} />
+            <CheckoutTextField field="phone" label="Телефон" value={form.phone} error={fieldErrors.phone} elementRef={(node) => { fieldRefs.current.phone = node; }} onChange={(value) => updateField('phone', value)} inputMode="tel" />
             <div
               className="delivery-method-field"
-              aria-invalid={deliveryMethodError ? 'true' : undefined}
-              aria-describedby={deliveryMethodError ? 'delivery-method-error' : undefined}
+              aria-invalid={fieldErrors.deliveryMethod ? 'true' : undefined}
             >
-              <span>Способ доставки</span>
+              <span>Способ доставки<FieldMarker required /></span>
               <button
                 aria-controls="delivery-method-options"
                 aria-expanded={deliverySelectorOpen}
                 className="delivery-method-trigger"
+                aria-invalid={Boolean(fieldErrors.deliveryMethod)}
+                aria-required="true"
+                aria-describedby={fieldErrors.deliveryMethod ? 'checkout-deliveryMethod-error' : undefined}
+                ref={(node) => { fieldRefs.current.deliveryMethod = node; }}
                 type="button"
                 onClick={() => setDeliverySelectorOpen((current) => !current)}
               >
@@ -604,19 +626,20 @@ export function CheckoutPage() {
                   ))}
                 </span>
               ) : null}
-              {deliveryMethodError ? (
-                <p className="form-error" id="delivery-method-error">{deliveryMethodError}</p>
+              {fieldErrors.deliveryMethod ? (
+                <p className="checkout-field-error" id="checkout-deliveryMethod-error">{fieldErrors.deliveryMethod}</p>
               ) : null}
             </div>
+            <CheckoutTextField field="city" label="Адрес (город, улица, номер дома)" value={form.city} error={fieldErrors.city} elementRef={(node) => { fieldRefs.current.city = node; }} onChange={(value) => updateField('city', value)} />
             <p className="checkout-size-hint">
               Пожалуйста, укажите рост и вес — мы подберём размер по вашим параметрам.
             </p>
             <div className="two-inputs">
-              <label>Рост<input value={form.height} onChange={(event) => updateField('height', event.target.value)} inputMode="numeric" /></label>
-              <label>Вес<input value={form.weight} onChange={(event) => updateField('weight', event.target.value)} inputMode="numeric" /></label>
+              <CheckoutTextField field="height" label="Рост" value={form.height} error={fieldErrors.height} elementRef={(node) => { fieldRefs.current.height = node; }} onChange={(value) => updateField('height', value)} inputMode="numeric" />
+              <CheckoutTextField field="weight" label="Вес" value={form.weight} error={fieldErrors.weight} elementRef={(node) => { fieldRefs.current.weight = node; }} onChange={(value) => updateField('weight', value)} inputMode="decimal" />
             </div>
-            <label>Имя в Telegram<input value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
-            <label>Комментарий<textarea value={form.comment} onChange={(event) => updateField('comment', event.target.value)} rows={3} /></label>
+            <label><span>Имя в Telegram<FieldMarker required={false} /></span><input aria-label="Имя в Telegram" value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
+            <label><span>Комментарий<FieldMarker required={false} /></span><textarea aria-label="Комментарий" value={form.comment} onChange={(event) => updateField('comment', event.target.value)} rows={3} /></label>
             {serviceNotificationsAvailable ? (
               <InlineNotice tone="success">
                 <span>Уведомления о заказах включены</span>
@@ -629,6 +652,26 @@ export function CheckoutPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function FieldMarker({ required }: { required: boolean }) {
+  const label = required ? 'обязательное поле' : 'необязательное поле';
+  return <span className={`checkout-field-marker checkout-field-marker--${required ? 'required' : 'optional'}`} title={label} aria-hidden="true">*</span>;
+}
+
+function CheckoutTextField({ field, label, value, error, onChange, elementRef, inputMode }: {
+  field: CheckoutField; label: string; value: string; error?: string;
+  onChange: (value: string) => void; elementRef: (node: HTMLInputElement | null) => void;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+}) {
+  const errorId = `checkout-${field}-error`;
+  return (
+    <label>
+      <span>{label}<FieldMarker required /></span>
+      <input ref={elementRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} inputMode={inputMode} aria-required="true" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
+      {error ? <span className="checkout-field-error" id={errorId}>{error}</span> : null}
+    </label>
   );
 }
 

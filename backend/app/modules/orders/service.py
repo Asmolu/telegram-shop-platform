@@ -33,7 +33,7 @@ from app.modules.customer_notifications.service import CustomerServiceNotificati
 from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.service import ManualPaymentsService
 from app.modules.notifications.service import NotificationsEventPublisher
-from app.modules.orders.delivery import delivery_price_for_method, is_delivery_address_required
+from app.modules.orders.delivery import delivery_price_for_method
 from app.modules.orders.repository import OrdersRepository
 from app.modules.orders.schemas import (
     OrderCheckoutCreate,
@@ -560,10 +560,8 @@ class OrdersService:
                 raise AppError("Insufficient stock", status.HTTP_400_BAD_REQUEST)
 
     def _validate_checkout_delivery(self, payload: OrderCheckoutCreate) -> None:
-        if is_delivery_address_required(payload.delivery_method) and not (
-            payload.delivery_address or ""
-        ).strip():
-            raise AppError("Delivery address is required", status.HTTP_400_BAD_REQUEST)
+        if not payload.delivery_address.strip():
+            raise AppError("Укажите адрес доставки.", status.HTTP_400_BAD_REQUEST)
 
     def _build_order(
         self,
@@ -599,9 +597,20 @@ class OrdersService:
             contact_name=payload.contact_name,
             contact_phone=payload.contact_phone,
             delivery_method=payload.delivery_method,
-            delivery_address=(payload.delivery_address or "").strip(),
-            delivery_comment=payload.delivery_comment,
+            delivery_address=payload.delivery_address,
+            delivery_comment=self._build_delivery_comment(payload),
         )
+
+    def _build_delivery_comment(self, payload: OrderCheckoutCreate) -> str:
+        weight = format(payload.weight_kg.normalize(), "f")
+        lines = [f"Рост: {payload.height_cm}", f"Вес: {weight}"]
+        if payload.telegram_username:
+            lines.append(f"Telegram: @{payload.telegram_username}")
+        if payload.customer_comment:
+            lines.append(payload.customer_comment)
+        if payload.delivery_comment:
+            lines.append(payload.delivery_comment)
+        return "\n".join(lines)
 
     async def _validate_promo_code(
         self,
