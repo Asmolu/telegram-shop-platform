@@ -24,9 +24,12 @@ from sqlalchemy import (
     Uuid,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+POSTGRES_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 product_tags = Table(
     "product_tags",
@@ -1241,6 +1244,11 @@ class ProductVariant(Base):
             "is_active",
             "product_id",
         ),
+        Index(
+            "ix_product_variants_product_id_is_active",
+            "product_id",
+            "is_active",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1890,6 +1898,8 @@ class ManualPayment(Base):
     __tablename__ = "manual_payments"
     __table_args__ = (
         CheckConstraint("amount > 0", name="ck_manual_payments_amount_positive"),
+        UniqueConstraint("order_id", name="uq_manual_payments_order_id"),
+        Index("ix_manual_payments_order_id", "order_id"),
         Index(
             "ix_manual_payments_status_expires_at",
             "status",
@@ -1901,8 +1911,6 @@ class ManualPayment(Base):
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
-        index=True,
     )
     method: Mapped[ManualPaymentMethod] = mapped_column(
         Enum(
@@ -1998,8 +2006,14 @@ class CustomerInAppNotification(Base):
             "id",
         ),
         Index("ix_customer_in_app_notifications_order_id", "order_id"),
-        Index("ix_customer_in_app_notifications_payment_id", "manual_payment_id"),
-        Index("ix_customer_in_app_notifications_return_id", "return_request_id"),
+        Index(
+            "ix_customer_in_app_notifications_manual_payment_id",
+            "manual_payment_id",
+        ),
+        Index(
+            "ix_customer_in_app_notifications_return_request_id",
+            "return_request_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -2553,7 +2567,7 @@ class Notification(Base):
     type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[dict[str, object] | None] = mapped_column(POSTGRES_JSONB, nullable=True)
     channel: Mapped[NotificationChannel] = mapped_column(
         Enum(NotificationChannel, name="notification_channel", values_callable=_enum_values),
         nullable=False,
@@ -2885,7 +2899,7 @@ class OutboxEvent(Base):
     event_name: Mapped[str] = mapped_column(String(100), nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(100), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(POSTGRES_JSONB, nullable=False)
     status: Mapped[OutboxStatus] = mapped_column(
         Enum(OutboxStatus, name="outbox_status", values_callable=_enum_values),
         nullable=False,
@@ -3014,7 +3028,7 @@ class AnalyticsEvent(Base):
     )
     event_metadata: Mapped[dict[str, object] | None] = mapped_column(
         "metadata",
-        JSON,
+        POSTGRES_JSONB,
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -3037,11 +3051,11 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    before_data: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
-    after_data: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    before_data: Mapped[dict[str, object] | None] = mapped_column(POSTGRES_JSONB, nullable=True)
+    after_data: Mapped[dict[str, object] | None] = mapped_column(POSTGRES_JSONB, nullable=True)
     audit_metadata: Mapped[dict[str, object] | None] = mapped_column(
         "metadata",
-        JSON,
+        POSTGRES_JSONB,
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(

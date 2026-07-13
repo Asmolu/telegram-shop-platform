@@ -17,6 +17,7 @@ from app.db.models import (
     Order,
     OrderItem,
     OrderStatus,
+    OutboxEvent,
     ProductStatus,
     ProductVariant,
 )
@@ -453,7 +454,6 @@ class OrdersService:
             order.delivered_at = datetime.now(UTC)
         post_commit_events: list[tuple[str, dict[str, object]]] = []
         if previous_status != order.status:
-            await self.in_app_notifications.create_order_status(order)
             await self.audit_service.record_action(
                 actor_user_id=actor_user_id,
                 action="order.status_changed",
@@ -472,9 +472,19 @@ class OrdersService:
                 post_commit_events.append((ORDER_SHIPPED, order_shipped_payload(order)))
 
         response = OrderRead.model_validate(order)
+        order_transition_source_key: str | None = None
         if self.outbox_service is not None:
             for event_name, event_payload in post_commit_events:
-                self._enqueue_event(event_name, event_payload)
+                outbox_event = self._enqueue_event(event_name, event_payload)
+                if event_name == ORDER_STATUS_CHANGED:
+                    order_transition_source_key = (
+                        f"order:{order.id}:{order.status.value}:outbox:{outbox_event.event_id}"
+                    )
+        if previous_status != order.status and order_transition_source_key is not None:
+            await self.in_app_notifications.create_order_status(
+                order,
+                source_key=order_transition_source_key,
+            )
         try:
             await self.session.commit()
         except IntegrityError as exc:
@@ -510,9 +520,11 @@ class OrdersService:
                     exc_info=True,
                 )
 
-    def _enqueue_event(self, event_name: str, event_payload: Mapping[str, object]) -> None:
+    def _enqueue_event(
+        self, event_name: str, event_payload: Mapping[str, object]
+    ) -> OutboxEvent:
         assert self.outbox_service is not None
-        self.outbox_service.enqueue(
+        return self.outbox_service.enqueue(
             event_name=event_name,
             aggregate_type="order",
             aggregate_id=event_payload.get("order_id", "unknown"),

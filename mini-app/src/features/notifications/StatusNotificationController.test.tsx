@@ -1,15 +1,18 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StatusNotificationController } from './StatusNotificationController';
 
 const api = vi.hoisted(() => ({ pending: vi.fn(), seen: vi.fn(), contacts: vi.fn() }));
+const appContext = vi.hoisted(() => ({ isAuthenticated: true, currentPath: '/orders' }));
 
 vi.mock('../../shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ isAuthenticated: true }),
+  useAuth: () => ({ isAuthenticated: appContext.isAuthenticated }),
 }));
 vi.mock('../../shared/router/RouterProvider', () => ({
-  useRouter: () => ({ currentPath: '/orders' }),
+  useRouter: () => ({ currentPath: appContext.currentPath }),
 }));
 vi.mock('../../shared/api', () => ({
   getApiBaseUrl: () => 'https://api.example.test/api/v1',
@@ -52,6 +55,10 @@ const approved = {
 
 describe('StatusNotificationController', () => {
   beforeEach(() => {
+    appContext.isAuthenticated = true;
+    appContext.currentPath = '/orders';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    window.localStorage.clear();
     api.pending.mockResolvedValue([standard]);
     api.seen.mockResolvedValue({ id: 1, seen_at: '2026-07-13T11:00:00Z' });
     api.contacts.mockResolvedValue({ telegram_url: 'https://t.me/stylexac' });
@@ -67,6 +74,12 @@ describe('StatusNotificationController', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.getByText(standard.title)).toBeTruthy();
     expect(api.pending).toHaveBeenCalled();
+  });
+
+  it('is the only global status controller mounted by App', () => {
+    const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
+    expect(appSource.match(/<StatusNotificationController\s*\/>/g)).toHaveLength(1);
+    expect(appSource).not.toContain('<PaymentSuccessBannerController');
   });
 
   it('acknowledges on Continue and then displays the next queued item', async () => {
@@ -112,5 +125,146 @@ describe('StatusNotificationController', () => {
     fireEvent.mouseDown(dialog.parentElement!);
     expect(api.seen).not.toHaveBeenCalled();
     expect(screen.getByText(standard.title)).toBeTruthy();
+  });
+
+  it('refreshes on route, focus, visibility, and visible polling but pauses while hidden', async () => {
+    vi.useFakeTimers();
+    api.pending.mockResolvedValue([]);
+    const view = render(<StatusNotificationController />);
+    await act(async () => Promise.resolve());
+    expect(api.pending).toHaveBeenCalledTimes(1);
+
+    appContext.currentPath = '/profile';
+    view.rerender(<StatusNotificationController />);
+    await act(async () => Promise.resolve());
+    expect(api.pending).toHaveBeenCalledTimes(2);
+
+    fireEvent.focus(window);
+    await act(async () => Promise.resolve());
+    expect(api.pending).toHaveBeenCalledTimes(3);
+
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => Promise.resolve());
+    expect(api.pending).toHaveBeenCalledTimes(4);
+
+    await act(async () => vi.advanceTimersByTimeAsync(45_000));
+    expect(api.pending).toHaveBeenCalledTimes(5);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    fireEvent.focus(window);
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => Promise.resolve());
+    expect(api.pending).toHaveBeenCalledTimes(5);
+  });
+
+  it('does not overlap lifecycle or polling requests', async () => {
+    let resolvePending: (value: typeof standard[]) => void = () => undefined;
+    api.pending.mockReturnValueOnce(new Promise((resolve) => { resolvePending = resolve; }));
+    render(<StatusNotificationController />);
+    await act(async () => Promise.resolve());
+    fireEvent.focus(window);
+    fireEvent(document, new Event('visibilitychange'));
+    expect(api.pending).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolvePending([]));
+    fireEvent.focus(window);
+    await waitFor(() => expect(api.pending).toHaveBeenCalledTimes(2));
+  });
+
+  it('locks scroll, traps focus, and restores focus after acknowledgement', async () => {
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    api.pending.mockResolvedValueOnce([approved]);
+    render(<><button type="button">Before popup</button><StatusNotificationController /></>);
+    const previous = screen.getByRole('button', { name: 'Before popup' });
+    previous.focus();
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(document.body.style.overflow).toBe('hidden');
+
+    const buttons = screen.getAllByRole('button').filter((button) => button !== previous);
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    last.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.click(last);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.body.style.overflow).toBe('');
+    expect(document.activeElement).toBe(previous);
+    requestAnimationFrame.mockRestore();
+  });
+
+  it.each([
+    ['NEW', true],
+    ['PROCESSING', true],
+    ['SHIPPED', true],
+    ['DELIVERED', true],
+    ['CANCELLED', false],
+  ])('localizes approved-payment order status %s with correct success color', async (status, success) => {
+    api.pending.mockResolvedValueOnce([{ ...approved, payload: { ...approved.payload, order_status: status } }]);
+    render(<StatusNotificationController />);
+    const dialog = await screen.findByRole('dialog');
+    const rows = dialog.querySelectorAll('.status-notification-data-row');
+    expect(rows).toHaveLength(5);
+    expect(rows[2].querySelector('strong')?.classList.contains('is-success')).toBe(true);
+    const orderStatus = rows[3].querySelector('strong');
+    expect(orderStatus?.textContent).not.toBe(status);
+    expect(orderStatus?.classList.contains('is-success')).toBe(success);
+  });
+
+  it.each(['CDEK', 'WB'])('preserves the delivery contact note for %s', async (deliveryMethod) => {
+    api.pending.mockResolvedValueOnce([
+      { ...approved, payload: { ...approved.payload, delivery_method: deliveryMethod } },
+    ]);
+    render(<StatusNotificationController />);
+    await screen.findByRole('dialog');
+    expect(document.querySelector('.status-notification-delivery-note')).toBeTruthy();
+  });
+
+  it.each(['light', 'dark'])('renders the standard button matrix without an image at 320px in %s theme', async (theme) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+    document.documentElement.dataset.theme = theme;
+    render(<StatusNotificationController />);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.classList.contains('status-notification-card--standard')).toBe(true);
+    expect(dialog.querySelector('img')).toBeNull();
+    expect(dialog.querySelectorAll('.status-notification-data-row')).toHaveLength(0);
+    expect(dialog.querySelectorAll('.status-notification-actions button')).toHaveLength(1);
+  });
+
+  it('renders both standard actions when seller contacts are available', async () => {
+    api.pending.mockResolvedValueOnce([
+      { ...standard, id: 3, event_code: 'CANCELLED', action_mode: 'continue_with_contacts' },
+    ]);
+    render(<StatusNotificationController />);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img')).toBeNull();
+    expect(dialog.querySelectorAll('.status-notification-actions button')).toHaveLength(2);
+    expect(screen.queryByText('CANCELLED')).toBeNull();
+  });
+
+  it('uses localStorage dismissal only to acknowledge the durable legacy notification', async () => {
+    const legacy = {
+      ...approved,
+      payload: { ...approved.payload, legacy: true },
+    };
+    window.localStorage.setItem(
+      'stylexac.paymentSuccessBanner.dismissedOrderIds',
+      JSON.stringify([legacy.order_id]),
+    );
+    api.pending.mockResolvedValueOnce([legacy]);
+    render(<StatusNotificationController />);
+    await waitFor(() => expect(api.seen).toHaveBeenCalledWith(legacy.id));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

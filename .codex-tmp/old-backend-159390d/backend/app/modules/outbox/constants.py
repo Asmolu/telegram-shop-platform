@@ -1,0 +1,2 @@
+SELLER_CONSUMER = "seller"
+CUSTOMER_CONSUMER = "customer"

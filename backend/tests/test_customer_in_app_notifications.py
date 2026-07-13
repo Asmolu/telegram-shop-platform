@@ -3,26 +3,38 @@ import os
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.errors import AppError
 from app.db.base import Base
 from app.db.models import (
+    AuditLog,
     CustomerInAppNotification,
     CustomerInAppNotificationActionMode,
     CustomerInAppNotificationCategory,
     CustomerInAppNotificationVariant,
+    ManualPayment,
+    ManualPaymentCurrency,
+    ManualPaymentMethod,
     ManualPaymentStatus,
+    Order,
     OrderDeliveryMethod,
     OrderStatus,
+    OutboxEvent,
     ReturnRequestStatus,
     User,
 )
+from app.modules.audit.service import AuditService
 from app.modules.customer_in_app_notifications.service import CustomerInAppNotificationsService
+from app.modules.manual_payments.service import ManualPaymentsService
+from app.modules.orders.schemas import OrderStatusUpdate
+from app.modules.orders.service import OrdersService
+from app.modules.outbox.service import OutboxService
 
 NOW = datetime(2026, 7, 13, 10, 0, tzinfo=UTC)
 POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")
@@ -44,6 +56,17 @@ class CaptureSession:
         return Result()
 
 
+class FixedEventOutboxService:
+    def __init__(self, session, event_id: UUID) -> None:
+        self.delegate = OutboxService(session)
+        self.event_id = event_id
+
+    def enqueue(self, **kwargs):
+        if kwargs["event_name"] == "order.status_changed":
+            kwargs["event_id"] = self.event_id
+        return self.delegate.enqueue(**kwargs)
+
+
 def order(*, status: OrderStatus = OrderStatus.NEW):
     return SimpleNamespace(
         id=10,
@@ -57,7 +80,7 @@ def order(*, status: OrderStatus = OrderStatus.NEW):
 
 
 @pytest.mark.asyncio
-async def test_initial_order_payment_and_return_statuses_create_no_notifications() -> None:
+async def test_initial_payment_and_return_statuses_create_no_notifications() -> None:
     session = CaptureSession()
     service = CustomerInAppNotificationsService(session)
     new_order = order()
@@ -75,7 +98,6 @@ async def test_initial_order_payment_and_return_statuses_create_no_notifications
         status=ReturnRequestStatus.PENDING,
     )
 
-    await service.create_order_status(new_order, occurred_at=NOW)
     await service.create_payment_status(payment, occurred_at=NOW)
     await service.create_return_status(return_request, occurred_at=NOW)
 
@@ -101,12 +123,16 @@ async def test_status_notifications_capture_immutable_copy_and_stable_source_key
         status=ReturnRequestStatus.REJECTED,
     )
 
-    await service.create_order_status(changed_order, occurred_at=NOW)
+    await service.create_order_status(
+        changed_order,
+        occurred_at=NOW,
+        source_key="order:10:PROCESSING:outbox:test-occurrence",
+    )
     await service.create_payment_status(payment, occurred_at=NOW)
     await service.create_return_status(return_request, occurred_at=NOW)
 
     order_notification, payment_notification, return_notification = session.added
-    assert order_notification.source_key == "order:10:PROCESSING"
+    assert order_notification.source_key == "order:10:PROCESSING:outbox:test-occurrence"
     assert order_notification.action_mode == CustomerInAppNotificationActionMode.CONTINUE_ONLY
     assert order_notification.payload["order_number"] == "ORD-000010"
     assert payment_notification.source_key == "payment:20:APPROVED"
@@ -117,6 +143,21 @@ async def test_status_notifications_capture_immutable_copy_and_stable_source_key
         return_notification.action_mode
         == CustomerInAppNotificationActionMode.CONTINUE_WITH_CONTACTS
     )
+
+
+@pytest.mark.asyncio
+async def test_order_source_key_accepts_persisted_transition_occurrence() -> None:
+    session = CaptureSession()
+    service = CustomerInAppNotificationsService(session)
+    changed_order = order(status=OrderStatus.PROCESSING)
+
+    await service.create_order_status(
+        changed_order,
+        occurred_at=NOW,
+        source_key="order:10:PROCESSING:outbox:00000000-0000-0000-0000-000000000056",
+    )
+
+    assert session.added[0].source_key.endswith(":00000000-0000-0000-0000-000000000056")
 
 
 @pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
@@ -203,6 +244,371 @@ async def test_postgres_unique_source_key_fences_concurrent_duplicates() -> None
         await engine.dispose()
 
 
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_duplicate_notification_preserves_order_audit_outbox_and_session() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    event_id = UUID("00000000-0000-0000-0000-000000000056")
+    telegram_id = 99005604
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(OutboxEvent).where(OutboxEvent.event_id == event_id))
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005604")
+            session.add(db_order)
+            await session.flush()
+            source_key = f"order:{db_order.id}:PROCESSING:outbox:{event_id}"
+            notification = _db_notification(user.id, source_key, NOW)
+            notification.order_id = db_order.id
+            session.add(notification)
+            await session.commit()
+            order_id = db_order.id
+
+        async with sessions() as session:
+            service = OrdersService(session, audit_service=AuditService(session))
+            service.outbox_service = FixedEventOutboxService(session, event_id)
+            await service.update_order_status(
+                order_id,
+                OrderStatusUpdate(status=OrderStatus.PROCESSING),
+                actor_user_id=None,
+            )
+
+            assert await session.scalar(select(Order.status).where(Order.id == order_id)) == (
+                OrderStatus.PROCESSING
+            )
+            assert await session.scalar(
+                select(CustomerInAppNotification.id).where(
+                    CustomerInAppNotification.source_key == source_key
+                )
+            )
+            assert await session.scalar(
+                select(AuditLog.id).where(
+                    AuditLog.action == "order.status_changed",
+                    AuditLog.entity_id == order_id,
+                )
+            )
+            assert await session.scalar(
+                select(OutboxEvent.id).where(OutboxEvent.event_id == event_id)
+            )
+            # A query after the suppressed conflict proves the session is not failed.
+            assert await session.scalar(select(User.id).where(User.id == user.id)) == user.id
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_unrelated_notification_integrity_error_aborts_transition() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005605
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005605")
+            session.add(db_order)
+            await session.commit()
+            order_id = db_order.id
+
+        async with sessions() as session:
+            service = OrdersService(session, audit_service=AuditService(session))
+            real_notifications = CustomerInAppNotificationsService(session)
+
+            async def insert_invalid_notification(*_args, **_kwargs):
+                await real_notifications.repository.insert_if_source_absent(
+                    _db_notification(2_147_483_647, "test:invalid-foreign-key", NOW)
+                )
+
+            service.in_app_notifications.create_order_status = insert_invalid_notification
+            with pytest.raises(IntegrityError):
+                await service.update_order_status(
+                    order_id,
+                    OrderStatusUpdate(status=OrderStatus.PROCESSING),
+                    actor_user_id=None,
+                )
+            await session.rollback()
+
+        async with sessions() as session:
+            assert await session.scalar(select(Order.status).where(Order.id == order_id)) == (
+                OrderStatus.NEW
+            )
+            assert (
+                await session.scalar(
+                    select(CustomerInAppNotification.id).where(
+                        CustomerInAppNotification.source_key == "test:invalid-foreign-key"
+                    )
+                )
+                is None
+            )
+            assert (
+                await session.scalar(
+                    select(AuditLog.id).where(
+                        AuditLog.action == "order.status_changed",
+                        AuditLog.entity_id == order_id,
+                    )
+                )
+                is None
+            )
+            assert (
+                await session.scalar(
+                    select(OutboxEvent.id).where(OutboxEvent.aggregate_id == str(order_id))
+                )
+                is None
+            )
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_order_reentry_creates_distinct_occurrence_notifications() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005606
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005606")
+            session.add(db_order)
+            await session.commit()
+            order_id = db_order.id
+
+        async with sessions() as session:
+            service = OrdersService(session)
+            await service.update_order_status(
+                order_id, OrderStatusUpdate(status=OrderStatus.PROCESSING)
+            )
+            await service.update_order_status(order_id, OrderStatusUpdate(status=OrderStatus.NEW))
+            await service.update_order_status(
+                order_id, OrderStatusUpdate(status=OrderStatus.PROCESSING)
+            )
+
+        async with sessions() as session:
+            keys = list(
+                (
+                    await session.scalars(
+                        select(CustomerInAppNotification.source_key).where(
+                            CustomerInAppNotification.order_id == order_id,
+                            CustomerInAppNotification.event_code == "PROCESSING",
+                        )
+                    )
+                ).all()
+            )
+            assert len(keys) == 2
+            assert len(set(keys)) == 2
+            assert all(":outbox:" in key for key in keys)
+            assert await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.order_id == order_id,
+                    CustomerInAppNotification.event_code == "NEW",
+                )
+            ) == 1
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_concurrent_order_transition_creates_one_occurrence() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005608
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005608")
+            session.add(db_order)
+            await session.commit()
+            order_id = db_order.id
+
+        async def transition_once():
+            async with sessions() as session:
+                return await OrdersService(session).update_order_status(
+                    order_id, OrderStatusUpdate(status=OrderStatus.PROCESSING)
+                )
+
+        first, second = await asyncio.gather(transition_once(), transition_once())
+        assert first.status == second.status == OrderStatus.PROCESSING
+        async with sessions() as session:
+            notification_count = await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.order_id == order_id,
+                    CustomerInAppNotification.event_code == "PROCESSING",
+                )
+            )
+            event_count = await session.scalar(
+                select(func.count(OutboxEvent.id)).where(
+                    OutboxEvent.aggregate_id == str(order_id),
+                    OutboxEvent.event_name == "order.status_changed",
+                )
+            )
+            assert notification_count == 1
+            assert event_count == 1
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_new_approved_payment_creates_one_transactional_notification() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005609
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005609")
+            session.add(db_order)
+            await session.flush()
+            payment = ManualPayment(
+                order_id=db_order.id,
+                method=ManualPaymentMethod.SBP_PHONE,
+                amount=db_order.total_amount,
+                currency=ManualPaymentCurrency.RUB,
+                seller_phone_e164="+79990000000",
+                seller_phone_display="+7 999 000-00-00",
+                payment_comment="ORD-99005609",
+                status=ManualPaymentStatus.PENDING,
+                expires_at=NOW.replace(day=14),
+            )
+            session.add(payment)
+            await session.commit()
+            payment_id = payment.id
+            order_id = db_order.id
+
+        async with sessions() as session:
+            service = ManualPaymentsService(session)
+            first = await service.approve(payment_id, actor_user_id=None)
+            second = await service.approve(payment_id, actor_user_id=None)
+            assert first.status == second.status == ManualPaymentStatus.APPROVED
+
+        async with sessions() as session:
+            assert await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.source_key == f"payment:{payment_id}:APPROVED"
+                )
+            ) == 1
+            assert await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.order_id == order_id,
+                    CustomerInAppNotification.category
+                    == CustomerInAppNotificationCategory.ORDER,
+                    CustomerInAppNotification.event_code == "PROCESSING",
+                )
+            ) == 1
+            assert await session.scalar(select(Order.status).where(Order.id == order_id)) == (
+                OrderStatus.PROCESSING
+            )
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_concurrent_legacy_conversion_creates_at_most_one_row() -> None:
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005607
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005607", status=OrderStatus.PROCESSING)
+            session.add(db_order)
+            await session.flush()
+            payment = ManualPayment(
+                order_id=db_order.id,
+                method=ManualPaymentMethod.SBP_PHONE,
+                amount=db_order.total_amount,
+                currency=ManualPaymentCurrency.RUB,
+                seller_phone_e164="+79990000000",
+                seller_phone_display="+7 999 000-00-00",
+                payment_comment="ORD-99005607",
+                status=ManualPaymentStatus.APPROVED,
+                approved_at=NOW,
+                expires_at=NOW,
+            )
+            session.add(payment)
+            await session.commit()
+            user_id = user.id
+            payment_id = payment.id
+
+        async def load_pending():
+            async with sessions() as session:
+                return await CustomerInAppNotificationsService(session).pending(
+                    user_id=user_id, limit=20
+                )
+
+        first, second = await asyncio.gather(load_pending(), load_pending())
+        assert len(first) == 1
+        assert len(second) == 1
+        async with sessions() as session:
+            count = await session.scalar(
+                select(CustomerInAppNotification.id).where(
+                    CustomerInAppNotification.source_key == f"payment:{payment_id}:APPROVED"
+                )
+            )
+            assert count is not None
+            rows = (
+                await session.scalars(
+                    select(CustomerInAppNotification).where(
+                        CustomerInAppNotification.source_key == f"payment:{payment_id}:APPROVED"
+                    )
+                )
+            ).all()
+            assert len(rows) == 1
+    finally:
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
 def _db_notification(user_id: int, source_key: str, occurred_at: datetime):
     return CustomerInAppNotification(
         user_id=user_id,
@@ -215,4 +621,25 @@ def _db_notification(user_id: int, source_key: str, occurred_at: datetime):
         payload={},
         occurred_at=occurred_at,
         source_key=source_key,
+    )
+
+
+def _db_order(
+    user_id: int,
+    order_number: str,
+    *,
+    status: OrderStatus = OrderStatus.NEW,
+) -> Order:
+    return Order(
+        order_number=order_number,
+        user_id=user_id,
+        status=status,
+        subtotal_amount=Decimal("1000.00"),
+        discount_amount=Decimal("0.00"),
+        total_amount=Decimal("1000.00"),
+        delivery_price=Decimal("0.00"),
+        contact_name="Test Customer",
+        contact_phone="+79990000000",
+        delivery_method=OrderDeliveryMethod.CDEK,
+        delivery_address="Test address",
     )

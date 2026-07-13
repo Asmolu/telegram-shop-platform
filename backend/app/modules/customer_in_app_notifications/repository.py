@@ -1,4 +1,5 @@
 from sqlalchemy import String, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,8 +10,43 @@ class CustomerInAppNotificationsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    def add(self, notification: CustomerInAppNotification) -> None:
-        self.session.add(notification)
+    async def insert_if_source_absent(
+        self, notification: CustomerInAppNotification
+    ) -> bool:
+        """Atomically insert unless the durable transition identity already exists.
+
+        The named conflict target is deliberately narrow: foreign-key, nullability,
+        and every other integrity failure still abort the caller's transaction.
+        """
+        if not isinstance(self.session, AsyncSession):
+            # Lightweight unit-session boundary. Real application sessions always
+            # execute the PostgreSQL ON CONFLICT statement below.
+            self.session.add(notification)
+            return True
+        result = await self.session.execute(
+            pg_insert(CustomerInAppNotification)
+            .values(
+                user_id=notification.user_id,
+                category=notification.category,
+                event_code=notification.event_code,
+                variant=notification.variant,
+                action_mode=notification.action_mode,
+                order_id=notification.order_id,
+                manual_payment_id=notification.manual_payment_id,
+                return_request_id=notification.return_request_id,
+                title=notification.title,
+                message=notification.message,
+                payload=notification.payload,
+                occurred_at=notification.occurred_at,
+                seen_at=notification.seen_at,
+                source_key=notification.source_key,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_customer_in_app_notifications_source_key"
+            )
+            .returning(CustomerInAppNotification.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def list_pending(self, *, user_id: int, limit: int) -> list[CustomerInAppNotification]:
         result = await self.session.execute(

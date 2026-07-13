@@ -1,0 +1,488 @@
+from datetime import UTC, datetime
+from decimal import Decimal
+
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from app.common.deps import get_current_user
+from app.core.errors import AppError
+from app.db.models import (
+    Banner,
+    BannerDisplayType,
+    BannerTargetType,
+    DiscountType,
+    PromoCode,
+    User,
+    UserRole,
+)
+from app.main import create_app
+from app.modules.banners.router import get_banners_service
+from app.modules.banners.schemas import BannerCreate, BannerUpdate
+from app.modules.banners.service import BannersService
+
+
+class DummySession:
+    def __init__(self) -> None:
+        self.committed = False
+        self.rolled_back = False
+
+    async def commit(self) -> None:
+        self.committed = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+    async def refresh(self, banner: Banner) -> None:
+        if getattr(banner, "id", None) is None:
+            banner.id = 1
+        if getattr(banner, "created_at", None) is None:
+            banner.created_at = _now()
+        if getattr(banner, "updated_at", None) is None:
+            banner.updated_at = _now()
+
+
+class FakeBannersRepository:
+    def __init__(self) -> None:
+        self.banners: dict[int, Banner] = {}
+        self.next_banner_id = 1
+
+    async def list(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        active_only: bool = False,
+    ) -> tuple[list[Banner], int]:
+        items = list(self.banners.values())
+        if active_only:
+            items = [banner for banner in items if banner.is_active]
+        return items[offset : offset + limit], len(items)
+
+    async def get_by_id(self, banner_id: int) -> Banner | None:
+        return self.banners.get(banner_id)
+
+    def add(self, banner: Banner) -> None:
+        banner.id = self.next_banner_id
+        self.next_banner_id += 1
+        banner.created_at = _now()
+        banner.updated_at = _now()
+        self.banners[banner.id] = banner
+
+
+class FakeAnalyticsTracker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    async def track(self, event_name: str, **payload: object) -> None:
+        self.events.append((event_name, payload))
+
+
+class FakePromoCodesRepository:
+    def __init__(self) -> None:
+        self.promo_codes: dict[int, PromoCode] = {}
+
+    async def get_by_ids(self, promo_code_ids: set[int]) -> dict[int, PromoCode]:
+        return {
+            promo_code_id: self.promo_codes[promo_code_id]
+            for promo_code_id in promo_code_ids
+            if promo_code_id in self.promo_codes
+        }
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_banner() -> None:
+    service, repository, session = _banners_service()
+
+    created = await service.create_banner(BannerCreate(**_banner_payload()))
+    updated = await service.update_banner(created.id, BannerUpdate(is_active=True, position=2))
+
+    assert created.title == "Spring drop"
+    assert created.image_path == "banners/spring.webp"
+    assert repository.banners[1].target_type == BannerTargetType.PRODUCT
+    assert updated.is_active is True
+    assert updated.position == 2
+    assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_promo_banner_does_not_require_target_or_external_url() -> None:
+    service, repository, _ = _banners_service()
+
+    created = await service.create_banner(
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "target_type": "promo",
+                "target_id": None,
+                "external_url": None,
+            }
+        )
+    )
+
+    assert created.target_type == BannerTargetType.PROMO
+    assert created.target_id is None
+    assert created.external_url is None
+    assert repository.banners[created.id].target_type == BannerTargetType.PROMO
+
+
+def test_external_url_banner_requires_external_url() -> None:
+    with pytest.raises(ValidationError, match="external_url"):
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "target_type": "external_url",
+                "target_id": None,
+                "external_url": None,
+            }
+        )
+
+
+def test_product_banner_requires_target_id() -> None:
+    with pytest.raises(ValidationError, match="target_id"):
+        BannerCreate(**{**_banner_payload(), "target_type": "product", "target_id": None})
+
+
+@pytest.mark.asyncio
+async def test_banner_popup_metadata_persists() -> None:
+    service, repository, _ = _banners_service()
+
+    created = await service.create_banner(
+        BannerCreate(
+            **{
+                **_banner_payload(),
+                "display_type": "aggressive_popup",
+            }
+        )
+    )
+
+    assert created.display_type == BannerDisplayType.AGGRESSIVE_POPUP
+    assert repository.banners[created.id].display_type == BannerDisplayType.AGGRESSIVE_POPUP
+
+
+@pytest.mark.asyncio
+async def test_banner_click_tracks_analytics_event() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, repository, _ = _banners_service(analytics_tracker=tracker)
+    repository.add(
+        _banner(
+            is_active=True,
+            display_type=BannerDisplayType.VERTICAL,
+        )
+    )
+
+    result = await service.track_banner_click(banner_id=1, user_id=42)
+
+    assert result.tracked is True
+    assert tracker.events == [
+        (
+            "banner.clicked",
+            {
+                "user_id": 42,
+                "banner_id": 1,
+                "metadata": {
+                    "banner_id": 1,
+                    "target_type": "product",
+                    "target_id": 1,
+                    "display_type": "vertical",
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_public_banner_list_only_returns_active_banners() -> None:
+    service, repository, _ = _banners_service()
+    repository.add(_banner(is_active=True))
+    repository.add(_banner(is_active=False, title="Inactive"))
+
+    banners = await service.list_public_banners(limit=20, offset=0)
+
+    assert len(banners.items) == 1
+    assert "is_active" not in banners.items[0].model_dump()
+    assert "title" not in banners.items[0].model_dump()
+    assert "subtitle" not in banners.items[0].model_dump()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "display_type",
+    [
+        BannerDisplayType.HORIZONTAL,
+        BannerDisplayType.VERTICAL,
+        BannerDisplayType.POPUP,
+        BannerDisplayType.AGGRESSIVE_POPUP,
+    ],
+)
+async def test_public_banner_list_returns_display_and_target_metadata(
+    display_type: BannerDisplayType,
+) -> None:
+    service, repository, _ = _banners_service()
+    repository.add(_banner(is_active=True, display_type=display_type))
+
+    banners = await service.list_public_banners(limit=20, offset=0)
+
+    assert banners.items[0].display_type == display_type
+    assert banners.items[0].target_type == BannerTargetType.PRODUCT
+    assert banners.items[0].target_id == 1
+    assert banners.items[0].external_url is None
+    assert banners.items[0].image_path == "banners/spring.webp"
+    assert banners.items[0].image_url == "/uploads/banners/spring.webp"
+
+
+@pytest.mark.asyncio
+async def test_public_promo_banner_exposes_active_promo_code_only() -> None:
+    service, repository, _ = _banners_service()
+    service.promo_codes_repository.promo_codes[7] = _promo_code(id=7, code="SAVE20")
+    service.promo_codes_repository.promo_codes[8] = _promo_code(
+        id=8,
+        code="HIDDEN",
+        is_active=False,
+    )
+    repository.add(
+        _banner(
+            is_active=True,
+            target_type=BannerTargetType.PROMO,
+            target_id=7,
+        )
+    )
+    repository.add(
+        _banner(
+            is_active=True,
+            target_type=BannerTargetType.PROMO,
+            target_id=8,
+        )
+    )
+
+    banners = await service.list_public_banners(limit=20, offset=0)
+
+    assert banners.items[0].promo_code == "SAVE20"
+    assert banners.items[1].promo_code is None
+
+
+@pytest.mark.asyncio
+async def test_public_banner_list_returns_aggressive_popup_and_tracks_view() -> None:
+    tracker = FakeAnalyticsTracker()
+    service, repository, _ = _banners_service(analytics_tracker=tracker)
+    repository.add(
+        _banner(
+            is_active=True,
+            display_type=BannerDisplayType.AGGRESSIVE_POPUP,
+        )
+    )
+
+    banners = await service.list_public_banners(limit=20, offset=0, user_id=42)
+
+    assert banners.items[0].display_type == BannerDisplayType.AGGRESSIVE_POPUP
+    assert tracker.events == [
+        (
+            "banner.viewed",
+            {
+                "user_id": 42,
+                "banner_id": 1,
+                "metadata": {
+                    "banner_id": 1,
+                    "target_type": "product",
+                    "target_id": 1,
+                    "display_type": "aggressive_popup",
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_activate_requires_complete_target() -> None:
+    service, repository, _ = _banners_service()
+    incomplete = _banner(target_type=None, target_id=None)
+    repository.add(incomplete)
+
+    with pytest.raises(AppError, match="target_type"):
+        await service.set_banner_active(incomplete.id, True)
+
+
+def test_banner_management_requires_authentication() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post("/api/v1/banners/admin", json=_banner_payload())
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate credentials"}
+
+
+def test_banner_management_rejects_regular_user() -> None:
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.USER)
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/banners/admin", json=_banner_payload())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Insufficient permissions"}
+
+
+def test_banner_management_allows_seller() -> None:
+    app = create_app()
+
+    class FakeBannersService:
+        async def create_banner(self, _: BannerCreate, **__: object) -> dict[str, object]:
+            return _banner_response()
+
+    app.dependency_overrides[get_current_user] = lambda: _user(UserRole.SELLER)
+    app.dependency_overrides[get_banners_service] = lambda: FakeBannersService()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/banners/admin", json=_banner_payload())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["target_type"] == "product"
+
+
+def test_public_active_banner_list_is_anonymous() -> None:
+    app = create_app()
+
+    class FakeBannersService:
+        async def list_public_banners(self, **_: object) -> dict[str, object]:
+            return {
+                "items": [_public_banner_response()],
+                "meta": {"limit": 20, "offset": 0, "total": 1},
+            }
+
+        async def track_public_banner_views(self, *_: object, **__: object) -> None:
+            return None
+
+    app.dependency_overrides[get_banners_service] = lambda: FakeBannersService()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/banners")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["etag"]
+    assert response.json()["items"][0]["target_type"] == "product"
+    assert "title" not in response.json()["items"][0]
+    assert "subtitle" not in response.json()["items"][0]
+
+
+def _banners_service(
+    *,
+    analytics_tracker: FakeAnalyticsTracker | None = None,
+) -> tuple[BannersService, FakeBannersRepository, DummySession]:
+    session = DummySession()
+    service = BannersService(session, analytics_tracker=analytics_tracker)
+    repository = FakeBannersRepository()
+    service.repository = repository
+    service.promo_codes_repository = FakePromoCodesRepository()
+    return service, repository, session
+
+
+def _banner(
+    *,
+    title: str = "Spring drop",
+    is_active: bool = True,
+    target_type: BannerTargetType | None = BannerTargetType.PRODUCT,
+    target_id: int | None = 1,
+    display_type: BannerDisplayType = BannerDisplayType.HORIZONTAL,
+) -> Banner:
+    return Banner(
+        title=title,
+        subtitle="Fresh arrivals",
+        file_path="banners/spring.webp",
+        original_filename="spring.webp",
+        mime_type="image/webp",
+        size_bytes=12,
+        alt_text=title,
+        target_type=target_type,
+        target_id=target_id,
+        external_url=None,
+        display_type=display_type,
+        position=0,
+        is_active=is_active,
+        starts_at=None,
+        ends_at=None,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+def _banner_payload() -> dict[str, object]:
+    return {
+        "title": "Spring drop",
+        "subtitle": "Fresh arrivals",
+        "image_path": "banners/spring.webp",
+        "target_type": "product",
+        "target_id": 1,
+        "external_url": None,
+        "display_type": "horizontal",
+        "position": 0,
+        "is_active": False,
+        "starts_at": None,
+        "ends_at": None,
+    }
+
+
+def _banner_response() -> dict[str, object]:
+    now = _now().isoformat()
+    return {
+        **_banner_payload(),
+        "id": 1,
+        "image_url": "/uploads/banners/spring.webp",
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _public_banner_response() -> dict[str, object]:
+    return {
+        "id": 1,
+        "image_path": "banners/spring.webp",
+        "image_url": "/uploads/banners/spring.webp",
+        "target_type": "product",
+        "target_id": 1,
+        "external_url": None,
+        "promo_code": None,
+        "display_type": "horizontal",
+        "position": 0,
+    }
+
+
+def _promo_code(*, id: int, code: str, is_active: bool = True) -> PromoCode:
+    return PromoCode(
+        id=id,
+        code=code,
+        discount_type=DiscountType.PERCENT,
+        discount_value=Decimal("20"),
+        is_active=is_active,
+        starts_at=None,
+        ends_at=None,
+        usage_limit=None,
+        per_user_limit=None,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+def _user(role: UserRole) -> User:
+    return User(
+        id=1,
+        telegram_id=42,
+        username="seller",
+        first_name="Ada",
+        last_name=None,
+        phone=None,
+        role=role,
+        is_active=True,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+def _now() -> datetime:
+    return datetime(2026, 5, 27, tzinfo=UTC)

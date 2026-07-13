@@ -1,0 +1,392 @@
+import logging
+from datetime import UTC, datetime
+
+from fastapi import status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.common.cache import CacheService, banner_cache_patterns, public_banners_list_key
+from app.common.pagination import PageMeta
+from app.core.config import settings
+from app.core.errors import AppError
+from app.db.models import Banner, BannerDisplayType, BannerTargetType, PromoCode
+from app.modules.analytics.service import AnalyticsTracker
+from app.modules.audit.service import AuditService, NoopAuditService
+from app.modules.banners.repository import BannersRepository
+from app.modules.banners.schemas import (
+    BannerClickRead,
+    BannerCreate,
+    BannerList,
+    BannerRead,
+    BannerUpdate,
+    PublicBannerList,
+    PublicBannerRead,
+)
+from app.modules.promo_codes.repository import PromoCodesRepository
+
+logger = logging.getLogger(__name__)
+
+BANNER_AUDIT_FIELDS = (
+    "title",
+    "subtitle",
+    "file_path",
+    "target_type",
+    "target_id",
+    "external_url",
+    "display_type",
+    "position",
+    "is_active",
+    "starts_at",
+    "ends_at",
+)
+
+
+class BannersService:
+    """Banner management endpoints."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        audit_service: AuditService | None = None,
+        cache: CacheService | None = None,
+        analytics_tracker: AnalyticsTracker | None = None,
+    ) -> None:
+        self.session = session
+        self.repository = BannersRepository(session)
+        self.promo_codes_repository = PromoCodesRepository(session)
+        self.audit_service = audit_service or NoopAuditService()
+        self.cache = cache
+        self.analytics_tracker = analytics_tracker
+
+    async def list_public_banners(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        user_id: int | None = None,
+        track_views: bool = True,
+    ) -> PublicBannerList:
+        cache_key = public_banners_list_key(limit=limit, offset=offset)
+        if self.cache is not None:
+            cached = await self.cache.get_model(cache_key, PublicBannerList)
+            if cached is not None:
+                if track_views:
+                    await self._track_banner_views(cached.items, user_id=user_id)
+                return cached
+
+        items, total = await self.repository.list(
+            limit=limit,
+            offset=offset,
+            active_only=True,
+        )
+        promo_code_ids = {
+            banner.target_id
+            for banner in items
+            if banner.target_type == BannerTargetType.PROMO and banner.target_id is not None
+        }
+        promo_codes = await self.promo_codes_repository.get_by_ids(promo_code_ids)
+        now = datetime.now(UTC)
+        result = PublicBannerList(
+            items=[self._to_public_banner(item, promo_codes, now=now) for item in items],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+        if track_views:
+            await self._track_banner_views(result.items, user_id=user_id)
+        if self.cache is not None:
+            await self.cache.set_model(cache_key, result, settings.cache_banners_ttl_seconds)
+        return result
+
+    async def track_public_banner_views(
+        self,
+        banners: list[PublicBannerRead],
+        *,
+        user_id: int | None,
+    ) -> None:
+        await self._track_banner_views(banners, user_id=user_id)
+
+    async def list_banners(self, *, limit: int, offset: int) -> BannerList:
+        items, total = await self.repository.list(limit=limit, offset=offset)
+        return BannerList(
+            items=[BannerRead.model_validate(item) for item in items],
+            meta=PageMeta(limit=limit, offset=offset, total=total),
+        )
+
+    async def get_banner(self, banner_id: int) -> BannerRead:
+        banner = await self._get_existing_banner(banner_id)
+        return BannerRead.model_validate(banner)
+
+    async def create_banner(
+        self,
+        payload: BannerCreate,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
+        banner = Banner(
+            title=payload.title,
+            subtitle=payload.subtitle,
+            file_path=payload.image_path,
+            original_filename=payload.image_path.rsplit("/", 1)[-1],
+            mime_type="",
+            size_bytes=0,
+            alt_text=payload.title,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            external_url=payload.external_url,
+            display_type=payload.display_type,
+            position=payload.position,
+            is_active=payload.is_active,
+            starts_at=payload.starts_at,
+            ends_at=payload.ends_at,
+        )
+        self.repository.add(banner)
+        try:
+            if banner.id is None:
+                await self.session.flush()
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.created",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=None,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
+            await self.session.commit()
+            await self.session.refresh(banner)
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError("Banner create failed", status.HTTP_409_CONFLICT) from exc
+
+        await self._invalidate_public_cache()
+        return BannerRead.model_validate(banner)
+
+    async def track_banner_click(
+        self,
+        *,
+        banner_id: int,
+        user_id: int | None = None,
+    ) -> BannerClickRead:
+        banner = await self._get_existing_banner(banner_id)
+        self._validate_banner_is_publicly_visible(banner)
+        target_type = banner.target_type.value if banner.target_type is not None else None
+        display_type = banner.display_type or BannerDisplayType.HORIZONTAL
+        await self._track_event(
+            "banner.clicked",
+            user_id=user_id,
+            banner_id=banner.id,
+            metadata={
+                "banner_id": banner.id,
+                "target_type": target_type,
+                "target_id": banner.target_id,
+                "display_type": display_type.value,
+            },
+        )
+        return BannerClickRead(banner_id=banner.id)
+
+    async def update_banner(
+        self,
+        banner_id: int,
+        payload: BannerUpdate,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
+        banner = await self._get_existing_banner(banner_id)
+        before_data = self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS)
+        data = payload.model_dump(exclude_unset=True)
+
+        target_type = data.get("target_type", banner.target_type)
+        target_id = data.get("target_id", banner.target_id)
+        external_url = data.get("external_url", banner.external_url)
+        starts_at = data.get("starts_at", banner.starts_at)
+        ends_at = data.get("ends_at", banner.ends_at)
+        is_active = data.get("is_active", banner.is_active)
+        self._validate_banner_state(
+            target_type=target_type,
+            target_id=target_id,
+            external_url=external_url,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            require_target=is_active,
+        )
+
+        image_path = data.pop("image_path", None)
+        if image_path is not None:
+            banner.file_path = image_path
+            banner.original_filename = image_path.rsplit("/", 1)[-1]
+
+        for field, value in data.items():
+            setattr(banner, field, value)
+
+        try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.updated",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
+            await self.session.commit()
+            await self.session.refresh(banner)
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError("Banner update failed", status.HTTP_409_CONFLICT) from exc
+
+        await self._invalidate_public_cache()
+        return BannerRead.model_validate(banner)
+
+    async def set_banner_active(
+        self,
+        banner_id: int,
+        is_active: bool,
+        actor_user_id: int | None = None,
+    ) -> BannerRead:
+        banner = await self._get_existing_banner(banner_id)
+        before_data = self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS)
+        if is_active:
+            self._validate_banner_state(
+                target_type=banner.target_type,
+                target_id=banner.target_id,
+                external_url=banner.external_url,
+                starts_at=banner.starts_at,
+                ends_at=banner.ends_at,
+                require_target=True,
+            )
+        banner.is_active = is_active
+        try:
+            await self.audit_service.record_action(
+                actor_user_id=actor_user_id,
+                action="banner.updated" if is_active else "banner.deactivated",
+                entity_type="banner",
+                entity_id=banner.id,
+                before_data=before_data,
+                after_data=self.audit_service.snapshot(banner, BANNER_AUDIT_FIELDS),
+            )
+            await self.session.commit()
+            await self.session.refresh(banner)
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise AppError("Banner update failed", status.HTTP_409_CONFLICT) from exc
+
+        await self._invalidate_public_cache()
+        return BannerRead.model_validate(banner)
+
+    async def _get_existing_banner(self, banner_id: int) -> Banner:
+        banner = await self.repository.get_by_id(banner_id)
+        if banner is None:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+        return banner
+
+    def _validate_banner_state(
+        self,
+        *,
+        target_type: BannerTargetType | None,
+        target_id: int | None,
+        external_url: str | None,
+        starts_at: datetime | None,
+        ends_at: datetime | None,
+        require_target: bool,
+    ) -> None:
+        if target_type is None:
+            if not require_target:
+                if starts_at is not None and ends_at is not None and starts_at >= ends_at:
+                    raise AppError("starts_at must be before ends_at", status.HTTP_400_BAD_REQUEST)
+                return
+            raise AppError("Banner target_type is required", status.HTTP_400_BAD_REQUEST)
+        if target_type == BannerTargetType.EXTERNAL_URL:
+            if not external_url:
+                raise AppError("external_url is required", status.HTTP_400_BAD_REQUEST)
+        elif target_type in {BannerTargetType.PRODUCT, BannerTargetType.CATEGORY}:
+            if target_id is None:
+                raise AppError("target_id is required", status.HTTP_400_BAD_REQUEST)
+
+        if starts_at is not None and ends_at is not None and starts_at >= ends_at:
+            raise AppError("starts_at must be before ends_at", status.HTTP_400_BAD_REQUEST)
+
+    def _validate_banner_is_publicly_visible(self, banner: Banner) -> None:
+        if not banner.is_active or banner.target_type is None:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+        now = datetime.now(UTC)
+        if banner.starts_at is not None and self._as_utc(banner.starts_at) > now:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+        if banner.ends_at is not None and self._as_utc(banner.ends_at) <= now:
+            raise AppError("Banner not found", status.HTTP_404_NOT_FOUND)
+
+    async def _track_event(
+        self,
+        event_name: str,
+        *,
+        user_id: int | None,
+        banner_id: int,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if self.analytics_tracker is None:
+            return
+        try:
+            await self.analytics_tracker.track(
+                event_name,
+                user_id=user_id,
+                banner_id=banner_id,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to track banner analytics event %s", event_name, exc_info=True)
+
+    async def _track_banner_views(
+        self,
+        banners: list[PublicBannerRead],
+        *,
+        user_id: int | None,
+    ) -> None:
+        for banner in banners:
+            display_type = banner.display_type or BannerDisplayType.HORIZONTAL
+            await self._track_event(
+                "banner.viewed",
+                user_id=user_id,
+                banner_id=banner.id,
+                metadata={
+                    "banner_id": banner.id,
+                    "target_type": banner.target_type.value if banner.target_type else None,
+                    "target_id": banner.target_id,
+                    "display_type": display_type.value,
+                },
+            )
+
+    def _to_public_banner(
+        self,
+        banner: Banner,
+        promo_codes: dict[int, PromoCode],
+        *,
+        now: datetime,
+    ) -> PublicBannerRead:
+        promo_code: str | None = None
+        if banner.target_type == BannerTargetType.PROMO and banner.target_id is not None:
+            promo = promo_codes.get(banner.target_id)
+            if promo is not None and self._is_promo_public(promo, now=now):
+                promo_code = promo.code
+
+        return PublicBannerRead(
+            id=banner.id,
+            image_path=banner.image_path,
+            image_url=banner.image_url,
+            target_type=banner.target_type,
+            target_id=banner.target_id,
+            external_url=banner.external_url,
+            promo_code=promo_code,
+            display_type=banner.display_type or BannerDisplayType.HORIZONTAL,
+            position=banner.position,
+        )
+
+    def _is_promo_public(self, promo_code: PromoCode, *, now: datetime) -> bool:
+        if not promo_code.is_active:
+            return False
+        if promo_code.starts_at is not None and self._as_utc(promo_code.starts_at) > now:
+            return False
+        return promo_code.ends_at is None or self._as_utc(promo_code.ends_at) > now
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    async def _invalidate_public_cache(self) -> None:
+        if self.cache is None:
+            return
+        await self.cache.delete_patterns(*banner_cache_patterns())

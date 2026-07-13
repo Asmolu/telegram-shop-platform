@@ -497,6 +497,26 @@ async def test_terminal_payment_transitions_are_rejected() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "terminal_status",
+    [
+        ManualPaymentStatus.APPROVED,
+        ManualPaymentStatus.REJECTED,
+        ManualPaymentStatus.EXPIRED,
+        ManualPaymentStatus.CANCELLED,
+    ],
+)
+async def test_terminal_payment_cannot_reenter_submitted(
+    terminal_status: ManualPaymentStatus,
+) -> None:
+    service, repository, _, _, _, _ = _service(with_payment=True)
+    repository.payments[1].status = terminal_status
+
+    with pytest.raises(AppError, match="can no longer be submitted"):
+        await service.submit(order_id=10, user_id=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "initial_status",
     [ManualPaymentStatus.PENDING, ManualPaymentStatus.SUBMITTED],
 )

@@ -190,11 +190,32 @@ Delivery state is recorded for observability and retry/debug decisions.
 
 Customer order, manual-payment, and return status popups are persisted in
 `customer_in_app_notifications`. They are an in-app channel and do not depend on Bot 1 chat
-state, Telegram write access, service opt-in, marketing opt-in, or the transactional outbox.
-The status change and its immutable title, message, payload, occurrence time, and stable source
-key are written in the same database transaction. A unique source key plus row locking on the
-status aggregate prevents repeated or concurrent application of the same status from creating
-duplicates.
+state, Telegram write access, service opt-in, or marketing opt-in. Their delivery does not use the
+transactional outbox, although order-transition deduplication reuses its persisted occurrence ID.
+The status change and its immutable title, message, payload, occurrence time, and durable source
+key are written in the same database transaction. Notification insertion uses PostgreSQL
+`INSERT ... ON CONFLICT DO NOTHING` targeted only at
+`uq_customer_in_app_notifications_source_key`; it does not catch unrelated integrity failures or
+roll back the shared service transaction.
+
+The enforced transition graphs are:
+
+- order: seller/admin correction may move between any of `NEW`, `PROCESSING`, `SHIPPED`,
+  `DELIVERED`, and `CANCELLED`, except that an order with a `PENDING` or `SUBMITTED` manual
+  payment must use the payment decision flow; a no-op status request is idempotent;
+- manual payment: `PENDING -> SUBMITTED`, and `PENDING|SUBMITTED -> APPROVED|REJECTED|EXPIRED`;
+  repeated requests for the current state are idempotent where exposed, terminal states cannot
+  leave, and `CANCELLED` currently has no mutation path;
+- return: `PENDING -> APPROVED|REJECTED|CANCELLED` and
+  `APPROVED -> COMPLETED|CANCELLED`; terminal states cannot leave.
+
+Orders therefore can re-enter a previously used status. Their source key includes the UUID of the
+persisted `order.status_changed` outbox occurrence. A linked order transition caused by a manual
+payment uses the persisted payment transition identity. Retries and concurrent duplicates are
+fenced by the aggregate row lock and do not create another occurrence, while a later genuine
+order re-entry receives a new persisted outbox identity and a new notification. Payment and return
+states cannot re-enter, so their entity/status source keys remain stable. A rollback removes the
+status, outbox/audit occurrence, and notification together and never reserves a source key.
 
 The authenticated Mini App API returns the current user's unseen rows oldest-first and marks one
 owned row seen idempotently. The global Mini App controller refreshes at startup, navigation,
@@ -207,9 +228,10 @@ Approved manual payments use the configured image snapshot and the larger paymen
 other supported status uses the standard layout. The legacy payment-success endpoints remain during
 rolling deployment: acknowledging through either API marks both the legacy order field and the new
 notification when it exists. When a previously approved, server-unseen legacy banner has no durable
-row, the new pending endpoint materializes only that pending legacy candidate with the same stable
-payment source key. Already-seen approvals are excluded, future approvals create their row directly,
-and the Mini App registers only the unified controller.
+row, the new pending endpoint atomically materializes only that pending legacy candidate with the
+same stable payment source key. Concurrent pending requests can create at most one row. Already-seen
+approvals are excluded, future approvals create their row directly, and the Mini App registers only
+the unified controller.
 
 ## Channel Entry Interaction
 

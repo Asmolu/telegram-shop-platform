@@ -243,3 +243,15 @@ For rollback, stop the new backend before downgrading the migration. A code roll
 leaves the outbox migrations applied is safe; the tables remain dormant. A database downgrade removes
 outbox history and notification source-event keys, so take and verify a production backup first.
 Never downgrade while the outbox worker is running.
+
+## Look Badge and In-App Notification Rollback
+
+The deployment order for revisions `20260712_0055` and `20260713_0056` remains backup, pull/build,
+`alembic upgrade head`, verify the current revision, and only then recreate the backend and frontend
+services. The new schema is additive: the Look badge columns are nullable or have a server default,
+and the notification table is independent, so the previous backend revision can remain on the
+forward schema during a code rollback.
+
+Prefer rolling application code back while retaining the forward database schema. Do not use an
+Alembic downgrade as the first production rollback action: downgrading `0056` deletes durable in-app
+notification history, and downgrading `0055` deletes Look badge configuration.

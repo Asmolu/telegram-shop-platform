@@ -1082,7 +1082,13 @@ def test_manual_sbp_payment_migration_and_model_contract() -> None:
     assert "stock_released_at" in content
     assert "ix_manual_payments_status_expires_at" in content
     assert SellerPaymentSettings.__table__.c.seller_phone_e164.nullable is True
-    assert ManualPayment.__table__.c.order_id.unique is True
+    assert "uq_manual_payments_order_id" in {
+        constraint.name for constraint in ManualPayment.__table__.constraints
+    }
+    assert ManualPayment.__table__.indexes
+    assert {
+        index.name: index.unique for index in ManualPayment.__table__.indexes
+    }["ix_manual_payments_order_id"] is False
     assert ManualPayment.__table__.c.receipt_image_path.type.length == 1024
 
 

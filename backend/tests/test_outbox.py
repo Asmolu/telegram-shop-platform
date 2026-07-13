@@ -2,6 +2,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -108,6 +109,7 @@ class CapturingOutbox:
 
     def enqueue(self, **values):
         self.events.append({**values, "business_committed": self.session.committed})
+        return SimpleNamespace(event_id=values.get("event_id") or uuid4())
 
 
 def _event(*, max_attempts: int = 3) -> OutboxEvent:

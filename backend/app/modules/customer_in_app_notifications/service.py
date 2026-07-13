@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 
 from fastapi import status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -35,6 +34,11 @@ from app.modules.customer_in_app_notifications.schemas import (
 )
 
 ORDER_COPY = {
+    OrderStatus.NEW: (
+        "Статус заказа обновлён",
+        "Заказ {number} получил статус «Новый».",
+        ActionMode.CONTINUE_ONLY,
+    ),
     OrderStatus.PROCESSING: (
         "Заказ принят в обработку",
         "Заказ {number} принят продавцом и готовится к отправке.",
@@ -100,13 +104,17 @@ class CustomerInAppNotificationsService:
         self.repository = CustomerInAppNotificationsRepository(session)
 
     async def create_order_status(
-        self, order: Order, *, occurred_at: datetime | None = None
+        self,
+        order: Order,
+        *,
+        source_key: str,
+        occurred_at: datetime | None = None,
     ) -> None:
         copy = ORDER_COPY.get(order.status)
         if copy is None:
             return
         title, message, action_mode = copy
-        self.repository.add(
+        await self.repository.insert_if_source_absent(
             CustomerInAppNotification(
                 user_id=order.user_id,
                 category=Category.ORDER,
@@ -118,7 +126,7 @@ class CustomerInAppNotificationsService:
                 message=message.format(number=order.order_number),
                 payload={"order_number": order.order_number, "order_status": order.status.value},
                 occurred_at=occurred_at or datetime.now(UTC),
-                source_key=f"order:{order.id}:{order.status.value}",
+                source_key=source_key,
             )
         )
 
@@ -163,7 +171,7 @@ class CustomerInAppNotificationsService:
                     "image_url": settings.public_upload_url_for(image_path) if image_path else None,
                 }
             )
-        self.repository.add(
+        await self.repository.insert_if_source_absent(
             CustomerInAppNotification(
                 user_id=payment.order.user_id,
                 category=Category.PAYMENT,
@@ -187,7 +195,7 @@ class CustomerInAppNotificationsService:
         if copy is None:
             return
         title, message = copy
-        self.repository.add(
+        await self.repository.insert_if_source_absent(
             CustomerInAppNotification(
                 user_id=return_request.user_id,
                 category=Category.RETURN,
@@ -212,12 +220,9 @@ class CustomerInAppNotificationsService:
         if not items:
             legacy_order = await self.repository.get_legacy_approved_order(user_id=user_id)
             if legacy_order and legacy_order.manual_payment:
-                try:
-                    await self.create_payment_status(legacy_order.manual_payment, legacy=True)
-                    await self.session.commit()
-                except IntegrityError:
-                    await self.session.rollback()
-                items = await self.repository.list_pending(user_id=user_id, limit=limit)
+                await self.create_payment_status(legacy_order.manual_payment, legacy=True)
+                await self.session.commit()
+            items = await self.repository.list_pending(user_id=user_id, limit=limit)
         return [CustomerInAppNotificationRead.model_validate(item) for item in items]
 
     async def mark_seen(

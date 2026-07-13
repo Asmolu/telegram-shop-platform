@@ -813,7 +813,11 @@ class ManualPaymentsService:
         payment.order.status = OrderStatus.PROCESSING
         await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
         if previous_order_status != payment.order.status:
-            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
+            await self.in_app_notifications.create_order_status(
+                payment.order,
+                occurred_at=now,
+                source_key=self._linked_order_source_key(payment),
+            )
         await self.audit_service.record_action(
             actor_user_id=actor_user_id,
             action="manual_payment.approved",
@@ -883,7 +887,11 @@ class ManualPaymentsService:
         payment.order.status = OrderStatus.CANCELLED
         await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
         if previous_order_status != payment.order.status:
-            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
+            await self.in_app_notifications.create_order_status(
+                payment.order,
+                occurred_at=now,
+                source_key=self._linked_order_source_key(payment),
+            )
         await self._release_stock(payment, now=now)
         await self.audit_service.record_action(
             actor_user_id=actor_user_id,
@@ -966,7 +974,11 @@ class ManualPaymentsService:
         payment.order.status = OrderStatus.CANCELLED
         await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
         if previous_order_status != payment.order.status:
-            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
+            await self.in_app_notifications.create_order_status(
+                payment.order,
+                occurred_at=now,
+                source_key=self._linked_order_source_key(payment),
+            )
         await self._release_stock(payment, now=now)
 
     async def _release_stock(self, payment: ManualPayment, *, now: datetime) -> None:
@@ -1048,6 +1060,13 @@ class ManualPaymentsService:
             aggregate_id=payment.id,
             payload=payload,
             consumers=consumers,
+        )
+
+    @staticmethod
+    def _linked_order_source_key(payment: ManualPayment) -> str:
+        return (
+            f"order:{payment.order.id}:{payment.order.status.value}:"
+            f"manual-payment:{payment.id}:{payment.status.value}"
         )
 
     def _event_payload(self, payment: ManualPayment) -> dict[str, object]:

@@ -20,6 +20,31 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# These PostgreSQL expression/partial indexes are intentionally owned by their
+# hand-written migrations. They cannot be represented portably in the shared
+# SQLite/PostgreSQL ORM metadata, so autogenerate must leave them intact.
+MIGRATION_MANAGED_INDEXES = {
+    "ix_products_description_trgm",
+    "ix_products_name_trgm",
+    "ix_products_search_aliases_trgm",
+    "ix_products_slug_trgm",
+    "uq_user_blocks_active_telegram_id",
+    "uq_user_blocks_active_user_id",
+    "uq_user_blocks_active_username",
+}
+
+
+def include_object(object_, name, type_, reflected, compare_to) -> bool:
+    del object_
+    if (
+        type_ == "index"
+        and reflected
+        and compare_to is None
+        and name in MIGRATION_MANAGED_INDEXES
+    ):
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -28,6 +53,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -39,6 +65,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():

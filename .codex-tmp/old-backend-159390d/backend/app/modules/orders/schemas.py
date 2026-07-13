@@ -1,0 +1,302 @@
+import re
+from datetime import datetime
+from decimal import Decimal
+
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import NoInspectionAvailable
+
+from app.db.models import OrderDeliveryMethod, OrderStatus, ProductSizeGrid
+from app.modules.manual_payments.schemas import ManualPaymentSummary
+
+
+class OrderCheckoutCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    contact_name: str = Field(min_length=1, max_length=255)
+    contact_phone: str = Field(min_length=1, max_length=32)
+    delivery_method: OrderDeliveryMethod
+    delivery_address: str = Field(min_length=1)
+    delivery_comment: str | None = None
+    height_cm: int = Field(gt=0, le=300)
+    weight_kg: Decimal = Field(gt=0, le=1000)
+    telegram_username: str | None = Field(default=None, max_length=255)
+    customer_comment: str | None = None
+    promo_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        validation_alias=AliasChoices("promo_code", "code"),
+    )
+
+    @field_validator("promo_code")
+    @classmethod
+    def normalize_promo_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip().upper()
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_legacy_measurements(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        values = dict(data)
+        comment = values.get("delivery_comment")
+        if not isinstance(comment, str):
+            return values
+        remaining: list[str] = []
+        for line in comment.splitlines():
+            height_match = re.fullmatch(r"\s*Рост:\s*([0-9]+)\s*", line, re.IGNORECASE)
+            weight_match = re.fullmatch(
+                r"\s*Вес:\s*([0-9]+(?:[.,][0-9]+)?)\s*", line, re.IGNORECASE
+            )
+            if height_match and "height_cm" not in values:
+                values["height_cm"] = height_match.group(1)
+            elif weight_match and "weight_kg" not in values:
+                values["weight_kg"] = weight_match.group(1).replace(",", ".")
+            else:
+                remaining.append(line)
+        values["delivery_comment"] = "\n".join(remaining)
+        return values
+
+    @field_validator("contact_name", "contact_phone", "delivery_address")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Поле обязательно для заполнения")
+        return value
+
+    @field_validator("delivery_comment", "telegram_username", "customer_comment")
+    @classmethod
+    def trim_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("telegram_username")
+    @classmethod
+    def normalize_telegram_username(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lstrip("@").strip()
+        return normalized or None
+
+
+class OrderStatusUpdate(BaseModel):
+    status: OrderStatus
+
+
+class OrderReturnEligibilitySummaryRead(BaseModel):
+    eligible: bool
+    reason_code: str | None = None
+    return_request_id: int | None = None
+    deadline_at: datetime | None = None
+
+
+class OrderItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    product_variant_id: int
+    product_name: str
+    variant_size: str
+    variant_size_grid: ProductSizeGrid = ProductSizeGrid.CLOTHING_ALPHA
+    variant_color: str | None = None
+    variant_sku: str
+    unit_price: Decimal
+    quantity: int
+    subtotal: Decimal
+    is_returnable: bool = True
+    product_brand: str | None = None
+    product_thumbnail_path: str | None = None
+    product_thumbnail_url: str | None = None
+    source_type: str | None = None
+    source_group_id: str | None = None
+    source_look_id: int | None = None
+    source_look_slug: str | None = None
+    source_look_title: str | None = None
+    source_look_image_url: str | None = None
+    created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_relation_derived_fields(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return data
+
+        product = _loaded_relationship(data, "product")
+        product_variant = _loaded_relationship(data, "product_variant")
+        thumbnail_path, thumbnail_url = _product_thumbnail(product)
+        variant_color = _read_attr(data, "variant_color")
+        if variant_color is None and product_variant is not None:
+            variant_color = _read_attr(product_variant, "color")
+        is_returnable = _read_attr(data, "is_returnable")
+
+        return {
+            "id": _read_attr(data, "id"),
+            "product_id": _read_attr(data, "product_id"),
+            "product_variant_id": _read_attr(data, "product_variant_id"),
+            "product_name": _read_attr(data, "product_name"),
+            "variant_size": _read_attr(data, "variant_size"),
+            "variant_size_grid": (
+                _read_attr(data, "variant_size_grid") or ProductSizeGrid.CLOTHING_ALPHA
+            ),
+            "variant_color": variant_color,
+            "variant_sku": _read_attr(data, "variant_sku"),
+            "unit_price": _read_attr(data, "unit_price"),
+            "quantity": _read_attr(data, "quantity"),
+            "subtotal": _read_attr(data, "subtotal"),
+            "is_returnable": is_returnable if is_returnable is not None else True,
+            "product_brand": _read_attr(product, "brand") if product is not None else None,
+            "product_thumbnail_path": thumbnail_path,
+            "product_thumbnail_url": thumbnail_url,
+            "source_type": _read_attr(data, "source_type"),
+            "source_group_id": _read_attr(data, "source_group_id"),
+            "source_look_id": _read_attr(data, "source_look_id"),
+            "source_look_slug": _read_attr(data, "source_look_slug"),
+            "source_look_title": _read_attr(data, "source_look_title"),
+            "source_look_image_url": _read_attr(data, "source_look_image_url"),
+            "created_at": _read_attr(data, "created_at"),
+        }
+
+    @computed_field
+    @property
+    def product_title(self) -> str:
+        return self.product_name
+
+    @computed_field
+    @property
+    def item_total(self) -> Decimal:
+        return self.subtotal
+
+
+class OrderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_number: str
+    user_id: int
+    status: OrderStatus
+    subtotal_amount: Decimal
+    discount_amount: Decimal
+    promo_code_id: int | None = None
+    promo_code_code: str | None = None
+    total_amount: Decimal
+    delivery_price: Decimal = Decimal("0.00")
+    contact_name: str
+    contact_phone: str
+    delivery_method: OrderDeliveryMethod | None = None
+    delivery_address: str
+    delivery_comment: str | None = None
+    manual_payment: ManualPaymentSummary | None = None
+    items: list[OrderItemRead]
+    delivered_at: datetime | None = None
+    return_eligibility: OrderReturnEligibilitySummaryRead | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    @computed_field
+    @property
+    def promo_code(self) -> str | None:
+        return self.promo_code_code
+
+    @computed_field
+    @property
+    def promo_applied(self) -> bool:
+        return self.promo_code_id is not None and self.discount_amount > Decimal("0.00")
+
+    @computed_field
+    @property
+    def subtotal(self) -> Decimal:
+        return self.subtotal_amount
+
+    @computed_field
+    @property
+    def discount(self) -> Decimal:
+        return self.discount_amount
+
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        return self.total_amount
+
+
+class OrderList(BaseModel):
+    items: list[OrderRead]
+
+
+class PaymentSuccessBannerPendingRead(BaseModel):
+    order_id: int
+    order_number: str
+    image_path: str
+    image_url: str
+    created_at: datetime
+    total_amount: Decimal
+    delivery_method: OrderDeliveryMethod | None = None
+    payment_status: str = "APPROVED"
+
+
+class PaymentSuccessBannerSeenRead(BaseModel):
+    order_id: int
+    seen_at: datetime
+
+
+def _loaded_relationship(instance: object | None, name: str) -> object | None:
+    if instance is None:
+        return None
+    try:
+        state = sa_inspect(instance)
+        if name in state.unloaded:
+            return None
+    except NoInspectionAvailable:
+        pass
+
+    try:
+        return getattr(instance, name)
+    except Exception:
+        return None
+
+
+def _read_attr(instance: object, name: str) -> object | None:
+    return getattr(instance, name, None)
+
+
+def _product_thumbnail(product: object | None) -> tuple[str | None, str | None]:
+    images = _loaded_relationship(product, "images")
+    if not images:
+        return None, None
+
+    ordered_images = sorted(
+        images,
+        key=lambda image: (
+            not bool(getattr(image, "is_primary", False)),
+            getattr(image, "position", 0),
+            getattr(image, "id", 0) or 0,
+        ),
+    )
+    image = ordered_images[0]
+    path = (
+        getattr(image, "thumbnail_path", None)
+        or getattr(image, "card_path", None)
+        or getattr(image, "file_path", None)
+    )
+    if not path:
+        return None, None
+    url = (
+        getattr(image, "thumbnail_url", None)
+        or getattr(image, "card_url", None)
+        or getattr(image, "url", f"/uploads/{path}")
+    )
+    return path, url
