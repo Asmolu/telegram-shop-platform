@@ -1,126 +1,14 @@
-# Backup and Restore
+# Резервное копирование и восстановление
 
-This document describes production backup and restore procedures for StyleXac.
+**Срез:** 13 июля 2026 года. Канонический runbook — [Operations Backup and Restore](operations/BACKUP_AND_RESTORE.md).
 
-## Production Context
+Целевой intent: ежедневный запуск в 04:00 Europe/Moscow; local retention 3 дня и максимум 20 копий; remote retention 14 дней и максимум 2; remote upload cadence 7. Механизм использует lock/state и обязательную restore verification. Конкретный pre-deploy backup подтвержден локально и успешно проверен восстановлением; remote upload для него был skipped по состоянию/политике. Это не подтверждает доступность всех последующих backup.
 
-| Area | Value |
-| --- | --- |
-| Server | Aeza Frankfurt |
-| SSH alias | `tsplatform-frankfurt` |
-| Project path | `/opt/telegram-shop` |
-| Compose file | `docker-compose.prod.yml` |
-| Env file | `backend/.env.production` |
-| Database service | `postgres` |
-| Upload storage | Docker volume mounted to backend uploads directory |
-
-## Backup Rule
-
-Run a backup before every Alembic migration and before any operation that could affect database or upload integrity.
-
-The scheduled production backup runs daily at 04:00 Moscow time through `telegram-shop-backup.timer`. Every run creates a local backup. Only every seventh successful local backup is uploaded to Yandex Disk.
-
-On production, use the systemd service:
-
+Production операции выполняются только через утвержденный service:
 ```bash
-ssh tsplatform-frankfurt
 sudo systemctl start telegram-shop-backup.service
 sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
+sudo journalctl -u telegram-shop-backup.service -n 120 --no-pager
 ```
 
-Do not run a bare Python backup command on production for normal operations. Use the service because it captures the production paths, env, permissions, logging, and operational wrapper expected on the server.
-
-## What Must Be Backed Up
-
-| Data | Why it matters |
-| --- | --- |
-| PostgreSQL database | Orders, users, subscriptions, catalog, coupons, campaigns, audit logs |
-| Uploads volume | Product images, banner images, campaign images, review images, payment receipts |
-| Deployment metadata | Commit, migration head, compose file identity |
-
-The production env file itself contains secrets and must be protected separately. Do not include raw env values in shared backup reports.
-
-## Backup Telegram Notifications
-
-When `BACKUP_TELEGRAM_NOTIFICATIONS_ENABLED=true`, the standalone backup script sends success/failure messages with `TELEGRAM_BOT_TOKEN` to `TELEGRAM_BACKUP_CHAT_ID`. If `TELEGRAM_BACKUP_CHAT_ID` is not set, `TELEGRAM_SELLER_CHAT_ID` is accepted only as a legacy migration fallback.
-
-Backups do not use `TELEGRAM_ORDERS_CHAT_ID` or `TELEGRAM_RETURNS_CHAT_ID`.
-
-Every scheduled backup sends a Telegram notification. It includes the backup id, local backup status, remote upload status (`skipped`, `sent`, or `failed`), restore verification status, archive size, local cleanup count, and remote cleanup count.
-
-## Pre-Migration Backup
-
-```bash
-ssh tsplatform-frankfurt
-cd /opt/telegram-shop
-git status --short
-sudo systemctl start telegram-shop-backup.service
-sudo systemctl status telegram-shop-backup.service --no-pager
-sudo journalctl -u telegram-shop-backup.service -n 160 --no-pager
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml run --rm backend alembic current
-```
-
-Expected current production migration after the latest deploy:
-
-```text
-20260703_0047
-```
-
-The service can run for several minutes. Yandex Disk upload may timeout and retry. A remote upload failure does not by itself make a verified local backup unusable; check the notification and journal for `Remote upload status: failed`. The next daily run retries the pending seventh remote upload instead of waiting for a new seven-backup cycle.
-
-## Restore Principles
-
-1. Stop and identify the incident scope.
-2. Preserve the broken state long enough to diagnose whether restore is needed.
-3. Confirm the backup timestamp, database revision, and upload archive identity.
-4. Prefer forward-fix when a migration has already changed customer data in a way that cannot be safely downgraded.
-5. Restore database and uploads as a matched set when file paths changed.
-6. Do not print secrets while verifying restore commands.
-
-## Restore Checklist
-
-Before restore:
-
-- confirm affected domains
-- confirm affected services
-- record current commit
-- record `alembic current`
-- record `docker compose ps`
-- identify the backup to restore
-- confirm whether new orders or uploads happened after the backup
-- get explicit approval for data loss if restoring to an older state
-
-After restore:
-
-- run `alembic current`
-- run API health check
-- open Mini App
-- open Seller Panel
-- verify uploads render
-- verify order/customer notification pages load
-- inspect backend logs
-
-## Health Checks After Restore
-
-```bash
-curl -sS -D - https://api.stylexac.ru/health -o /dev/null
-curl -I https://mini.stylexac.ru/
-curl -I https://seller.stylexac.ru/
-```
-
-## Log Checks After Restore
-
-```bash
-cd /opt/telegram-shop
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=250 backend
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 mini-app
-docker compose --env-file backend/.env.production -f docker-compose.prod.yml logs --tail=120 seller-panel
-```
-
-## Sensitive Data Rules
-
-- Do not store backups in a public bucket.
-- Do not paste backup archive names if they reveal private infrastructure naming.
-- Do not paste `backend/.env.production`.
-- Do not include DB passwords, bot tokens, JWT secrets, Yandex Disk tokens, or private keys in restore notes.
+Не публиковать пути с credentials, dumps и содержимое пользовательских данных. Repository template с `/opt/TelegramShopPlatform` не устанавливать verbatim: текущий production path — `/opt/telegram-shop`. Восстановление репетируется в изолированной БД; RPO/RTO подтверждаются drill evidence.
