@@ -371,6 +371,7 @@ function cartFixture(): Cart {
           compare_at_price: null,
           size_grid: 'clothing_alpha',
           status: 'ACTIVE',
+          is_returnable: true,
           image_url: '/uploads/products/card.webp',
           thumbnail_image_url: '/uploads/products/thumb.webp',
         },

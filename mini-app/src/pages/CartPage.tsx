@@ -708,6 +708,11 @@ function CartItemsTab({
                 <small className="cart-item__variant">{variantInfo}</small>
                 {unavailable ? <em>Проверьте наличие</em> : null}
                 <small className="cart-item__delivery">Доступно к оформлению</small>
+                <small
+                  className={`cart-item__returnability cart-item__returnability--${item.product.is_returnable ? 'returnable' : 'nonreturnable'}`}
+                >
+                  {item.product.is_returnable ? 'Возвратный товар' : 'Невозвратный товар'}
+                </small>
               </div>
               <div className="cart-item__actions">
                 <div

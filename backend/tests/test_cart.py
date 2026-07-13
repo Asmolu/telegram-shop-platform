@@ -149,10 +149,23 @@ async def test_add_item() -> None:
     assert cart.items[0].source_look_title is None
     assert cart.items[0].source_look_image_url is None
     assert cart.items[0].product.size_grid == ProductSizeGrid.CLOTHING_ALPHA
+    assert cart.items[0].product.is_returnable is True
     assert cart.items[0].subtotal == Decimal("119.80")
     assert cart.total == Decimal("119.80")
     assert cart.selected_total == Decimal("119.80")
     assert cart.selected_quantity_total == 2
+
+
+@pytest.mark.asyncio
+async def test_cart_exposes_nonreturnable_product() -> None:
+    service, _ = _cart_service(product_is_returnable=False)
+
+    cart = await service.add_item(
+        1,
+        CartItemCreate(product_id=1, product_variant_id=1, quantity=1),
+    )
+
+    assert cart.items[0].product.is_returnable is False
 
 
 @pytest.mark.asyncio

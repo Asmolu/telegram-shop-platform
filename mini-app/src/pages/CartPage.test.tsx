@@ -187,6 +187,18 @@ describe('CartPage compact favorites', () => {
     expect(routerMocks.navigate).toHaveBeenCalledWith('/product/20');
   });
 
+  it('shows returnability for a regular cart item', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=cart');
+    vi.mocked(getCart).mockResolvedValueOnce(cartWithSelectedItemFixture());
+
+    render(<CartPage />);
+
+    const item = (await screen.findByText('Compact Hoodie')).closest('.cart-item') as HTMLElement;
+    const label = within(item).getByText('Возвратный товар');
+
+    expect(label.classList.contains('cart-item__returnability--returnable')).toBe(true);
+  });
+
   it('does not open product detail from cart item controls', async () => {
     routerMocks.searchParams = new URLSearchParams('tab=cart');
     const cart = cartWithSelectedItemFixture();
@@ -245,6 +257,8 @@ describe('CartPage compact favorites', () => {
     expect(document.querySelectorAll('.cart-item')).toHaveLength(3);
 
     const groupedItem = screen.getByText('Look Shirt').closest('.cart-item') as HTMLElement;
+    const returnability = within(groupedItem).getByText('Невозвратный товар');
+    expect(returnability.classList.contains('cart-item__returnability--nonreturnable')).toBe(true);
     fireEvent.click(within(groupedItem).getByRole('button', { name: 'Удалить' }));
 
     await waitFor(() => expect(removeCartItem).toHaveBeenCalledWith(11));
@@ -371,6 +385,7 @@ function cartWithSelectedItemFixture() {
         compare_at_price: null,
         size_grid: 'clothing_alpha' as const,
         status: 'ACTIVE' as const,
+        is_returnable: true,
         image_url: null,
         thumbnail_image_url: null,
       },
@@ -415,6 +430,7 @@ function cartWithLookGroupFixture() {
           id: 21,
           name: 'Look Shirt',
           slug: 'look-shirt',
+          is_returnable: false,
         },
         product_variant: {
           ...normalCart.items[0].product_variant,

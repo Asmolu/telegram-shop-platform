@@ -3140,6 +3140,19 @@ label {
   font-weight: 800;
 }
 
+.cart-item .cart-item__returnability {
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.cart-item .cart-item__returnability--returnable {
+  color: var(--success-text);
+}
+
+.cart-item .cart-item__returnability--nonreturnable {
+  color: var(--danger);
+}
+
 .cart-item__actions {
   grid-area: actions;
   display: grid;
@@ -5502,7 +5515,12 @@ label {
   }
 
   .cart-item__actions {
-    grid-template-columns: minmax(96px, 1fr) minmax(82px, 0.78fr);
+    grid-template-columns: minmax(102px, 1fr) minmax(64px, 0.7fr);
+  }
+
+  .cart-item__buy-button {
+    padding-right: 6px;
+    padding-left: 6px;
   }
 
   .order-detail-item {

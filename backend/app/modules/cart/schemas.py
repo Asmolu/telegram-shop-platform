@@ -36,6 +36,7 @@ class CartProductRead(BaseModel):
     old_price: Decimal | None = None
     size_grid: ProductSizeGrid
     status: ProductStatus
+    is_returnable: bool
     image_url: str | None = None
     thumbnail_image_url: str | None = None
 

@@ -363,6 +363,7 @@ export type CartProduct = {
   compare_at_price?: string | null;
   size_grid: ProductSizeGrid;
   status: ProductStatus;
+  is_returnable: boolean;
   image_url?: string | null;
   thumbnail_image_url?: string | null;
 };
