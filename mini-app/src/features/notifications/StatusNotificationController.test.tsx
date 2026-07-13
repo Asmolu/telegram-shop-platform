@@ -1,8 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import appSource from '../../App.tsx?raw';
 import { StatusNotificationController } from './StatusNotificationController';
 
 const api = vi.hoisted(() => ({ pending: vi.fn(), seen: vi.fn(), contacts: vi.fn() }));
@@ -77,7 +76,6 @@ describe('StatusNotificationController', () => {
   });
 
   it('is the only global status controller mounted by App', () => {
-    const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
     expect(appSource.match(/<StatusNotificationController\s*\/>/g)).toHaveLength(1);
     expect(appSource).not.toContain('<PaymentSuccessBannerController');
   });
