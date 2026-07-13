@@ -31,6 +31,7 @@ from app.events.names import (
     MANUAL_PAYMENT_SUBMITTED,
 )
 from app.modules.audit.service import AuditService, NoopAuditService
+from app.modules.customer_in_app_notifications.service import notification_service_for_session
 from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
 from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.phone import normalize_russian_phone
@@ -445,6 +446,7 @@ class ManualPaymentsService:
         self.storage = storage or self.uploads_service.storage
         self.idempotency_service = idempotency_service or IdempotencyService(session)
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
+        self.in_app_notifications = notification_service_for_session(session)
 
     async def get_settings(self) -> SellerPaymentSettingsRead:
         payment_settings = await self.repository.get_settings()
@@ -595,6 +597,7 @@ class ManualPaymentsService:
 
         payment.status = ManualPaymentStatus.SUBMITTED
         payment.submitted_at = payment.submitted_at or now
+        await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
         payment_id = payment.id
         response = self._payment_response(payment, server_now=now)
         self.idempotency_service.complete(
@@ -803,10 +806,14 @@ class ManualPaymentsService:
             raise AppError("Payment cannot be approved", status.HTTP_409_CONFLICT)
 
         before_status = payment.status
+        previous_order_status = payment.order.status
         payment.status = ManualPaymentStatus.APPROVED
         payment.approved_at = now
         payment.approved_by_user_id = actor_user_id
         payment.order.status = OrderStatus.PROCESSING
+        await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
+        if previous_order_status != payment.order.status:
+            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
         await self.audit_service.record_action(
             actor_user_id=actor_user_id,
             action="manual_payment.approved",
@@ -868,11 +875,15 @@ class ManualPaymentsService:
             raise AppError("Payment cannot be rejected", status.HTTP_409_CONFLICT)
 
         before_status = payment.status
+        previous_order_status = payment.order.status
         payment.status = ManualPaymentStatus.REJECTED
         payment.rejected_at = now
         payment.rejected_by_user_id = actor_user_id
         payment.reject_reason = reject_reason
         payment.order.status = OrderStatus.CANCELLED
+        await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
+        if previous_order_status != payment.order.status:
+            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
         await self._release_stock(payment, now=now)
         await self.audit_service.record_action(
             actor_user_id=actor_user_id,
@@ -950,8 +961,12 @@ class ManualPaymentsService:
         return True
 
     async def _mark_expired(self, payment: ManualPayment, *, now: datetime) -> None:
+        previous_order_status = payment.order.status
         payment.status = ManualPaymentStatus.EXPIRED
         payment.order.status = OrderStatus.CANCELLED
+        await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
+        if previous_order_status != payment.order.status:
+            await self.in_app_notifications.create_order_status(payment.order, occurred_at=now)
         await self._release_stock(payment, now=now)
 
     async def _release_stock(self, payment: ManualPayment, *, now: datetime) -> None:

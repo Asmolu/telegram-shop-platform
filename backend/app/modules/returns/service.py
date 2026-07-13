@@ -27,6 +27,7 @@ from app.db.models import (
     ReturnRequestItem,
     ReturnRequestStatus,
 )
+from app.modules.customer_in_app_notifications.service import notification_service_for_session
 from app.modules.returns.repository import ReturnsRepository
 from app.modules.returns.schemas import (
     ReturnDecisionRequest,
@@ -233,6 +234,7 @@ class ReturnsService:
         self.seller_notifier = seller_notifier or TelegramReturnSellerNotifier()
         self.now_factory = now_factory or (lambda: datetime.now(UTC))
         self.users_service = users_service or UsersService(session)
+        self.in_app_notifications = notification_service_for_session(session)
 
     async def get_return_eligibility(
         self,
@@ -411,6 +413,7 @@ class ReturnsService:
             actor_user_id=user_id,
             comment=payload.comment,
         )
+        await self.in_app_notifications.create_return_status(return_request)
         await self._commit("Return request cancellation failed")
         return await self._read_updated(return_request_id)
 
@@ -435,6 +438,7 @@ class ReturnsService:
             actor_user_id=actor_user_id,
             comment=payload.comment,
         )
+        await self.in_app_notifications.create_return_status(return_request)
         await self._commit("Return request completion failed")
         return await self._read_updated(return_request_id)
 
@@ -487,6 +491,7 @@ class ReturnsService:
                     actor_user_id=actor_user_id,
                     comment=payload.comment,
                 )
+                await self.in_app_notifications.create_return_status(return_request)
 
             await self._commit("Return request processing failed")
         except AppError:
@@ -519,6 +524,7 @@ class ReturnsService:
             actor_user_id=actor_user_id,
             comment=payload.comment,
         )
+        await self.in_app_notifications.create_return_status(return_request)
         await self._commit("Return request cancellation failed")
         return await self._read_updated(return_request_id)
 
@@ -651,6 +657,7 @@ class ReturnsService:
         return_request.decided_at = self._now()
         return_request.decided_by_user_id = actor_user_id
         return_request.decision_comment = payload.decision_comment
+        await self.in_app_notifications.create_return_status(return_request)
         await self._commit("Return request decision failed")
 
         return await self._read_updated(return_request_id)

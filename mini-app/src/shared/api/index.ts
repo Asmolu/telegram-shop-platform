@@ -20,6 +20,8 @@ import type {
   OrderList,
   PaymentSuccessBannerPending,
   PaymentSuccessBannerSeen,
+  CustomerInAppNotification,
+  CustomerInAppNotificationSeen,
   PersonalData,
   PersonalDataUpdate,
   Product,
@@ -301,6 +303,21 @@ export function markPaymentSuccessBannerSeen(orderId: number) {
       networkImpact: 'local',
       retry: false,
     },
+  );
+}
+
+export function getPendingCustomerInAppNotifications(options: ApiRequestOptions = {}) {
+  return apiRequest<CustomerInAppNotification[]>('/customer-in-app-notifications/pending', {
+    ...options,
+    query: { limit: 20 },
+    networkImpact: options.networkImpact ?? 'local',
+  });
+}
+
+export function markCustomerInAppNotificationSeen(notificationId: number) {
+  return apiRequest<CustomerInAppNotificationSeen>(
+    `/customer-in-app-notifications/${notificationId}/seen`,
+    { method: 'POST', networkImpact: 'local', retry: false },
   );
 }
 

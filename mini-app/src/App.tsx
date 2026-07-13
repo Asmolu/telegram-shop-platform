@@ -8,7 +8,7 @@ import { ThemeProvider } from './shared/theme/ThemeProvider';
 import { getConnectionTelemetry, getViewportTelemetry, normalizeRoute, trackTelemetry } from './shared/telemetry';
 import { AppErrorBoundary } from './shared/ui/AppErrorBoundary';
 import { AppShell, TopBar } from './shared/ui/AppShell';
-import { PaymentSuccessBannerController } from './features/orders/PaymentSuccessBannerController';
+import { StatusNotificationController } from './features/notifications/StatusNotificationController';
 
 const routeLoaders = {
   launch: () => import('./pages/LaunchPage').then((module) => ({ default: module.LaunchPage })),
@@ -152,7 +152,7 @@ export function App() {
           <NetworkProvider>
             <AuthProvider>
               <RouteSwitch />
-              <PaymentSuccessBannerController />
+              <StatusNotificationController />
             </AuthProvider>
           </NetworkProvider>
         </RouterProvider>

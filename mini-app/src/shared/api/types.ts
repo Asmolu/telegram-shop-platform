@@ -518,6 +518,39 @@ export type PaymentSuccessBannerSeen = {
   seen_at: string;
 };
 
+export type CustomerInAppNotification = {
+  id: number;
+  category: 'order' | 'payment' | 'return';
+  event_code: string;
+  variant: 'standard' | 'approved_payment';
+  action_mode: 'continue_only' | 'continue_with_contacts';
+  order_id: number | null;
+  manual_payment_id: number | null;
+  return_request_id: number | null;
+  title: string;
+  message: string;
+  payload: {
+    order_number?: string;
+    order_status?: OrderStatus;
+    payment_status?: ManualPaymentStatus;
+    return_number?: string;
+    return_status?: ReturnRequestStatus;
+    total_amount?: string;
+    delivery_method?: OrderDeliveryMethod | null;
+    order_created_at?: string;
+    image_path?: string | null;
+    image_url?: string | null;
+    legacy?: boolean;
+  };
+  occurred_at: string;
+  created_at: string;
+};
+
+export type CustomerInAppNotificationSeen = {
+  id: number;
+  seen_at: string;
+};
+
 export type ReturnRequestStatus =
   | 'PENDING'
   | 'APPROVED'

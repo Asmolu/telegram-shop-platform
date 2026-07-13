@@ -29,6 +29,7 @@ from app.events.payloads import (
 )
 from app.modules.analytics.service import AnalyticsTracker
 from app.modules.audit.service import AuditService, NoopAuditService
+from app.modules.customer_in_app_notifications.service import notification_service_for_session
 from app.modules.customer_notifications.service import CustomerServiceNotificationEventPublisher
 from app.modules.idempotency.service import IdempotencyClaim, IdempotencyService
 from app.modules.manual_payments.service import ManualPaymentsService
@@ -130,6 +131,7 @@ class OrdersService:
         self.idempotency_service = idempotency_service or IdempotencyService(session)
         self.users_service = users_service or UsersService(session)
         self.returns_service = returns_service or ReturnsService(session, now_factory=now_factory)
+        self.in_app_notifications = notification_service_for_session(session)
 
     async def checkout_current_user_cart(
         self,
@@ -401,6 +403,11 @@ class OrdersService:
 
         if order.payment_success_banner_seen_at is None:
             order.payment_success_banner_seen_at = datetime.now(UTC)
+            assert order.manual_payment is not None
+            await self.in_app_notifications.mark_legacy_source_seen(
+                payment_id=order.manual_payment.id,
+                seen_at=order.payment_success_banner_seen_at,
+            )
             try:
                 await self.session.commit()
             except IntegrityError as exc:
@@ -422,7 +429,10 @@ class OrdersService:
         payload: OrderStatusUpdate,
         actor_user_id: int | None = None,
     ) -> OrderRead:
-        order = await self.repository.get_by_id(order_id)
+        if isinstance(self.repository, OrdersRepository):
+            order = await self.repository.get_by_id(order_id, for_update=True)
+        else:
+            order = await self.repository.get_by_id(order_id)
         if order is None:
             raise AppError("Order not found", status.HTTP_404_NOT_FOUND)
 
@@ -443,6 +453,7 @@ class OrdersService:
             order.delivered_at = datetime.now(UTC)
         post_commit_events: list[tuple[str, dict[str, object]]] = []
         if previous_status != order.status:
+            await self.in_app_notifications.create_order_status(order)
             await self.audit_service.record_action(
                 actor_user_id=actor_user_id,
                 action="order.status_changed",

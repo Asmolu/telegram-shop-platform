@@ -156,6 +156,22 @@ class ReturnRequestStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class CustomerInAppNotificationCategory(StrEnum):
+    ORDER = "order"
+    PAYMENT = "payment"
+    RETURN = "return"
+
+
+class CustomerInAppNotificationVariant(StrEnum):
+    STANDARD = "standard"
+    APPROVED_PAYMENT = "approved_payment"
+
+
+class CustomerInAppNotificationActionMode(StrEnum):
+    CONTINUE_ONLY = "continue_only"
+    CONTINUE_WITH_CONTACTS = "continue_with_contacts"
+
+
 class ReturnRefundStatus(StrEnum):
     PENDING = "PENDING"
     RECORDED = "RECORDED"
@@ -1962,6 +1978,77 @@ class ManualPayment(Base):
     )
 
     order: Mapped[Order] = relationship(back_populates="manual_payment")
+
+
+class CustomerInAppNotification(Base):
+    __tablename__ = "customer_in_app_notifications"
+    __table_args__ = (
+        UniqueConstraint("source_key", name="uq_customer_in_app_notifications_source_key"),
+        Index(
+            "ix_customer_in_app_notifications_user_unseen",
+            "user_id",
+            "seen_at",
+            "occurred_at",
+            "id",
+        ),
+        Index(
+            "ix_customer_in_app_notifications_user_chronological",
+            "user_id",
+            "occurred_at",
+            "id",
+        ),
+        Index("ix_customer_in_app_notifications_order_id", "order_id"),
+        Index("ix_customer_in_app_notifications_payment_id", "manual_payment_id"),
+        Index("ix_customer_in_app_notifications_return_id", "return_request_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    category: Mapped[CustomerInAppNotificationCategory] = mapped_column(
+        Enum(
+            CustomerInAppNotificationCategory,
+            name="customer_in_app_notification_category",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    event_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    variant: Mapped[CustomerInAppNotificationVariant] = mapped_column(
+        Enum(
+            CustomerInAppNotificationVariant,
+            name="customer_in_app_notification_variant",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    action_mode: Mapped[CustomerInAppNotificationActionMode] = mapped_column(
+        Enum(
+            CustomerInAppNotificationActionMode,
+            name="customer_in_app_notification_action_mode",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+    )
+    manual_payment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("manual_payments.id", ondelete="SET NULL"), nullable=True
+    )
+    return_request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("return_requests.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class ProductImage(Base):

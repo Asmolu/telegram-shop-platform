@@ -116,12 +116,11 @@ class OrdersRepository:
         )
         return list(result.scalars())
 
-    async def get_by_id(self, order_id: int) -> Order | None:
-        result = await self.session.execute(
-            select(Order)
-            .options(*self._order_detail_loads())
-            .where(Order.id == order_id)
-        )
+    async def get_by_id(self, order_id: int, *, for_update: bool = False) -> Order | None:
+        query = select(Order).options(*self._order_detail_loads()).where(Order.id == order_id)
+        if for_update:
+            query = query.with_for_update()
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def get_for_user(self, *, user_id: int, order_id: int) -> Order | None:

@@ -186,6 +186,31 @@ Current service notifications can use:
 
 Delivery state is recorded for observability and retry/debug decisions.
 
+## Durable Mini App Status Notifications
+
+Customer order, manual-payment, and return status popups are persisted in
+`customer_in_app_notifications`. They are an in-app channel and do not depend on Bot 1 chat
+state, Telegram write access, service opt-in, marketing opt-in, or the transactional outbox.
+The status change and its immutable title, message, payload, occurrence time, and stable source
+key are written in the same database transaction. A unique source key plus row locking on the
+status aggregate prevents repeated or concurrent application of the same status from creating
+duplicates.
+
+The authenticated Mini App API returns the current user's unseen rows oldest-first and marks one
+owned row seen idempotently. The global Mini App controller refreshes at startup, navigation,
+focus, visible-state restoration, and a restrained visible-only poll; it displays and acknowledges
+one item at a time. PostgreSQL `seen_at` is authoritative. Local storage is read only to reconcile
+legacy approved-payment banners that a previous client dismissed before its server acknowledgement
+succeeded.
+
+Approved manual payments use the configured image snapshot and the larger payment layout. Every
+other supported status uses the standard layout. The legacy payment-success endpoints remain during
+rolling deployment: acknowledging through either API marks both the legacy order field and the new
+notification when it exists. When a previously approved, server-unseen legacy banner has no durable
+row, the new pending endpoint materializes only that pending legacy candidate with the same stable
+payment source key. Already-seen approvals are excluded, future approvals create their row directly,
+and the Mini App registers only the unified controller.
+
 ## Channel Entry Interaction
 
 Channel entry users may authenticate in the Mini App through `initData`, which creates or updates a backend `User`. That does not create a real private Bot 1 chat.
