@@ -598,6 +598,8 @@ class ManualPaymentsService:
         payment.status = ManualPaymentStatus.SUBMITTED
         payment.submitted_at = payment.submitted_at or now
         await self.in_app_notifications.create_payment_status(payment, occurred_at=now)
+        await self.session.flush()
+        await self.session.refresh(payment, attribute_names=["updated_at"])
         payment_id = payment.id
         response = self._payment_response(payment, server_now=now)
         self.idempotency_service.complete(

@@ -43,17 +43,28 @@ class DummySession:
     def __init__(self) -> None:
         self.commit_count = 0
         self.rollback_count = 0
+        self.operations: list[str] = []
         self.on_commit: Callable[[], None] | None = None
 
     async def commit(self) -> None:
         self.commit_count += 1
+        self.operations.append("commit")
         if self.on_commit is not None:
             self.on_commit()
 
     async def rollback(self) -> None:
         self.rollback_count += 1
 
-    async def refresh(self, _: object) -> None:
+    async def flush(self) -> None:
+        self.operations.append("flush")
+
+    async def refresh(
+        self,
+        _: object,
+        attribute_names: list[str] | None = None,
+    ) -> None:
+        refreshed = ",".join(attribute_names or ("all",))
+        self.operations.append(f"refresh:{refreshed}")
         return None
 
 
@@ -406,6 +417,7 @@ async def test_submit_is_owner_only_and_idempotent() -> None:
     assert first.status == ManualPaymentStatus.SUBMITTED
     assert second.submitted_at == first.submitted_at
     assert session.commit_count == 1
+    assert session.operations == ["flush", "refresh:updated_at", "commit"]
     assert repository.populate_existing_ids == [1]
     assert [event[0] for event in events.events] == [MANUAL_PAYMENT_SUBMITTED]
 

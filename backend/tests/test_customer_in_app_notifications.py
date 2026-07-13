@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import UUID
@@ -18,6 +18,7 @@ from app.db.models import (
     CustomerInAppNotificationActionMode,
     CustomerInAppNotificationCategory,
     CustomerInAppNotificationVariant,
+    IdempotencyRecord,
     ManualPayment,
     ManualPaymentCurrency,
     ManualPaymentMethod,
@@ -29,6 +30,7 @@ from app.db.models import (
     ReturnRequestStatus,
     User,
 )
+from app.events.names import MANUAL_PAYMENT_SUBMITTED
 from app.modules.audit.service import AuditService
 from app.modules.customer_in_app_notifications.service import CustomerInAppNotificationsService
 from app.modules.manual_payments.service import ManualPaymentsService
@@ -539,6 +541,207 @@ async def test_postgres_new_approved_payment_creates_one_transactional_notificat
             )
     finally:
         async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.parametrize(
+    ("telegram_id", "order_number", "receipt_image_path"),
+    (
+        (99005610, "ORD-99005610", "payment_receipts/keep.png"),
+        (99005611, "ORD-99005611", None),
+    ),
+)
+@pytest.mark.asyncio
+async def test_postgres_manual_payment_submission_serializes_persisted_timestamp_once(
+    telegram_id: int,
+    order_number: str,
+    receipt_image_path: str | None,
+) -> None:
+    assert POSTGRES_URL is not None
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    payment_id: int | None = None
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, order_number)
+            session.add(db_order)
+            await session.flush()
+            payment = ManualPayment(
+                order_id=db_order.id,
+                method=ManualPaymentMethod.SBP_PHONE,
+                amount=db_order.total_amount,
+                currency=ManualPaymentCurrency.RUB,
+                seller_phone_e164="+79990000000",
+                seller_phone_display="+7 999 000-00-00",
+                payment_comment=order_number,
+                status=ManualPaymentStatus.PENDING,
+                receipt_image_path=receipt_image_path,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+            session.add(payment)
+            await session.commit()
+            payment_id = payment.id
+            order_id = db_order.id
+            user_id = user.id
+
+        idempotency_key = f"payment-submit-{telegram_id}"
+        async with sessions() as session:
+            service = ManualPaymentsService(session)
+            first = await service.submit(
+                order_id=order_id,
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+            )
+            replayed = await service.submit(
+                order_id=order_id,
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+            )
+            repeated = await service.submit(order_id=order_id, user_id=user_id)
+
+        assert first.status == ManualPaymentStatus.SUBMITTED
+        assert first.submitted_at is not None
+        assert first.updated_at is not None
+        assert first.receipt_image_path == receipt_image_path
+        assert replayed == first
+        assert repeated.submitted_at == first.submitted_at
+        assert repeated.updated_at == first.updated_at
+
+        async with sessions() as session:
+            stored = await session.get(ManualPayment, payment_id)
+            assert stored is not None
+            assert stored.status == ManualPaymentStatus.SUBMITTED
+            assert stored.submitted_at == first.submitted_at
+            assert stored.updated_at == first.updated_at
+            assert stored.receipt_image_path == receipt_image_path
+            assert await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.source_key
+                    == f"payment:{payment_id}:SUBMITTED"
+                )
+            ) == 1
+            assert await session.scalar(
+                select(func.count(OutboxEvent.id)).where(
+                    OutboxEvent.aggregate_type == "manual_payment",
+                    OutboxEvent.aggregate_id == str(payment_id),
+                    OutboxEvent.event_name == MANUAL_PAYMENT_SUBMITTED,
+                )
+            ) == 1
+            idempotency = await session.scalar(
+                select(IdempotencyRecord).where(
+                    IdempotencyRecord.user_id == user_id,
+                    IdempotencyRecord.scope == "manual_payments.submit",
+                    IdempotencyRecord.key == idempotency_key,
+                )
+            )
+            assert idempotency is not None
+            assert idempotency.status == "SUCCEEDED"
+            assert idempotency.response_body == first.model_dump(mode="json")
+    finally:
+        async with sessions() as session:
+            if payment_id is not None:
+                await session.execute(
+                    delete(OutboxEvent).where(
+                        OutboxEvent.aggregate_type == "manual_payment",
+                        OutboxEvent.aggregate_id == str(payment_id),
+                    )
+                )
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
+@pytest.mark.asyncio
+async def test_postgres_manual_payment_submission_commit_failure_rolls_back_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert POSTGRES_URL is not None
+    engine = create_async_engine(POSTGRES_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    telegram_id = 99005612
+    payment_id: int | None = None
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions() as session:
+            await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            db_order = _db_order(user.id, "ORD-99005612")
+            session.add(db_order)
+            await session.flush()
+            payment = ManualPayment(
+                order_id=db_order.id,
+                method=ManualPaymentMethod.SBP_PHONE,
+                amount=db_order.total_amount,
+                currency=ManualPaymentCurrency.RUB,
+                seller_phone_e164="+79990000000",
+                seller_phone_display="+7 999 000-00-00",
+                payment_comment="ORD-99005612",
+                status=ManualPaymentStatus.PENDING,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+            session.add(payment)
+            await session.commit()
+            payment_id = payment.id
+            order_id = db_order.id
+            user_id = user.id
+
+        async with sessions() as session:
+            async def fail_commit() -> None:
+                raise RuntimeError("forced commit failure")
+
+            monkeypatch.setattr(session, "commit", fail_commit)
+            with pytest.raises(RuntimeError, match="forced commit failure"):
+                await ManualPaymentsService(session).submit(
+                    order_id=order_id,
+                    user_id=user_id,
+                    idempotency_key="payment-submit-99005612",
+                )
+
+        async with sessions() as session:
+            stored = await session.get(ManualPayment, payment_id)
+            assert stored is not None
+            assert stored.status == ManualPaymentStatus.PENDING
+            assert stored.submitted_at is None
+            assert await session.scalar(
+                select(func.count(CustomerInAppNotification.id)).where(
+                    CustomerInAppNotification.manual_payment_id == payment_id
+                )
+            ) == 0
+            assert await session.scalar(
+                select(func.count(OutboxEvent.id)).where(
+                    OutboxEvent.aggregate_type == "manual_payment",
+                    OutboxEvent.aggregate_id == str(payment_id),
+                )
+            ) == 0
+            assert await session.scalar(
+                select(func.count(IdempotencyRecord.id)).where(
+                    IdempotencyRecord.user_id == user_id,
+                    IdempotencyRecord.scope == "manual_payments.submit",
+                    IdempotencyRecord.key == "payment-submit-99005612",
+                )
+            ) == 0
+    finally:
+        async with sessions() as session:
+            if payment_id is not None:
+                await session.execute(
+                    delete(OutboxEvent).where(
+                        OutboxEvent.aggregate_type == "manual_payment",
+                        OutboxEvent.aggregate_id == str(payment_id),
+                    )
+                )
             await session.execute(delete(User).where(User.telegram_id == telegram_id))
             await session.commit()
         await engine.dispose()
