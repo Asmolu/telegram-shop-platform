@@ -105,7 +105,7 @@ export function StatusNotificationController() {
   return (
     <div className="status-notification-overlay" onMouseDown={(event) => event.stopPropagation()}>
       <section
-        aria-describedby="status-notification-message"
+        aria-describedby={current.variant === 'approved_payment' ? undefined : 'status-notification-message'}
         aria-labelledby="status-notification-title"
         aria-modal="true"
         className={`status-notification-card status-notification-card--${current.variant}`}
@@ -158,22 +158,13 @@ function ApprovedPaymentContent({ notification }: { notification: CustomerInAppN
   const payload = notification.payload;
   const imageUrl = normalizeAssetUrl(payload.image_url || payload.image_path);
   const deliveryNote = payload.delivery_method === 'CDEK' || payload.delivery_method === 'WB';
-  const orderStatus = orderStatusLabel(payload.order_status);
   return (
     <>
       {imageUrl ? <img alt="" className="status-notification-image" src={imageUrl} /> : null}
       <div className="status-notification-payment-data">
         <h2 id="status-notification-title">{notification.title}</h2>
-        <p id="status-notification-message">{notification.message}</p>
-        <DataRow icon="▣" label="Заказ" value={payload.order_number || '—'} />
         <DataRow icon="◷" label="Дата покупки" value={formatDate(payload.order_created_at)} />
         <DataRow icon="✓" label="Платёж" value="Оплачено" success />
-        <DataRow
-          icon="◉"
-          label="Статус заказа"
-          value={orderStatus}
-          success={payload.order_status !== 'CANCELLED'}
-        />
         <DataRow icon="₽" label="Сумма" value={formatPrice(payload.total_amount || '0')} />
         {deliveryNote ? (
           <p className="status-notification-delivery-note">
@@ -203,10 +194,6 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })
     .format(date)
     .replace(/\s?г\.$/, '');
-}
-
-function orderStatusLabel(status?: string) {
-  return ({ NEW: 'Новый', PROCESSING: 'В обработке', SHIPPED: 'Отправлен', DELIVERED: 'Доставлен', CANCELLED: 'Отменён' } as Record<string, string>)[status || ''] || 'Подтверждён';
 }
 
 function isLegacyDismissedLocally(notification: CustomerInAppNotification) {

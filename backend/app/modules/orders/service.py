@@ -624,16 +624,20 @@ class OrdersService:
             delivery_comment=self._build_delivery_comment(payload),
         )
 
-    def _build_delivery_comment(self, payload: OrderCheckoutCreate) -> str:
-        weight = format(payload.weight_kg.normalize(), "f")
-        lines = [f"Рост: {payload.height_cm}", f"Вес: {weight}"]
+    def _build_delivery_comment(self, payload: OrderCheckoutCreate) -> str | None:
+        lines: list[str] = []
+        if payload.height_cm is not None:
+            lines.append(f"Рост: {payload.height_cm}")
+        if payload.weight_kg is not None:
+            weight = format(payload.weight_kg.normalize(), "f")
+            lines.append(f"Вес: {weight}")
         if payload.telegram_username:
             lines.append(f"Telegram: @{payload.telegram_username}")
         if payload.customer_comment:
             lines.append(payload.customer_comment)
         if payload.delivery_comment:
             lines.append(payload.delivery_comment)
-        return "\n".join(lines)
+        return "\n".join(lines) or None
 
     async def _validate_promo_code(
         self,

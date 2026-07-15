@@ -702,8 +702,8 @@ export type CheckoutPayload = {
   delivery_method: OrderDeliveryMethod;
   delivery_address: string;
   delivery_comment?: string | null;
-  height_cm: number;
-  weight_kg: number;
+  height_cm?: number | null;
+  weight_kg?: number | null;
   telegram_username?: string | null;
   customer_comment?: string | null;
   promo_code?: string | null;

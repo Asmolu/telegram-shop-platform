@@ -579,10 +579,44 @@ async def test_chetam_command_formats_missing_fields_and_look_groups(
     assert "Добавлено из образа: Летний образ &lt;2026&gt;" in message
     assert message.count("Добавлено из образа:") == 1
     assert "Футболка Hermes | белый | M | 1" in message
-    assert "Рост: Не указан" in message
-    assert "Вес: Не указан" in message
+    assert "Рост:" not in message
+    assert "Вес:" not in message
     assert "Контактный номер: Не указан" in message
     assert "Телеграм тег: Не указан" in message
+    ElementTree.fromstring(f"<root>{message}</root>")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("height_cm", "weight_kg", "expected", "absent"),
+    [
+        (181, None, "Рост: 181 см", "Вес:"),
+        (None, Decimal("76.50"), "Вес: 76.5 кг", "Рост:"),
+    ],
+    ids=["height-only", "weight-only"],
+)
+async def test_chetam_command_includes_only_available_measurements(
+    monkeypatch: pytest.MonkeyPatch,
+    height_cm: int | None,
+    weight_kg: Decimal | None,
+    expected: str,
+    absent: str,
+) -> None:
+    monkeypatch.setattr(settings, "telegram_seller_chat_id", "-100")
+    service, repository, _ = _seller_bot_command_service()
+    order = repository._paid_order()
+    order.user.height_cm = height_cm
+    order.user.weight_kg = weight_kg
+    repository.paid_orders = [order]
+
+    messages = await service.format_chetam_command(
+        chat_id=-100,
+        actor_telegram_user_id=42,
+    )
+
+    message = messages[0]
+    assert expected in message
+    assert absent not in message
     ElementTree.fromstring(f"<root>{message}</root>")
 
 

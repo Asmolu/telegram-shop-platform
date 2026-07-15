@@ -72,6 +72,7 @@ describe('StatusNotificationController', () => {
     render(<StatusNotificationController />);
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.getByText(standard.title)).toBeTruthy();
+    expect(screen.getByText(standard.message)).toBeTruthy();
     expect(api.pending).toHaveBeenCalled();
   });
 
@@ -98,13 +99,22 @@ describe('StatusNotificationController', () => {
     expect(screen.getByText(standard.title)).toBeTruthy();
   });
 
-  it('renders a photo and five icon/data rows only for approved payment', async () => {
+  it('renders the simplified approved-payment popup with its image and actions', async () => {
     api.pending.mockResolvedValueOnce([approved]);
     render(<StatusNotificationController />);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.querySelector('img')?.getAttribute('src')).toContain('/uploads/paid.webp');
-    expect(dialog.querySelectorAll('.status-notification-data-row')).toHaveLength(5);
+    expect(screen.getByRole('heading', { name: 'Оплата подтверждена' })).toBeTruthy();
+    expect(screen.queryByText(approved.message)).toBeNull();
+    expect(screen.queryByText('Заказ')).toBeNull();
+    expect(screen.queryByText('Статус заказа')).toBeNull();
+    expect(screen.getByText('Дата покупки').parentElement?.textContent).toContain('02 июля 2026');
+    expect(screen.getByText('Платёж').parentElement?.textContent).toContain('Оплачено');
+    expect(screen.getByText('Сумма').parentElement?.textContent).toMatch(/7\s?262/);
+    expect(dialog.querySelectorAll('.status-notification-data-row')).toHaveLength(3);
     expect(screen.getByText('Необходимо связаться с продавцом для оплаты доставки.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Связаться с продавцом' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Продолжить' })).toBeTruthy();
     expect(screen.queryByText('APPROVED')).toBeNull();
   });
 
@@ -200,24 +210,6 @@ describe('StatusNotificationController', () => {
     expect(document.body.style.overflow).toBe('');
     expect(document.activeElement).toBe(previous);
     requestAnimationFrame.mockRestore();
-  });
-
-  it.each([
-    ['NEW', true],
-    ['PROCESSING', true],
-    ['SHIPPED', true],
-    ['DELIVERED', true],
-    ['CANCELLED', false],
-  ])('localizes approved-payment order status %s with correct success color', async (status, success) => {
-    api.pending.mockResolvedValueOnce([{ ...approved, payload: { ...approved.payload, order_status: status } }]);
-    render(<StatusNotificationController />);
-    const dialog = await screen.findByRole('dialog');
-    const rows = dialog.querySelectorAll('.status-notification-data-row');
-    expect(rows).toHaveLength(5);
-    expect(rows[2].querySelector('strong')?.classList.contains('is-success')).toBe(true);
-    const orderStatus = rows[3].querySelector('strong');
-    expect(orderStatus?.textContent).not.toBe(status);
-    expect(orderStatus?.classList.contains('is-success')).toBe(success);
   });
 
   it.each(['CDEK', 'WB'])('preserves the delivery contact note for %s', async (deliveryMethod) => {

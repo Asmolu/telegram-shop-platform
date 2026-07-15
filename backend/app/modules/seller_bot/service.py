@@ -561,12 +561,17 @@ class SellerBotService:
         user = order.user
         order_number = getattr(order, "order_number", None) or order.id
         address = self._telegram_html_text(order.delivery_address or MISSING_VALUE)
-        height = self._telegram_html_text(
-            self._height_label(getattr(user, "height_cm", None))
-        )
-        weight = self._telegram_html_text(
-            self._weight_label(getattr(user, "weight_kg", None))
-        )
+        measurement_lines: list[str] = []
+        height = getattr(user, "height_cm", None)
+        if height:
+            measurement_lines.append(
+                f"Рост: {self._telegram_html_text(self._height_label(height))}"
+            )
+        weight = getattr(user, "weight_kg", None)
+        if weight:
+            measurement_lines.append(
+                f"Вес: {self._telegram_html_text(self._weight_label(weight))}"
+            )
         contact_phone = self._telegram_html_text(
             order.contact_phone or CHETAM_MISSING_VALUE
         )
@@ -577,8 +582,7 @@ class SellerBotService:
             "Оплата: подтверждено",
             f"Адрес: {address}",
             *self._chetam_order_item_lines(order.items),
-            f"Рост: {height}",
-            f"Вес: {weight}",
+            *measurement_lines,
             f"Контактный номер: {contact_phone}",
             f"Телеграм тег: {telegram_tag}",
             CHETAM_ORDER_SEPARATOR,

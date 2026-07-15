@@ -3,12 +3,31 @@ import { ApiClientError } from '../shared/api/client';
 import { mapCheckoutApiValidationErrors, validateCheckoutForm } from './checkoutValidation';
 
 describe('checkout validation', () => {
-  it('returns field-specific errors for empty and invalid required values', () => {
+  it('returns field-specific errors for empty required and invalid measurement values', () => {
     expect(validateCheckoutForm({ contactName: '', phone: '', deliveryMethod: '', city: '', height: 'x', weight: 'x' })).toEqual({
       contactName: 'Укажите получателя.', phone: 'Укажите номер телефона.',
       deliveryMethod: 'Выберите способ доставки.', city: 'Укажите адрес доставки.',
       height: 'Укажите рост числом в сантиметрах.', weight: 'Укажите вес числом в килограммах.',
     });
+  });
+
+  it('allows either or both optional measurements to be empty', () => {
+    expect(validateCheckoutForm({
+      contactName: 'Ada', phone: '+79990000000', deliveryMethod: 'CDEK', city: 'Москва',
+      height: '', weight: '',
+    })).toEqual({});
+  });
+
+  it.each([
+    ['height', '0'], ['height', '301'], ['height', '12.5'],
+    ['weight', '0'], ['weight', '1001'], ['weight', 'abc'],
+  ] as const)('rejects invalid non-empty %s value %s', (field, value) => {
+    const form = {
+      contactName: 'Ada', phone: '+79990000000', deliveryMethod: 'CDEK', city: 'Москва',
+      height: '', weight: '',
+      [field]: value,
+    };
+    expect(validateCheckoutForm(form)[field]).toBeTruthy();
   });
 
   it('maps multiple FastAPI validation locations without exposing messages', () => {

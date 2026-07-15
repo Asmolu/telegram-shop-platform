@@ -5,6 +5,7 @@ import {
   checkoutCart,
   getCart,
   getCustomerNotificationSubscription,
+  getPersonalData,
   recordCustomerNotificationWriteAccess,
   validatePromoCode,
   type Cart,
@@ -270,6 +271,67 @@ describe('CheckoutPage item details', () => {
       }),
       'checkout-key',
     ));
+  });
+
+  it('marks height and weight optional while keeping other fields required', async () => {
+    vi.mocked(getPersonalData).mockResolvedValueOnce({
+      recipient_name: null, contact_phone: null, city: null,
+      height_cm: null, weight_kg: null, persistent_comment: null, telegram_username: null,
+    });
+    render(<CheckoutPage />);
+
+    const height = await screen.findByLabelText('Рост');
+    const weight = screen.getByLabelText('Вес');
+    const recipient = screen.getByLabelText('Получатель');
+    expect(height.getAttribute('aria-required')).toBe('false');
+    expect(weight.getAttribute('aria-required')).toBe('false');
+    expect(recipient.getAttribute('aria-required')).toBe('true');
+    expect(height.closest('label')?.querySelector('.checkout-field-marker--required')).toBeNull();
+    expect(weight.closest('label')?.querySelector('.checkout-field-marker--required')).toBeNull();
+    expect(recipient.closest('label')?.querySelector('.checkout-field-marker--required')).toBeTruthy();
+    expect(screen.getByText(/Поля без отметки — необязательные/)).toBeTruthy();
+  });
+
+  it.each([
+    ['neither measurement', '', '', {}],
+    ['height only', '181', '', { height_cm: 181 }],
+    ['weight only', '', '76,5', { weight_kg: 76.5 }],
+    ['both measurements', '181', '76,5', { height_cm: 181, weight_kg: 76.5 }],
+  ])('submits checkout with %s', async (_case, height, weight, expectedMeasurements) => {
+    vi.mocked(getPersonalData).mockResolvedValueOnce({
+      recipient_name: null, contact_phone: null, city: null,
+      height_cm: null, weight_kg: null, persistent_comment: null, telegram_username: null,
+    });
+    render(<CheckoutPage />);
+
+    fireEvent.change(await screen.findByLabelText('Адрес (город, улица, номер дома)'), { target: { value: 'Хасавюрт' } });
+    if (height) fireEvent.change(screen.getByLabelText('Рост'), { target: { value: height } });
+    if (weight) fireEvent.change(screen.getByLabelText('Вес'), { target: { value: weight } });
+    fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
+
+    await waitFor(() => expect(checkoutCart).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(checkoutCart).mock.calls[0][0];
+    expect(payload).toEqual(expect.objectContaining(expectedMeasurements));
+    expect(Object.values(payload).some((value) => Number.isNaN(value))).toBe(false);
+    expect('height_cm' in payload).toBe(Boolean(height));
+    expect('weight_kg' in payload).toBe(Boolean(weight));
+  });
+
+  it('rejects malformed and out-of-range non-empty measurements', async () => {
+    vi.mocked(getPersonalData).mockResolvedValueOnce({
+      recipient_name: null, contact_phone: null, city: null,
+      height_cm: null, weight_kg: null, persistent_comment: null, telegram_username: null,
+    });
+    render(<CheckoutPage />);
+
+    fireEvent.change(await screen.findByLabelText('Адрес (город, улица, номер дома)'), { target: { value: 'Хасавюрт' } });
+    fireEvent.change(screen.getByLabelText('Рост'), { target: { value: '301' } });
+    fireEvent.change(screen.getByLabelText('Вес'), { target: { value: 'abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Оформить заказ' }));
+
+    expect(await screen.findByText('Укажите рост числом в сантиметрах.')).toBeTruthy();
+    expect(screen.getByText('Укажите вес числом в килограммах.')).toBeTruthy();
+    expect(checkoutCart).not.toHaveBeenCalled();
   });
 
   it('rejects pickup checkout without address', async () => {

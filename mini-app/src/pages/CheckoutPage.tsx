@@ -382,14 +382,16 @@ export function CheckoutPage() {
           endpoint_scope: '/orders/checkout',
           method: 'POST',
         }, { priority: 'critical' });
+        const height = form.height.trim();
+        const weight = form.weight.trim().replace(',', '.');
         const order = await checkoutCart({
           contact_name: form.contactName.trim(),
           contact_phone: form.phone.trim(),
           delivery_method: deliveryMethod,
           delivery_address: form.city.trim(),
           delivery_comment: null,
-          height_cm: Number.parseInt(form.height.trim(), 10),
-          weight_kg: Number(form.weight.trim().replace(',', '.')),
+          ...(height ? { height_cm: Number.parseInt(height, 10) } : {}),
+          ...(weight ? { weight_kg: Number(weight) } : {}),
           telegram_username: form.username.trim() || null,
           customer_comment: form.comment.trim() || null,
           promo_code: promoCodeForOrder,
@@ -584,7 +586,7 @@ export function CheckoutPage() {
           ) : null}
 
           <form className="checkout-form" onSubmit={submitCheckout} noValidate>
-            <p className="checkout-field-legend"><FieldMarker required /> — обязательное поле; <FieldMarker required={false} /> — необязательное поле.</p>
+            <p className="checkout-field-legend"><FieldMarker required /> — обязательное поле. Поля без отметки — необязательные.</p>
             <CheckoutTextField field="contactName" label="Получатель" value={form.contactName} error={fieldErrors.contactName} elementRef={(node) => { fieldRefs.current.contactName = node; }} onChange={(value) => updateField('contactName', value)} />
             <CheckoutTextField field="phone" label="Телефон" value={form.phone} error={fieldErrors.phone} elementRef={(node) => { fieldRefs.current.phone = node; }} onChange={(value) => updateField('phone', value)} inputMode="tel" />
             <div
@@ -632,11 +634,11 @@ export function CheckoutPage() {
             </div>
             <CheckoutTextField field="city" label="Адрес (город, улица, номер дома)" value={form.city} error={fieldErrors.city} elementRef={(node) => { fieldRefs.current.city = node; }} onChange={(value) => updateField('city', value)} />
             <p className="checkout-size-hint">
-              Пожалуйста, укажите рост и вес — мы подберём размер по вашим параметрам.
+              Если хотите, укажите рост и вес — мы подберём размер по вашим параметрам.
             </p>
             <div className="two-inputs">
-              <CheckoutTextField field="height" label="Рост" value={form.height} error={fieldErrors.height} elementRef={(node) => { fieldRefs.current.height = node; }} onChange={(value) => updateField('height', value)} inputMode="numeric" />
-              <CheckoutTextField field="weight" label="Вес" value={form.weight} error={fieldErrors.weight} elementRef={(node) => { fieldRefs.current.weight = node; }} onChange={(value) => updateField('weight', value)} inputMode="decimal" />
+              <CheckoutTextField field="height" label="Рост" value={form.height} error={fieldErrors.height} elementRef={(node) => { fieldRefs.current.height = node; }} onChange={(value) => updateField('height', value)} inputMode="numeric" required={false} />
+              <CheckoutTextField field="weight" label="Вес" value={form.weight} error={fieldErrors.weight} elementRef={(node) => { fieldRefs.current.weight = node; }} onChange={(value) => updateField('weight', value)} inputMode="decimal" required={false} />
             </div>
             <label><span>Имя в Telegram<FieldMarker required={false} /></span><input aria-label="Имя в Telegram" value={form.username} onChange={(event) => updateField('username', event.target.value)} /></label>
             <label><span>Комментарий<FieldMarker required={false} /></span><textarea aria-label="Комментарий" value={form.comment} onChange={(event) => updateField('comment', event.target.value)} rows={3} /></label>
@@ -656,20 +658,21 @@ export function CheckoutPage() {
 }
 
 function FieldMarker({ required }: { required: boolean }) {
-  const label = required ? 'обязательное поле' : 'необязательное поле';
-  return <span className={`checkout-field-marker checkout-field-marker--${required ? 'required' : 'optional'}`} title={label} aria-hidden="true">*</span>;
+  if (!required) return null;
+  return <span className="checkout-field-marker checkout-field-marker--required" title="обязательное поле" aria-hidden="true">*</span>;
 }
 
-function CheckoutTextField({ field, label, value, error, onChange, elementRef, inputMode }: {
+function CheckoutTextField({ field, label, value, error, onChange, elementRef, inputMode, required = true }: {
   field: CheckoutField; label: string; value: string; error?: string;
   onChange: (value: string) => void; elementRef: (node: HTMLInputElement | null) => void;
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  required?: boolean;
 }) {
   const errorId = `checkout-${field}-error`;
   return (
     <label>
-      <span>{label}<FieldMarker required /></span>
-      <input ref={elementRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} inputMode={inputMode} aria-required="true" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
+      <span>{label}<FieldMarker required={required} /></span>
+      <input ref={elementRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} inputMode={inputMode} aria-required={required} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
       {error ? <span className="checkout-field-error" id={errorId}>{error}</span> : null}
     </label>
   );

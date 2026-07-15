@@ -26,8 +26,8 @@ class OrderCheckoutCreate(BaseModel):
     delivery_method: OrderDeliveryMethod
     delivery_address: str = Field(min_length=1)
     delivery_comment: str | None = None
-    height_cm: int = Field(gt=0, le=300)
-    weight_kg: Decimal = Field(gt=0, le=1000)
+    height_cm: int | None = Field(default=None, gt=0, le=300)
+    weight_kg: Decimal | None = Field(default=None, gt=0, le=1000)
     telegram_username: str | None = Field(default=None, max_length=255)
     customer_comment: str | None = None
     promo_code: str | None = Field(

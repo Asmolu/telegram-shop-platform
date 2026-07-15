@@ -482,6 +482,36 @@ async def test_checkout_from_valid_cart(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("measurements", "expected_comment"),
+    [
+        ({}, None),
+        ({"height_cm": "181"}, "Рост: 181"),
+        ({"weight_kg": "76.5"}, "Вес: 76.5"),
+        ({"height_cm": "181", "weight_kg": "76.5"}, "Рост: 181\nВес: 76.5"),
+    ],
+    ids=["neither", "height-only", "weight-only", "both"],
+)
+async def test_checkout_supports_optional_measurement_snapshots(
+    measurements: dict[str, str],
+    expected_comment: str | None,
+) -> None:
+    service, _, _, _ = _orders_service()
+    payload = _checkout_payload_json()
+    payload.pop("height_cm")
+    payload.pop("weight_kg")
+    payload["delivery_comment"] = None
+    payload.update(measurements)
+
+    order = await service.checkout_current_user_cart(
+        user_id=1,
+        payload=OrderCheckoutCreate.model_validate(payload),
+    )
+
+    assert order.delivery_comment == expected_comment
+
+
+@pytest.mark.asyncio
 async def test_checkout_assigns_sequential_human_order_numbers() -> None:
     service, repository, _, _ = _orders_service()
 
@@ -1840,7 +1870,7 @@ def _checkout_payload() -> OrderCheckoutCreate:
     return OrderCheckoutCreate.model_validate(_checkout_payload_json())
 
 
-def _checkout_payload_json() -> dict[str, str]:
+def _checkout_payload_json() -> dict[str, object]:
     return {
         "contact_name": "Ada Lovelace",
         "contact_phone": "+10000000000",
@@ -1858,20 +1888,44 @@ def _checkout_payload_json() -> dict[str, str]:
         ("contact_name", ""), ("contact_name", "   "),
         ("contact_phone", ""), ("contact_phone", "   "),
         ("delivery_address", ""), ("delivery_address", "   "),
-        ("height_cm", "missing"), ("height_cm", "abc"), ("height_cm", "0"),
+        ("height_cm", "abc"), ("height_cm", "0"),
         ("height_cm", "-1"), ("height_cm", "301"),
-        ("weight_kg", "missing"), ("weight_kg", "abc"), ("weight_kg", "0"),
+        ("weight_kg", "abc"), ("weight_kg", "0"),
         ("weight_kg", "-1"), ("weight_kg", "1001"),
     ],
 )
-def test_checkout_schema_rejects_invalid_required_values(field: str, value: str) -> None:
+def test_checkout_schema_rejects_invalid_non_empty_values(field: str, value: str) -> None:
     payload = _checkout_payload_json()
-    if value == "missing":
-        payload.pop(field)
-    else:
-        payload[field] = value
+    payload[field] = value
     with pytest.raises(ValidationError):
         OrderCheckoutCreate.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("measurements", "expected_height", "expected_weight"),
+    [
+        ({}, None, None),
+        ({"height_cm": None, "weight_kg": None}, None, None),
+        ({"height_cm": "181"}, 181, None),
+        ({"weight_kg": "76.5"}, None, Decimal("76.5")),
+        ({"height_cm": "181", "weight_kg": "76.5"}, 181, Decimal("76.5")),
+    ],
+    ids=["missing", "explicit-null", "height-only", "weight-only", "both"],
+)
+def test_checkout_schema_accepts_optional_measurements(
+    measurements: dict[str, object],
+    expected_height: int | None,
+    expected_weight: Decimal | None,
+) -> None:
+    payload = _checkout_payload_json()
+    payload.pop("height_cm")
+    payload.pop("weight_kg")
+    payload.update(measurements)
+
+    parsed = OrderCheckoutCreate.model_validate(payload)
+
+    assert parsed.height_cm == expected_height
+    assert parsed.weight_kg == expected_weight
 
 
 def test_checkout_schema_normalizes_optional_values_and_decimal_weight() -> None:

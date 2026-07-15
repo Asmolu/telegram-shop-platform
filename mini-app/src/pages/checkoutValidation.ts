@@ -23,10 +23,8 @@ export function validateCheckoutForm(values: Record<CheckoutField, string>): Che
   if (!values.phone.trim()) errors.phone = messages.phone;
   if (!values.deliveryMethod) errors.deliveryMethod = messages.deliveryMethod;
   if (!values.city.trim()) errors.city = messages.city;
-  if (!values.height.trim()) errors.height = 'Укажите рост.';
-  else if (!/^\d+$/.test(values.height.trim()) || Number(values.height) <= 0 || Number(values.height) > 300) errors.height = messages.height;
-  if (!values.weight.trim()) errors.weight = 'Укажите вес.';
-  else if (!/^\d+(?:[.,]\d+)?$/.test(values.weight.trim()) || Number(values.weight.replace(',', '.')) <= 0 || Number(values.weight.replace(',', '.')) > 1000) errors.weight = messages.weight;
+  if (values.height.trim() && (!/^\d+$/.test(values.height.trim()) || Number(values.height) <= 0 || Number(values.height) > 300)) errors.height = messages.height;
+  if (values.weight.trim() && (!/^\d+(?:[.,]\d+)?$/.test(values.weight.trim()) || Number(values.weight.replace(',', '.')) <= 0 || Number(values.weight.replace(',', '.')) > 1000)) errors.weight = messages.weight;
   return errors;
 }
 
