@@ -103,7 +103,11 @@ describe('StatusNotificationController', () => {
     api.pending.mockResolvedValueOnce([approved]);
     render(<StatusNotificationController />);
     const dialog = await screen.findByRole('dialog');
-    expect(dialog.querySelector('img')?.getAttribute('src')).toContain('/uploads/paid.webp');
+    const image = dialog.querySelector('img');
+    expect(image?.getAttribute('src')).toContain('/uploads/paid.webp');
+    expect(image?.classList.contains('status-notification-image--approved-payment')).toBe(true);
+    expect(dialog.classList.contains('status-notification-card--approved_payment')).toBe(true);
+    expect(dialog.parentElement?.classList.contains('status-notification-overlay--approved_payment')).toBe(true);
     expect(screen.getByRole('heading', { name: 'Оплата подтверждена' })).toBeTruthy();
     expect(screen.queryByText(approved.message)).toBeNull();
     expect(screen.queryByText('Заказ')).toBeNull();
@@ -227,7 +231,9 @@ describe('StatusNotificationController', () => {
     render(<StatusNotificationController />);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.classList.contains('status-notification-card--standard')).toBe(true);
+    expect(dialog.parentElement?.classList.contains('status-notification-overlay--approved_payment')).toBe(false);
     expect(dialog.querySelector('img')).toBeNull();
+    expect(dialog.querySelector('.status-notification-image--approved-payment')).toBeNull();
     expect(dialog.querySelectorAll('.status-notification-data-row')).toHaveLength(0);
     expect(dialog.querySelectorAll('.status-notification-actions button')).toHaveLength(1);
   });

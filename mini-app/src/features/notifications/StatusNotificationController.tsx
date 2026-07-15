@@ -103,7 +103,10 @@ export function StatusNotificationController() {
   const hasContacts = current.action_mode === 'continue_with_contacts';
 
   return (
-    <div className="status-notification-overlay" onMouseDown={(event) => event.stopPropagation()}>
+    <div
+      className={`status-notification-overlay status-notification-overlay--${current.variant}`}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
       <section
         aria-describedby={current.variant === 'approved_payment' ? undefined : 'status-notification-message'}
         aria-labelledby="status-notification-title"
@@ -160,7 +163,13 @@ function ApprovedPaymentContent({ notification }: { notification: CustomerInAppN
   const deliveryNote = payload.delivery_method === 'CDEK' || payload.delivery_method === 'WB';
   return (
     <>
-      {imageUrl ? <img alt="" className="status-notification-image" src={imageUrl} /> : null}
+      {imageUrl ? (
+        <img
+          alt=""
+          className="status-notification-image status-notification-image--approved-payment"
+          src={imageUrl}
+        />
+      ) : null}
       <div className="status-notification-payment-data">
         <h2 id="status-notification-title">{notification.title}</h2>
         <DataRow icon="◷" label="Дата покупки" value={formatDate(payload.order_created_at)} />

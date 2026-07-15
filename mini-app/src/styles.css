@@ -4977,6 +4977,17 @@ label {
   backdrop-filter: blur(7px);
 }
 
+.status-notification-overlay--approved_payment {
+  --status-notification-top-inset: max(
+    calc(18px + env(safe-area-inset-top)),
+    calc(18px + var(--tg-safe-area-top)),
+    calc(18px + var(--tg-content-safe-area-top)),
+    var(--tg-fullscreen-top-offset)
+  );
+
+  padding-top: var(--status-notification-top-inset);
+}
+
 .status-notification-card {
   width: min(100%, 350px);
   max-height: calc(100dvh - 44px);
@@ -4989,6 +5000,12 @@ label {
 
 .status-notification-card--standard {
   padding: 22px 18px 18px;
+}
+
+.status-notification-card--approved_payment {
+  max-height: calc(
+    100dvh - var(--status-notification-top-inset) - 18px - env(safe-area-inset-bottom)
+  );
 }
 
 .status-notification-copy {
@@ -5033,6 +5050,18 @@ label {
   aspect-ratio: 4 / 3;
   border-radius: 24px 24px 0 0;
   object-fit: cover;
+}
+
+.status-notification-image--approved-payment {
+  height: 450px;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+@media (max-height: 700px) {
+  .status-notification-image--approved-payment {
+    height: min(52dvh, 360px);
+  }
 }
 
 .status-notification-payment-data {
