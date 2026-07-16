@@ -1,9 +1,10 @@
-from sqlalchemy import String, select
+from sqlalchemy import String, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import CustomerInAppNotification, ManualPayment, ManualPaymentStatus, Order
+from app.modules.customer_in_app_notifications.policy import SUPPRESSED_NOTIFICATION_KEYS
 
 
 class CustomerInAppNotificationsRepository:
@@ -54,6 +55,10 @@ class CustomerInAppNotificationsRepository:
             .where(
                 CustomerInAppNotification.user_id == user_id,
                 CustomerInAppNotification.seen_at.is_(None),
+                tuple_(
+                    CustomerInAppNotification.category,
+                    CustomerInAppNotification.event_code,
+                ).not_in(SUPPRESSED_NOTIFICATION_KEYS),
             )
             .order_by(
                 CustomerInAppNotification.occurred_at.asc(),

@@ -5053,14 +5053,14 @@ label {
 }
 
 .status-notification-image--approved-payment {
-  height: 450px;
+  height: 405px;
   max-height: none;
   aspect-ratio: auto;
 }
 
 @media (max-height: 700px) {
   .status-notification-image--approved-payment {
-    height: min(52dvh, 360px);
+    height: min(47dvh, 324px);
   }
 }
 

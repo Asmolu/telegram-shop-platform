@@ -107,10 +107,32 @@ async def test_initial_payment_and_return_statuses_create_no_notifications() -> 
 
 
 @pytest.mark.asyncio
+async def test_noisy_intermediate_statuses_create_no_notifications() -> None:
+    session = CaptureSession()
+    service = CustomerInAppNotificationsService(session)
+    processing_order = order(status=OrderStatus.PROCESSING)
+    submitted_payment = SimpleNamespace(
+        id=20,
+        order_id=10,
+        order=processing_order,
+        status=ManualPaymentStatus.SUBMITTED,
+    )
+
+    await service.create_order_status(
+        processing_order,
+        occurred_at=NOW,
+        source_key="order:10:PROCESSING:outbox:test-occurrence",
+    )
+    await service.create_payment_status(submitted_payment, occurred_at=NOW)
+
+    assert session.added == []
+
+
+@pytest.mark.asyncio
 async def test_status_notifications_capture_immutable_copy_and_stable_source_keys() -> None:
     session = CaptureSession()
     service = CustomerInAppNotificationsService(session)
-    changed_order = order(status=OrderStatus.PROCESSING)
+    changed_order = order(status=OrderStatus.SHIPPED)
     payment = SimpleNamespace(
         id=20,
         order_id=10,
@@ -128,13 +150,13 @@ async def test_status_notifications_capture_immutable_copy_and_stable_source_key
     await service.create_order_status(
         changed_order,
         occurred_at=NOW,
-        source_key="order:10:PROCESSING:outbox:test-occurrence",
+        source_key="order:10:SHIPPED:outbox:test-occurrence",
     )
     await service.create_payment_status(payment, occurred_at=NOW)
     await service.create_return_status(return_request, occurred_at=NOW)
 
     order_notification, payment_notification, return_notification = session.added
-    assert order_notification.source_key == "order:10:PROCESSING:outbox:test-occurrence"
+    assert order_notification.source_key == "order:10:SHIPPED:outbox:test-occurrence"
     assert order_notification.action_mode == CustomerInAppNotificationActionMode.CONTINUE_ONLY
     assert order_notification.payload["order_number"] == "ORD-000010"
     assert payment_notification.source_key == "payment:20:APPROVED"
@@ -151,12 +173,12 @@ async def test_status_notifications_capture_immutable_copy_and_stable_source_key
 async def test_order_source_key_accepts_persisted_transition_occurrence() -> None:
     session = CaptureSession()
     service = CustomerInAppNotificationsService(session)
-    changed_order = order(status=OrderStatus.PROCESSING)
+    changed_order = order(status=OrderStatus.SHIPPED)
 
     await service.create_order_status(
         changed_order,
         occurred_at=NOW,
-        source_key="order:10:PROCESSING:outbox:00000000-0000-0000-0000-000000000056",
+        source_key="order:10:SHIPPED:outbox:00000000-0000-0000-0000-000000000056",
     )
 
     assert session.added[0].source_key.endswith(":00000000-0000-0000-0000-000000000056")
@@ -178,6 +200,19 @@ async def test_postgres_pending_seen_ownership_and_ordering() -> None:
             await session.flush()
             session.add_all(
                 (
+                    _db_notification(
+                        first_user.id,
+                        "test:suppressed:processing",
+                        NOW - timedelta(hours=2),
+                        event_code="PROCESSING",
+                    ),
+                    _db_notification(
+                        first_user.id,
+                        "test:suppressed:submitted",
+                        NOW - timedelta(hours=1),
+                        category=CustomerInAppNotificationCategory.PAYMENT,
+                        event_code="SUBMITTED",
+                    ),
                     _db_notification(first_user.id, "test:order:later", NOW.replace(hour=11)),
                     _db_notification(first_user.id, "test:order:first", NOW),
                     _db_notification(second_user.id, "test:other-user", NOW),
@@ -187,7 +222,7 @@ async def test_postgres_pending_seen_ownership_and_ordering() -> None:
 
         async with sessions() as session:
             service = CustomerInAppNotificationsService(session)
-            pending = await service.pending(user_id=first_user.id, limit=20)
+            pending = await service.pending(user_id=first_user.id, limit=2)
             assert [item.message for item in pending] == ["test:order:first", "test:order:later"]
             seen = await service.mark_seen(notification_id=pending[0].id, user_id=first_user.id)
             assert seen.seen_at is not None
@@ -400,11 +435,11 @@ async def test_postgres_order_reentry_creates_distinct_occurrence_notifications(
         async with sessions() as session:
             service = OrdersService(session)
             await service.update_order_status(
-                order_id, OrderStatusUpdate(status=OrderStatus.PROCESSING)
+                order_id, OrderStatusUpdate(status=OrderStatus.SHIPPED)
             )
             await service.update_order_status(order_id, OrderStatusUpdate(status=OrderStatus.NEW))
             await service.update_order_status(
-                order_id, OrderStatusUpdate(status=OrderStatus.PROCESSING)
+                order_id, OrderStatusUpdate(status=OrderStatus.SHIPPED)
             )
 
         async with sessions() as session:
@@ -413,7 +448,7 @@ async def test_postgres_order_reentry_creates_distinct_occurrence_notifications(
                     await session.scalars(
                         select(CustomerInAppNotification.source_key).where(
                             CustomerInAppNotification.order_id == order_id,
-                            CustomerInAppNotification.event_code == "PROCESSING",
+                            CustomerInAppNotification.event_code == "SHIPPED",
                         )
                     )
                 ).all()
@@ -436,7 +471,7 @@ async def test_postgres_order_reentry_creates_distinct_occurrence_notifications(
 
 @pytest.mark.skipif(not POSTGRES_URL, reason="TEST_POSTGRES_URL is required")
 @pytest.mark.asyncio
-async def test_postgres_concurrent_order_transition_creates_one_occurrence() -> None:
+async def test_postgres_processing_transition_suppresses_notification_but_keeps_event() -> None:
     engine = create_async_engine(POSTGRES_URL)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     telegram_id = 99005608
@@ -474,7 +509,7 @@ async def test_postgres_concurrent_order_transition_creates_one_occurrence() -> 
                     OutboxEvent.event_name == "order.status_changed",
                 )
             )
-            assert notification_count == 1
+            assert notification_count == 0
             assert event_count == 1
     finally:
         async with sessions() as session:
@@ -535,7 +570,7 @@ async def test_postgres_new_approved_payment_creates_one_transactional_notificat
                     == CustomerInAppNotificationCategory.ORDER,
                     CustomerInAppNotification.event_code == "PROCESSING",
                 )
-            ) == 1
+            ) == 0
             assert await session.scalar(select(Order.status).where(Order.id == order_id)) == (
                 OrderStatus.PROCESSING
             )
@@ -628,7 +663,7 @@ async def test_postgres_manual_payment_submission_serializes_persisted_timestamp
                     CustomerInAppNotification.source_key
                     == f"payment:{payment_id}:SUBMITTED"
                 )
-            ) == 1
+            ) == 0
             assert await session.scalar(
                 select(func.count(OutboxEvent.id)).where(
                     OutboxEvent.aggregate_type == "manual_payment",
@@ -812,11 +847,18 @@ async def test_postgres_concurrent_legacy_conversion_creates_at_most_one_row() -
         await engine.dispose()
 
 
-def _db_notification(user_id: int, source_key: str, occurred_at: datetime):
+def _db_notification(
+    user_id: int,
+    source_key: str,
+    occurred_at: datetime,
+    *,
+    category: CustomerInAppNotificationCategory = CustomerInAppNotificationCategory.ORDER,
+    event_code: str = "SHIPPED",
+):
     return CustomerInAppNotification(
         user_id=user_id,
-        category=CustomerInAppNotificationCategory.ORDER,
-        event_code="PROCESSING",
+        category=category,
+        event_code=event_code,
         variant=CustomerInAppNotificationVariant.STANDARD,
         action_mode=CustomerInAppNotificationActionMode.CONTINUE_ONLY,
         title="Test",

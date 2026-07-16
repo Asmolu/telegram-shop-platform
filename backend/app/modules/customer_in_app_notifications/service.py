@@ -25,6 +25,7 @@ from app.db.models import (
 from app.db.models import (
     CustomerInAppNotificationVariant as Variant,
 )
+from app.modules.customer_in_app_notifications.policy import is_suppressed_notification
 from app.modules.customer_in_app_notifications.repository import (
     CustomerInAppNotificationsRepository,
 )
@@ -37,11 +38,6 @@ ORDER_COPY = {
     OrderStatus.NEW: (
         "Статус заказа обновлён",
         "Заказ {number} получил статус «Новый».",
-        ActionMode.CONTINUE_ONLY,
-    ),
-    OrderStatus.PROCESSING: (
-        "Заказ принят в обработку",
-        "Заказ {number} принят продавцом и готовится к отправке.",
         ActionMode.CONTINUE_ONLY,
     ),
     OrderStatus.SHIPPED: (
@@ -61,11 +57,6 @@ ORDER_COPY = {
     ),
 }
 PAYMENT_COPY = {
-    ManualPaymentStatus.SUBMITTED: (
-        "Оплата отправлена на проверку",
-        "Оплата заказа {number} передана продавцу на проверку.",
-        ActionMode.CONTINUE_ONLY,
-    ),
     ManualPaymentStatus.APPROVED: (
         "Оплата подтверждена",
         "Оплата заказа {number} подтверждена.",
@@ -110,6 +101,8 @@ class CustomerInAppNotificationsService:
         source_key: str,
         occurred_at: datetime | None = None,
     ) -> None:
+        if is_suppressed_notification(Category.ORDER, order.status.value):
+            return
         copy = ORDER_COPY.get(order.status)
         if copy is None:
             return
@@ -133,6 +126,8 @@ class CustomerInAppNotificationsService:
     async def create_payment_status(
         self, payment: ManualPayment, *, occurred_at: datetime | None = None, legacy: bool = False
     ) -> None:
+        if is_suppressed_notification(Category.PAYMENT, payment.status.value):
+            return
         copy = PAYMENT_COPY.get(payment.status)
         if copy is None:
             return

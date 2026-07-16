@@ -23,17 +23,36 @@ vi.mock('../../shared/api', () => ({
 const standard = {
   id: 1,
   category: 'order',
-  event_code: 'PROCESSING',
+  event_code: 'SHIPPED',
   variant: 'standard',
   action_mode: 'continue_only',
   order_id: 10,
   manual_payment_id: null,
   return_request_id: null,
+  title: 'Заказ отправлен',
+  message: 'Заказ ORD-000010 передан в доставку.',
+  payload: { order_number: 'ORD-000010', order_status: 'SHIPPED' },
+  occurred_at: '2026-07-13T10:00:00Z',
+  created_at: '2026-07-13T10:00:00Z',
+};
+
+const processing = {
+  ...standard,
+  id: 3,
+  event_code: 'PROCESSING',
   title: 'Заказ принят в обработку',
   message: 'Заказ ORD-000010 принят продавцом и готовится к отправке.',
   payload: { order_number: 'ORD-000010', order_status: 'PROCESSING' },
-  occurred_at: '2026-07-13T10:00:00Z',
-  created_at: '2026-07-13T10:00:00Z',
+};
+
+const submitted = {
+  ...standard,
+  id: 4,
+  category: 'payment',
+  event_code: 'SUBMITTED',
+  title: 'Оплата отправлена на проверку',
+  message: 'Оплата заказа ORD-000010 передана продавцу на проверку.',
+  payload: { order_number: 'ORD-000010', payment_status: 'SUBMITTED' },
 };
 
 const approved = {
@@ -99,7 +118,7 @@ describe('StatusNotificationController', () => {
     expect(screen.getByText(standard.title)).toBeTruthy();
   });
 
-  it('renders the simplified approved-payment popup with its image and actions', async () => {
+  it('renders the reduced approved-payment popup with its image, readable data, and actions', async () => {
     api.pending.mockResolvedValueOnce([approved]);
     render(<StatusNotificationController />);
     const dialog = await screen.findByRole('dialog');
@@ -130,13 +149,43 @@ describe('StatusNotificationController', () => {
     expect(api.seen).not.toHaveBeenCalled();
   });
 
-  it('does not acknowledge on Escape or backdrop interaction', async () => {
+  it('does not acknowledge on Escape or interaction inside the popup card', async () => {
     render(<StatusNotificationController />);
     const dialog = await screen.findByRole('dialog');
     fireEvent.keyDown(dialog, { key: 'Escape' });
-    fireEvent.mouseDown(dialog.parentElement!);
+    fireEvent.click(dialog);
     expect(api.seen).not.toHaveBeenCalled();
     expect(screen.getByText(standard.title)).toBeTruthy();
+  });
+
+  it.each([
+    ['standard', standard],
+    ['approved payment', approved],
+  ])('acknowledges and closes the %s popup on backdrop click', async (_label, notification) => {
+    api.pending.mockResolvedValueOnce([notification]);
+    render(<StatusNotificationController />);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(dialog.parentElement!);
+    await waitFor(() => expect(api.seen).toHaveBeenCalledWith(notification.id));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('does not show or retain the two suppressed notification types', async () => {
+    api.pending.mockResolvedValueOnce([processing, submitted]);
+    render(<StatusNotificationController />);
+    await waitFor(() => expect(api.seen).toHaveBeenCalledTimes(2));
+    expect(api.seen).toHaveBeenCalledWith(processing.id);
+    expect(api.seen).toHaveBeenCalledWith(submitted.id);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('skips suppressed queued notifications without blocking a later popup', async () => {
+    api.pending.mockResolvedValueOnce([processing, submitted, standard]);
+    render(<StatusNotificationController />);
+    expect(await screen.findByText(standard.title)).toBeTruthy();
+    await waitFor(() => expect(api.seen).toHaveBeenCalledWith(processing.id));
+    expect(api.seen).toHaveBeenCalledWith(submitted.id);
+    expect(api.seen).not.toHaveBeenCalledWith(standard.id);
   });
 
   it('refreshes on route, focus, visibility, and visible polling but pauses while hidden', async () => {

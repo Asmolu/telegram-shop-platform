@@ -12,6 +12,10 @@ import { normalizeAssetUrl } from '../../shared/utils/images';
 
 const POLL_INTERVAL_MS = 45_000;
 const LEGACY_DISMISSED_STORAGE_KEY = 'stylexac.paymentSuccessBanner.dismissedOrderIds';
+const SUPPRESSED_NOTIFICATION_KEYS = new Set([
+  'order:PROCESSING',
+  'payment:SUBMITTED',
+]);
 
 export function StatusNotificationController() {
   const { isAuthenticated } = useAuth();
@@ -32,13 +36,18 @@ export function StatusNotificationController() {
     inFlight.current = true;
     try {
       const pending = await getPendingCustomerInAppNotifications({ retry: false });
-      const legacyDismissed = pending.find(isLegacyDismissedLocally);
-      if (legacyDismissed) {
-        await markCustomerInAppNotificationSeen(legacyDismissed.id);
-        const remaining = pending.filter((item) => item.id !== legacyDismissed.id);
-        setQueue(remaining);
-      } else {
-        setQueue(pending);
+      const hidden = pending.filter(
+        (item) => isSuppressedNotification(item) || isLegacyDismissedLocally(item),
+      );
+      const hiddenIds = new Set(hidden.map((item) => item.id));
+      setQueue(pending.filter((item) => !hiddenIds.has(item.id)));
+      for (const item of hidden) {
+        try {
+          await markCustomerInAppNotificationSeen(item.id);
+        } catch {
+          // Keep suppressed and locally dismissed notifications out of the visible queue.
+          // The backend pending policy and later lifecycle refreshes provide durable cleanup.
+        }
       }
     } catch {
       // Durable server state will be retried on the next lifecycle refresh or poll.
@@ -105,7 +114,9 @@ export function StatusNotificationController() {
   return (
     <div
       className={`status-notification-overlay status-notification-overlay--${current.variant}`}
-      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) void acknowledge();
+      }}
     >
       <section
         aria-describedby={current.variant === 'approved_payment' ? undefined : 'status-notification-message'}
@@ -213,6 +224,10 @@ function isLegacyDismissedLocally(notification: CustomerInAppNotification) {
   } catch {
     return false;
   }
+}
+
+function isSuppressedNotification(notification: CustomerInAppNotification) {
+  return SUPPRESSED_NOTIFICATION_KEYS.has(`${notification.category}:${notification.event_code}`);
 }
 
 function keepFocusInDialog(event: React.KeyboardEvent<HTMLElement>) {
