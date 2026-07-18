@@ -70,6 +70,9 @@ logs/
 
 # Archives / temporary exports
 output/pdf/
+video-work/
+tools/video_pipeline/
+.codex-tmp/
 *.zip
 *.tar
 *.tar.gz
