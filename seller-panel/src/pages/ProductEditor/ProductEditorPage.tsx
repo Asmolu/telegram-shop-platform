@@ -51,6 +51,7 @@ import {
   getLinkableProductVariants,
   getProductLinkGeneratorState,
 } from './productLinks';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   mode: 'create' | 'edit';
@@ -739,13 +740,13 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
         <div className="success-banner">
           {success}{' '}
           {mode === 'create' && createdProductId ? (
-            <button
+            <InternalLink
               className="text-button"
-              type="button"
-              onClick={() => onNavigate(`/products/${createdProductId}/edit`)}
+              href={`/products/${createdProductId}/edit`}
+              onNavigate={onNavigate}
             >
               {t('productEditor.openEdit')}
-            </button>
+            </InternalLink>
           ) : null}
         </div>
       ) : null}
@@ -1498,9 +1499,9 @@ export function ProductEditorPage({ mode, productId, onNavigate, onAuthExpired }
       </section>
 
       <div className="form-actions">
-        <button className="button button-secondary" type="button" onClick={() => onNavigate('/products')}>
+        <InternalLink className="button button-secondary" href="/products" onNavigate={onNavigate}>
           {t('productEditor.backToProducts')}
-        </button>
+        </InternalLink>
         <button className="button button-primary" disabled={saving} type="submit">
           {saving
             ? t('common.saving')

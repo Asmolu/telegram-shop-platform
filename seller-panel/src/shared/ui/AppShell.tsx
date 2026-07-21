@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { User } from '../api';
 import { useI18n } from '../i18n';
+import { InternalLink } from '../navigation/InternalLink';
 
 export interface NavItem {
   path: string;
@@ -50,14 +51,14 @@ export function AppShell({
               (item.path !== '/dashboard' && currentPath.startsWith(item.path));
 
             return (
-              <button
+              <InternalLink
                 className={`nav-link ${active ? 'nav-link-active' : ''}`}
+                href={item.path}
                 key={item.path}
-                type="button"
-                onClick={() => onNavigate(item.path)}
+                onNavigate={onNavigate}
               >
                 {t(item.labelKey)}
-              </button>
+              </InternalLink>
             );
           })}
         </nav>

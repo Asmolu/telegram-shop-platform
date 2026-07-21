@@ -11,6 +11,7 @@ import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { compactText, formatDate, formatMoney } from '../../shared/utils/format';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   onNavigate: (path: string) => void;
@@ -73,7 +74,13 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
       ]);
       setOrders(orderList.items);
       setPayments(paymentList.items);
-      const requestedPaymentId = Number(new URLSearchParams(window.location.search).get('payment'));
+      const routeQuery = new URLSearchParams(window.location.search);
+      const requestedOrderId = Number(routeQuery.get('order'));
+      const requestedPaymentId = Number(routeQuery.get('payment'));
+      if (Number.isFinite(requestedOrderId) && requestedOrderId > 0) {
+        const requestedOrder = orderList.items.find((order) => order.id === requestedOrderId);
+        if (requestedOrder) selectOrderDetails(requestedOrder);
+      }
       if (Number.isFinite(requestedPaymentId) && requestedPaymentId > 0) {
         void selectPaymentDetails(requestedPaymentId);
       }
@@ -726,13 +733,13 @@ export function OrdersPage({ onNavigate, onAuthExpired }: PageProps) {
                             {!item.product_thumbnail_url ? (
                               <small>{t('orders.thumbnailGap')}</small>
                             ) : null}
-                            <button
+                            <InternalLink
                               className="text-button"
-                              type="button"
-                              onClick={() => onNavigate(`/products/${item.product_id}/edit`)}
+                              href={`/products/${item.product_id}/edit`}
+                              onNavigate={onNavigate}
                             >
                               {t('orders.openProduct')}
-                            </button>
+                            </InternalLink>
                           </div>
                         </div>
                       </td>

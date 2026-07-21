@@ -5,6 +5,7 @@ import { labelForEnum, useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { formatDate, formatMoney } from '../../shared/utils/format';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   onNavigate: (path: string) => void;
@@ -165,9 +166,9 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
             {t('common.apply')}
           </button>
         </form>
-        <button className="button button-primary" type="button" onClick={() => onNavigate('/products/new')}>
+        <InternalLink className="button button-primary" href="/products/new" onNavigate={onNavigate}>
           {t('products.addProduct')}
-        </button>
+        </InternalLink>
       </div>
 
       {notice ? <div className="success-banner">{notice}</div> : null}
@@ -262,13 +263,13 @@ export function ProductsPage({ onNavigate, onAuthExpired }: PageProps) {
                     <td>{formatDate(product.updated_at, language)}</td>
                     <td>
                       <div className="table-actions">
-                        <button
+                        <InternalLink
                           className="text-button"
-                          type="button"
-                          onClick={() => onNavigate(`/products/${product.id}/edit`)}
+                          href={`/products/${product.id}/edit`}
+                          onNavigate={onNavigate}
                         >
                           {t('common.edit')}
-                        </button>
+                        </InternalLink>
                         <select
                           aria-label={t('products.changeStatus', { name: product.name })}
                           value={product.status}

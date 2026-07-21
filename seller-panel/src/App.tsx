@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from './shared/api';
 import type { User } from './shared/api';
-import { clearStoredToken, getStoredToken } from './shared/auth/tokenStorage';
+import {
+  clearStoredToken,
+  getStoredToken,
+  getTokenStorageScope,
+  setStoredToken,
+} from './shared/auth/tokenStorage';
+import { subscribeToUnauthorized } from './shared/auth/authEvents';
+import {
+  SELLER_SESSION_HANDOFF_WAIT_MS,
+  SellerSessionCoordinator,
+} from './shared/auth/idleSession';
 import { useI18n } from './shared/i18n';
 import { AppShell, type NavItem } from './shared/ui/AppShell';
 import { LoadingState } from './shared/ui/DataState';
@@ -76,9 +86,11 @@ export function App() {
   const { t } = useI18n();
   const [path, setPath] = useState(() => normalizePath(window.location.pathname));
   const [token, setToken] = useState(() => getStoredToken());
+  const [checkingSessionHandoff, setCheckingSessionHandoff] = useState(() => !token);
   const [user, setUser] = useState<User | null>(null);
   const [checkingUser, setCheckingUser] = useState(Boolean(token));
   const [authError, setAuthError] = useState<string | null>(null);
+  const sessionCoordinatorRef = useRef<SellerSessionCoordinator | null>(null);
 
   const title = useMemo(() => t(getPageTitleKey(path)), [path, t]);
 
@@ -86,6 +98,40 @@ export function App() {
     const onPopState = () => setPath(normalizePath(window.location.pathname));
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const coordinator = new SellerSessionCoordinator({
+      tokenStore: {
+        getToken: getStoredToken,
+        getScope: getTokenStorageScope,
+        setSessionToken: (receivedToken) => setStoredToken(receivedToken, 'session'),
+        clear: clearStoredToken,
+      },
+      onTokenReceived: (receivedToken) => {
+        setCheckingUser(true);
+        setToken(receivedToken);
+        setCheckingSessionHandoff(false);
+      },
+      onLogout: () => finishLogout(),
+    });
+    sessionCoordinatorRef.current = coordinator;
+    coordinator.start();
+
+    const handoffTimer = window.setTimeout(
+      () => setCheckingSessionHandoff(false),
+      SELLER_SESSION_HANDOFF_WAIT_MS,
+    );
+    const unsubscribeUnauthorized = subscribeToUnauthorized(() => coordinator.logout('unauthorized'));
+
+    return () => {
+      window.clearTimeout(handoffTimer);
+      unsubscribeUnauthorized();
+      coordinator.stop();
+      if (sessionCoordinatorRef.current === coordinator) {
+        sessionCoordinatorRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -108,11 +154,8 @@ export function App() {
       .catch((error: unknown) => {
         if (cancelled) return;
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          clearStoredToken();
-          setToken(null);
-          setUser(null);
           setAuthError(error.message);
-          navigate('/login');
+          sessionCoordinatorRef.current?.logout('unauthorized');
           return;
         }
         setAuthError(error instanceof Error ? error.message : t('app.tokenVerifyFailed'));
@@ -128,22 +171,44 @@ export function App() {
     };
   }, [token, t]);
 
-  function navigate(nextPath: string) {
-    const normalized = normalizePath(nextPath);
-    window.history.pushState(null, '', normalized);
+  function navigate(nextHref: string, replace = false) {
+    const url = new URL(nextHref, window.location.origin);
+    const normalized = normalizePath(url.pathname);
+    window.history[replace ? 'replaceState' : 'pushState'](null, '', `${normalized}${url.search}${url.hash}`);
     setPath(normalized);
   }
 
   function handleLogout() {
+    const coordinator = sessionCoordinatorRef.current;
+    if (coordinator) {
+      coordinator.logout('manual');
+      return;
+    }
     clearStoredToken();
+    finishLogout();
+  }
+
+  function finishLogout() {
     setToken(null);
     setUser(null);
-    navigate('/login');
+    setCheckingSessionHandoff(false);
+    navigate('/login', true);
   }
 
   function handleTokenSaved() {
+    sessionCoordinatorRef.current?.authenticated();
+    setCheckingUser(true);
     setToken(getStoredToken());
+    setCheckingSessionHandoff(false);
     navigate('/dashboard');
+  }
+
+  if (checkingSessionHandoff) {
+    return (
+      <div className="auth-loading">
+        <LoadingState title={t('app.checkingToken')} />
+      </div>
+    );
   }
 
   if (!token || path === '/login') {

@@ -10,6 +10,7 @@ import { useI18n } from '../../shared/i18n';
 import { ErrorState, LoadingState } from '../../shared/ui/DataState';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { compactText, formatDate, formatMoney } from '../../shared/utils/format';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   initialReturnRequestId?: number;
@@ -90,7 +91,7 @@ export function ReturnsPage({
       setReturnRequests(result.items);
       const targetId = initialReturnRequestId ?? selectedReturn?.id ?? result.items[0]?.id;
       if (targetId) {
-        await selectReturnDetails(targetId, false);
+        await selectReturnDetails(targetId);
       } else {
         setSelectedReturn(null);
       }
@@ -101,11 +102,7 @@ export function ReturnsPage({
     }
   }
 
-  async function selectReturnDetails(returnRequestId: number, updateRoute = true) {
-    if (updateRoute) {
-      onNavigate(`/returns/${returnRequestId}`);
-      return;
-    }
+  async function selectReturnDetails(returnRequestId: number) {
     setDetailLoading(true);
     setActionError(null);
     try {
@@ -273,10 +270,15 @@ export function ReturnsPage({
                     <tr
                       className={selectedReturn?.id === returnRequest.id ? 'selected-row' : ''}
                       key={returnRequest.id}
-                      onClick={() => void selectReturnDetails(returnRequest.id)}
                     >
                       <td>
-                        <strong>{returnRequest.return_number}</strong>
+                        <InternalLink
+                          className="table-route-link"
+                          href={`/returns/${returnRequest.id}`}
+                          onNavigate={onNavigate}
+                        >
+                          <strong>{returnRequest.return_number}</strong>
+                        </InternalLink>
                         <small>ID {returnRequest.id}</small>
                       </td>
                       <td>
@@ -312,7 +314,7 @@ export function ReturnsPage({
             onComplete={() => void completeReturn()}
             onProcess={(payload) => processReturn(payload)}
             onReject={() => void decideReturn('REJECTED')}
-            onOpenOrder={() => onNavigate('/orders')}
+            onNavigate={onNavigate}
             returnRequest={selectedReturn}
           />
         </div>
@@ -330,7 +332,7 @@ function ReturnDetail({
   onComplete,
   onReject,
   onProcess,
-  onOpenOrder,
+  onNavigate,
   returnRequest,
 }: {
   actionBusy: boolean;
@@ -341,7 +343,7 @@ function ReturnDetail({
   onComplete: () => void;
   onReject: () => void;
   onProcess: (payload: ReturnProcessPayload) => Promise<void>;
-  onOpenOrder: () => void;
+  onNavigate: (href: string) => void;
   returnRequest: ReturnRequest | null;
 }) {
   const { language, t } = useI18n();
@@ -481,13 +483,13 @@ function ReturnDetail({
         <div><dt>{t('returns.comment')}</dt><dd>{compactText(returnRequest.comment, t('common.notProvided'))}</dd></div>
       </dl>
 
-      <button
+      <InternalLink
         className="text-button"
-        type="button"
-        onClick={onOpenOrder}
+        href={`/orders?order=${returnRequest.order_id}`}
+        onNavigate={onNavigate}
       >
         {t('returns.openOrder')}
-      </button>
+      </InternalLink>
 
       <h3>{t('returns.items')}</h3>
       <div className="returns-item-list">

@@ -51,6 +51,15 @@ Use dense but readable operational UI:
 
 Avoid marketplace-style mobile composition for Seller Panel pages.
 
+## Authentication and Navigation
+
+- Authenticated Seller Panel sessions expire after 15 minutes without meaningful user activity.
+- Activity and logout state are synchronized across same-origin Seller Panel tabs.
+- A session-scoped token can be handed to a newly opened tab through `BroadcastChannel`; the receiving tab keeps it in `sessionStorage`, never `localStorage`.
+- Local-scope and session-scope token persistence remain separate.
+- Route-backed navigation renders real anchors, so modified clicks, middle click, the browser context menu, Back/Forward, and direct route loading retain native browser behavior.
+- The production Nginx configuration falls back to `index.html` for internal SPA routes.
+
 ## Channel Entry
 
 Route:

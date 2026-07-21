@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../../shared/api';
 import type { ApiDecimal, DashboardSummary } from '../../shared/api';
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/DataState';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   onNavigate: (path: string) => void;
@@ -99,37 +100,44 @@ export function DashboardPage({ onNavigate, onAuthExpired }: PageProps) {
         <DashboardLink
           title="Товары"
           description="Каталог, остатки, варианты, статусы и изображения."
-          onClick={() => onNavigate('/products')}
+          href="/products"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Заказы"
           description="Активные заказы, ручная оплата и статусы исполнения."
-          onClick={() => onNavigate('/orders')}
+          href="/orders"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Категории и теги"
           description="Структура каталога и быстрые метки товаров."
-          onClick={() => onNavigate('/taxonomy')}
+          href="/taxonomy"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Баннеры"
           description="Видимые баннеры Mini App, форматы и цели перехода."
-          onClick={() => onNavigate('/banners')}
+          href="/banners"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Промокоды"
           description="Скидки, лимиты использования и сроки активности."
-          onClick={() => onNavigate('/promo-codes')}
+          href="/promo-codes"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Отзывы"
           description="Модерация отзывов покупателей после покупки."
-          onClick={() => onNavigate('/reviews')}
+          href="/reviews"
+          onNavigate={onNavigate}
         />
         <DashboardLink
           title="Статистика"
           description="События, топы товаров, промокодов и баннеров."
-          onClick={() => onNavigate('/statistics')}
+          href="/statistics"
+          onNavigate={onNavigate}
         />
       </section>
     </div>
@@ -164,18 +172,20 @@ function KpiCard({
 function DashboardLink({
   title,
   description,
-  onClick,
+  href,
+  onNavigate,
 }: {
   title: string;
   description: string;
-  onClick: () => void;
+  href: string;
+  onNavigate: (href: string) => void;
 }) {
   return (
-    <button className="dashboard-link" type="button" onClick={onClick}>
+    <InternalLink className="dashboard-link" href={href} onNavigate={onNavigate}>
       <span>{title}</span>
       <p>{description}</p>
       <strong>Открыть</strong>
-    </button>
+    </InternalLink>
   );
 }
 

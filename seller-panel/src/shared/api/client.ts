@@ -1,4 +1,5 @@
 import { getStoredToken } from '../auth/tokenStorage';
+import { notifyUnauthorized } from '../auth/authEvents';
 import { buildApiUrl, normalizeApiBaseUrl, resolvePublicMediaUrl } from '../utils/urls';
 import type {
   AnalyticsEvent,
@@ -192,6 +193,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const payload = rawText ? safeJson(rawText) : undefined;
 
   if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     throw new ApiError(
       getErrorMessage(payload, `${response.status} ${response.statusText}`),
       response.status,

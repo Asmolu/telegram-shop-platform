@@ -20,6 +20,7 @@ import {
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { compactText, formatDate, formatMoney } from '../../shared/utils/format';
 import { applyGeneratedLookSlug } from './lookSlugAutofill';
+import { InternalLink } from '../../shared/navigation/InternalLink';
 
 interface PageProps {
   onNavigate: (path: string) => void;
@@ -158,9 +159,9 @@ export function LooksPage({ onNavigate, onAuthExpired }: PageProps) {
             />
           </label>
         </div>
-        <button className="button button-primary" type="button" onClick={() => onNavigate('/looks/new')}>
+        <InternalLink className="button button-primary" href="/looks/new" onNavigate={onNavigate}>
           {t('looks.create')}
-        </button>
+        </InternalLink>
       </div>
 
       {notice ? <div className="success-banner">{notice}</div> : null}
@@ -222,13 +223,13 @@ export function LooksPage({ onNavigate, onAuthExpired }: PageProps) {
                     </td>
                     <td>
                       <div className="table-actions">
-                        <button
+                        <InternalLink
                           className="text-button"
-                          type="button"
-                          onClick={() => onNavigate(`/looks/${look.id}/edit`)}
+                          href={`/looks/${look.id}/edit`}
+                          onNavigate={onNavigate}
                         >
                           {t('common.edit')}
-                        </button>
+                        </InternalLink>
                         <button
                           className="text-button danger-text"
                           disabled={look.status === 'ARCHIVED'}
@@ -782,9 +783,9 @@ export function LookEditorPage({ mode, lookId, onNavigate, onAuthExpired }: Edit
               {t('common.archive')}
             </button>
           ) : null}
-          <button className="button button-secondary" type="button" onClick={() => onNavigate('/looks')}>
+          <InternalLink className="button button-secondary" href="/looks" onNavigate={onNavigate}>
             {t('common.cancel')}
-          </button>
+          </InternalLink>
           <button
             className="button button-secondary"
             disabled={saving}

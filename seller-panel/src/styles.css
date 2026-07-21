@@ -29,6 +29,17 @@ textarea {
   font: inherit;
 }
 
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
 button {
   cursor: pointer;
 }
@@ -142,6 +153,7 @@ code {
 }
 
 .nav-link {
+  display: block;
   width: 100%;
   border: 0;
   border-radius: 7px;
@@ -340,6 +352,9 @@ textarea:focus {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 38px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -382,6 +397,7 @@ textarea:focus {
 }
 
 .text-button {
+  display: inline;
   border: 0;
   background: transparent;
   color: #6d28d9;
@@ -592,6 +608,7 @@ textarea:focus {
   min-height: 132px;
   padding: 16px;
   text-align: left;
+  color: inherit;
 }
 
 .dashboard-link:hover {
@@ -1747,8 +1764,9 @@ textarea:focus {
   min-width: 860px;
 }
 
-.returns-table-panel tbody tr {
-  cursor: pointer;
+.table-route-link {
+  display: inline-block;
+  color: #6d28d9;
 }
 
 .returns-table-panel .selected-row {
