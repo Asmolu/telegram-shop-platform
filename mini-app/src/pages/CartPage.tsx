@@ -806,10 +806,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
         const discountAmount = Number(order.discount_amount ?? order.discount ?? 0);
         const deliveryPrice = Number(order.delivery_price ?? 0);
         const paymentStatus = order.manual_payment?.status;
-        const displayStatus = paymentStatus
-          ? formatPaymentStatus(paymentStatus)
-          : formatOrderStatus(order.status);
-        const statusClass = paymentStatus?.toLowerCase() ?? order.status.toLowerCase();
+        const statusClass = order.status.toLowerCase();
 
         return (
           <article className="order-card order-card--rich" key={order.id}>
@@ -819,7 +816,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                 <small>{formatDate(order.created_at)} · {order.items.length} поз.</small>
               </div>
               <span className={`status-pill status-pill--${statusClass}`}>
-                {displayStatus}
+                {formatOrderStatus(order.status)}
               </span>
             </header>
 
@@ -854,11 +851,14 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                     && candidate.source_group_id === lookSourceGroupId
                   ))
                   : [];
+                const size = item.variant_size?.trim();
                 const variant = [
-                  displaySize(item.variant_size_grid, item.variant_size, true),
-                  item.variant_color,
-                  item.variant_sku ? `SKU ${item.variant_sku}` : '',
+                  size ? displaySize(item.variant_size_grid, size, true) : '',
+                  item.variant_color?.trim(),
+                  item.variant_sku?.trim() ? `арт. ${item.variant_sku.trim()}` : '',
                 ].filter(Boolean).join(' · ');
+                const brand = item.product_brand?.trim();
+                const title = item.product_title?.trim() || item.product_name;
 
                 return (
                   <React.Fragment key={item.id}>
@@ -875,20 +875,20 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                         <img
                           src={thumbnailUrl}
                           alt=""
-                          width={72}
-                          height={90}
+                          width={96}
+                          height={120}
                           loading="lazy"
                           decoding="async"
                         />
                       ) : <span>{item.product_name.slice(0, 1)}</span>}
                     </Link>
-                    <div>
-                      <Link to={productPath}>{item.product_title ?? item.product_name}</Link>
-                      {item.product_brand ? <small>{item.product_brand}</small> : null}
-                      <small>{variant}</small>
-                      <small>{item.quantity} × {formatPrice(item.unit_price)}</small>
+                    <div className="order-item-row__content">
+                      {brand ? <span className="order-item-row__brand">{brand}</span> : null}
+                      <Link className="order-item-row__title" to={productPath}>{title}</Link>
+                      {variant ? <small className="order-item-row__variant">{variant}</small> : null}
+                      <small className="order-item-row__quantity">{item.quantity} × {formatPrice(item.unit_price)}</small>
                     </div>
-                    <strong>{formatPrice(item.item_total ?? item.subtotal)}</strong>
+                    <strong className="order-item-row__total">{formatPrice(item.item_total ?? item.subtotal)}</strong>
                   </div>
                   </React.Fragment>
                 );
@@ -938,16 +938,4 @@ function OrdersTab({ orders }: { orders: Order[] }) {
       ) : null}
     </div>
   );
-}
-
-function formatPaymentStatus(status: NonNullable<Order['manual_payment']>['status']) {
-  const labels = {
-    PENDING: 'Ожидает оплату',
-    SUBMITTED: 'Оплата на проверке',
-    APPROVED: 'Оплачено',
-    REJECTED: 'Отклонено',
-    EXPIRED: 'Время оплаты истекло',
-    CANCELLED: 'Отменено',
-  };
-  return labels[status];
 }

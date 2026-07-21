@@ -95,6 +95,33 @@ describe('StatusNotificationController', () => {
     expect(api.pending).toHaveBeenCalled();
   });
 
+  it.each([
+    ['SHIPPED', '🙂'],
+    ['DELIVERED', '🥳'],
+    ['CANCELLED', '☹️'],
+  ])('renders the native order status emoji for %s', async (eventCode, emoji) => {
+    api.pending.mockResolvedValueOnce([{ ...standard, event_code: eventCode }]);
+    render(<StatusNotificationController />);
+
+    const symbol = await screen.findByText(emoji);
+    expect(symbol.classList.contains('status-notification-symbol')).toBe(true);
+    expect(symbol.classList.contains('status-notification-symbol--emoji')).toBe(true);
+    expect(symbol.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('retains the normal symbol for other notification events', async () => {
+    api.pending.mockResolvedValueOnce([{
+      ...standard,
+      category: 'return',
+      event_code: 'APPROVED',
+    }]);
+    render(<StatusNotificationController />);
+
+    const symbol = await screen.findByText('✓');
+    expect(symbol.classList.contains('status-notification-symbol')).toBe(true);
+    expect(symbol.classList.contains('status-notification-symbol--emoji')).toBe(false);
+  });
+
   it('is the only global status controller mounted by App', () => {
     expect(appSource.match(/<StatusNotificationController\s*\/>/g)).toHaveLength(1);
     expect(appSource).not.toContain('<PaymentSuccessBannerController');

@@ -16,6 +16,11 @@ const SUPPRESSED_NOTIFICATION_KEYS = new Set([
   'order:PROCESSING',
   'payment:SUBMITTED',
 ]);
+const ORDER_STATUS_EMOJI: Partial<Record<string, string>> = {
+  SHIPPED: '🙂',
+  DELIVERED: '🥳',
+  CANCELLED: '☹️',
+};
 
 export function StatusNotificationController() {
   const { isAuthenticated } = useAuth();
@@ -110,6 +115,9 @@ export function StatusNotificationController() {
 
   if (!current) return null;
   const hasContacts = current.action_mode === 'continue_with_contacts';
+  const orderStatusEmoji = current.category === 'order'
+    ? ORDER_STATUS_EMOJI[current.event_code]
+    : undefined;
 
   return (
     <div
@@ -135,7 +143,12 @@ export function StatusNotificationController() {
           <ApprovedPaymentContent notification={current} />
         ) : (
           <div className="status-notification-copy">
-            <div aria-hidden="true" className="status-notification-symbol">✓</div>
+            <div
+              aria-hidden="true"
+              className={`status-notification-symbol${orderStatusEmoji ? ' status-notification-symbol--emoji' : ''}`}
+            >
+              {orderStatusEmoji ?? '✓'}
+            </div>
             <h2 id="status-notification-title">{current.title}</h2>
             <p id="status-notification-message">{current.message}</p>
           </div>

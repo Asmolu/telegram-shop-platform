@@ -3692,6 +3692,14 @@ label {
   align-items: start;
 }
 
+.order-card__header > div {
+  min-width: 0;
+}
+
+.order-card__header strong {
+  overflow-wrap: anywhere;
+}
+
 .order-card__totals {
   grid-template-columns: minmax(0, 1fr) auto;
   border-top: 1px solid var(--border);
@@ -3709,17 +3717,19 @@ label {
 }
 
 .order-item-row {
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 4px 0;
 }
 
 .order-item-row__image {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 56px;
+  width: 96px;
+  height: 120px;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--media-bg);
   color: var(--primary);
   font-weight: 900;
@@ -3731,23 +3741,50 @@ label {
   object-fit: cover;
 }
 
-.order-item-row a:not(.order-item-row__image) {
+.order-item-row__content {
+  align-content: start;
+  min-width: 0;
+}
+
+.order-item-row__brand {
   overflow: hidden;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
+  letter-spacing: .02em;
+  line-height: 1.2;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
+}
+
+.order-item-row a.order-item-row__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
 }
 
 .order-item-row small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
-.order-item-row > strong {
+.order-item-row__variant {
+  overflow-wrap: anywhere;
+}
+
+.order-item-row > .order-item-row__total {
+  align-self: start;
   color: var(--text);
   font-size: 13px;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -5027,6 +5064,16 @@ label {
   font-weight: 900;
 }
 
+.status-notification-symbol--emoji {
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 42px;
+  font-weight: 400;
+  line-height: 1;
+}
+
 .status-notification-copy h2,
 .status-notification-payment-data h2 {
   margin: 0;
@@ -5537,6 +5584,17 @@ label {
   .cart-item__image {
     width: 92px;
     height: 116px;
+  }
+
+  .order-item-row {
+    grid-template-columns: 84px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .order-item-row__image {
+    width: 84px;
+    height: 105px;
+    border-radius: 14px;
   }
 
   .cart-item__content {

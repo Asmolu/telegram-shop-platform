@@ -317,6 +317,137 @@ describe('CartPage compact favorites', () => {
     expect(routerMocks.navigate).toHaveBeenCalledWith('/payment/99');
   });
 
+  it.each(['APPROVED', 'SUBMITTED', 'PENDING'] as const)(
+    'uses the order lifecycle status for an order with %s manual payment',
+    async (paymentStatus) => {
+      routerMocks.searchParams = new URLSearchParams('tab=orders');
+      vi.mocked(getOrders).mockResolvedValueOnce({
+        items: [orderFixture({
+          status: 'DELIVERED',
+          manual_payment: { id: 1, status: paymentStatus, expires_at: '2026-07-13T00:00:00Z' },
+        })],
+      });
+
+      render(<CartPage />);
+
+      const badge = await screen.findByText('Доставлен');
+      expect(badge.classList.contains('status-pill--delivered')).toBe(true);
+      expect(screen.queryByText('Оплачено')).toBeNull();
+      expect(screen.queryByText('Оплата на проверке')).toBeNull();
+      expect(screen.queryByText('Ожидает оплату')).toBeNull();
+    },
+  );
+
+  it('keeps approved-payment details routing separate from the lifecycle badge', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [orderFixture({
+        status: 'PROCESSING',
+        manual_payment: { id: 1, status: 'APPROVED', expires_at: '2026-07-13T00:00:00Z' },
+      })],
+    });
+
+    render(<CartPage />);
+
+    expect(await screen.findByText('В обработке')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/order-success/99');
+  });
+
+  it('renders immutable order snapshots with the enlarged product hierarchy and links', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    const fixture = orderFixture();
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [orderFixture({
+        items: [{
+          ...fixture.items[0],
+          product_name: 'Snapshot fallback title',
+          product_title: 'Long snapshot product title',
+          product_brand: 'ICON STORE',
+          variant_size: 'XL',
+          variant_color: 'белый',
+          variant_sku: 'tshirt1-white-xl-a46486',
+          product_thumbnail_url: '/uploads/products/order-thumb.webp',
+          unit_price: '599.00',
+          quantity: 2,
+          subtotal: '1198.00',
+          item_total: '1198.00',
+        }],
+      })],
+    });
+
+    render(<CartPage />);
+
+    const row = (await screen.findByText('Long snapshot product title')).closest('.order-item-row') as HTMLElement;
+    expect(within(row).getByText('ICON STORE')).toBeTruthy();
+    expect(within(row).getByText('XL · белый · арт. tshirt1-white-xl-a46486')).toBeTruthy();
+    expect(within(row).queryByText(/^SKU /)).toBeNull();
+    expect(within(row).getByText(/2 × 599/)).toBeTruthy();
+    expect(within(row).getByText(/1\s?198/)).toBeTruthy();
+    expect(row.querySelector('.order-item-row__image img')?.getAttribute('width')).toBe('96');
+    expect(row.querySelector('.order-item-row__image img')?.getAttribute('height')).toBe('120');
+    expect(row.querySelector('.order-item-row__image img')?.getAttribute('loading')).toBe('lazy');
+    expect(row.querySelectorAll('a[href="/product/20"]')).toHaveLength(2);
+  });
+
+  it('omits empty snapshot metadata without leaving broken separators', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    const fixture = orderFixture();
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [orderFixture({
+        items: [{
+          ...fixture.items[0],
+          product_brand: '   ',
+          variant_size: '',
+          variant_color: ' ',
+          variant_sku: '',
+        }],
+      })],
+    });
+
+    render(<CartPage />);
+
+    const row = (await screen.findByText('Hoodie')).closest('.order-item-row') as HTMLElement;
+    expect(row.querySelector('.order-item-row__brand')).toBeNull();
+    expect(row.querySelector('.order-item-row__variant')).toBeNull();
+    expect(row.textContent).not.toContain('·');
+    expect(row.textContent).not.toContain('арт.');
+    expect(within(row).getByText(/1 × 100/)).toBeTruthy();
+  });
+
+  it('keeps Look headers, grouping, item order, and product links intact in mixed orders', async () => {
+    routerMocks.searchParams = new URLSearchParams('tab=orders');
+    const fixture = orderFixture();
+    const normalItem = { ...fixture.items[0], id: 1, product_id: 20, product_name: 'Normal product' };
+    const lookItem = {
+      ...fixture.items[0],
+      id: 2,
+      product_id: 21,
+      product_name: 'Look shirt',
+      source_type: 'LOOK',
+      source_group_id: 'look-group-1',
+      source_look_title: 'City Look',
+      source_look_image_url: '/uploads/looks/city.webp',
+    };
+    vi.mocked(getOrders).mockResolvedValueOnce({
+      items: [orderFixture({
+        items: [normalItem, lookItem, { ...lookItem, id: 3, product_id: 22, product_name: 'Look pants' }],
+      })],
+    });
+
+    render(<CartPage />);
+
+    expect(await screen.findByText('Добавлено из образа: City Look')).toBeTruthy();
+    expect(document.querySelectorAll('.look-source-header')).toHaveLength(1);
+    const rows = Array.from(document.querySelectorAll('.order-item-row'));
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain('Normal product');
+    expect(rows[1].textContent).toContain('Look shirt');
+    expect(rows[2].textContent).toContain('Look pants');
+    expect(rows[1].querySelector('a[href="/product/21"]')).toBeTruthy();
+    expect(rows[2].querySelector('a[href="/product/22"]')).toBeTruthy();
+  });
+
   it('opens rules without immediate navigation and continues after consent', async () => {
     routerMocks.searchParams = new URLSearchParams('tab=orders');
     vi.mocked(getOrders).mockResolvedValueOnce({ items: [orderFixture({ return_eligibility: { eligible: true } })] });
